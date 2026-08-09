@@ -1,0 +1,21 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "HapbeatMod",
+	"Description": "Sends Hapbeat haptic events over UDP when the game fires, kills a bot, or damages the player.",
+	"Category": "Other",
+	"CreatedBy": "Hapbeat",
+	"CreatedByURL": "https://hapbeat.com",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsMod": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "HapbeatMod",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

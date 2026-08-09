@@ -1,0 +1,6 @@
+# dotnet build artifacts (src / compile-check)
+bin/
+obj/
+
+# game DLLs copied in by the user for a local build (never redistributed)
+libs/

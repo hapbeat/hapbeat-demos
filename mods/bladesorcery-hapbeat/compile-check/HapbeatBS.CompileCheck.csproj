@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Builds the mod source against hand-written ThunderRoad/UnityEngine stubs, so the code
+    can be verified without owning Blade & Sorcery:
+
+      dotnet build mods/bladesorcery-hapbeat/compile-check
+
+    What this proves: the mod compiles as C# 7.3 against net48, the shared Hapbeat core
+    links in cleanly, and every ThunderRoad member the mod uses matches the signature
+    recorded in ../stubs.
+    What this does NOT prove: that the real ThunderRoad.dll has those signatures. That is
+    the ILSpy pass in the README — grep for VERIFY-ILSPY.
+
+    The output DLL is throwaway; ship the one from ../src instead.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <OutputType>Library</OutputType>
+    <AssemblyName>HapbeatBS.CompileCheck</AssemblyName>
+    <RootNamespace>Hapbeat.BladeSorcery</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Warnings left in the stub build would also show up in the real build. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Same feature set the shipped build uses, so the check covers the same code. -->
+    <DefineConstants>$(DefineConstants);HAPBEAT_BS_MODOPTIONS;HAPBEAT_BS_PARRY;HAPBEAT_BS_DEFLECT</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\*.cs" LinkBase="src" />
+    <Compile Include="..\stubs\*.cs" LinkBase="stubs" />
+    <Compile Include="..\..\shared\HapbeatModCore\*.cs" LinkBase="HapbeatModCore" />
+  </ItemGroup>
+
+</Project>

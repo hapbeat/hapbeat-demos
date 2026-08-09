@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Blade & Sorcery (PCVR 1.0) scripted mod.
+
+    Point GameDir at your Blade & Sorcery install before building, either by editing the
+    default below or on the command line:
+
+      dotnet build -c Release -p:GameDir="D:\SteamLibrary\steamapps\common\Blade & Sorcery"
+
+    The game DLLs are referenced straight out of the install (Private=false), so nothing
+    from the game is copied into the output and nothing game-owned is redistributed.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <OutputType>Library</OutputType>
+    <AssemblyName>HapbeatBS</AssemblyName>
+    <RootNamespace>Hapbeat.BladeSorcery</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>0.1.0</Version>
+    <!-- No .pdb next to the shipped DLL (mod distribution convention). -->
+    <DebugType>none</DebugType>
+
+    <!--
+      Optional features, each gated so a signature that turns out to be wrong can be
+      dropped without touching code:
+        HAPBEAT_BS_MODOPTIONS  in-game settings menu entries ([ModOption] attributes)
+        HAPBEAT_BS_PARRY       EventManager.onCreatureAttackParry subscription
+        HAPBEAT_BS_DEFLECT     EventManager.onDeflect subscription
+      Override on the command line with -p:HapbeatBsFeatures=... (a command-line property
+      wins over this assignment). Use -p:HapbeatBsFeatures=none to turn all three off:
+      "none" is simply not one of the symbols the code tests for.
+    -->
+    <HapbeatBsFeatures>HAPBEAT_BS_MODOPTIONS;HAPBEAT_BS_PARRY;HAPBEAT_BS_DEFLECT</HapbeatBsFeatures>
+    <DefineConstants>$(DefineConstants);$(HapbeatBsFeatures)</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Blade &amp; Sorcery</GameDir>
+    <GameManagedDir>$(GameDir)\BladeAndSorcery_Data\Managed</GameManagedDir>
+  </PropertyGroup>
+
+  <!-- Reference assemblies for .NET Framework 4.8, so no Visual Studio / targeting pack
+       install is needed to build. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Shared Hapbeat send core, pulled in as source (see mods/shared/README.md) so the
+       mod ships as a single self-contained DLL. -->
+  <ItemGroup>
+    <Compile Include="..\..\shared\HapbeatModCore\*.cs" LinkBase="HapbeatModCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="ThunderRoad">
+      <HintPath>$(GameManagedDir)\ThunderRoad.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- manifest.json must sit next to the DLL in the mod folder, so put it in the output. -->
+  <ItemGroup>
+    <None Include="..\manifest.json" Link="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Fail with a readable message instead of dozens of "type not found" errors when
+       GameDir is wrong. -->
+  <Target Name="HapbeatCheckGameDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameManagedDir)\ThunderRoad.dll')"
+           Text="ThunderRoad.dll not found under &quot;$(GameManagedDir)&quot;. Set GameDir to your Blade &amp; Sorcery install folder, e.g. dotnet build -c Release -p:GameDir=&quot;D:\SteamLibrary\steamapps\common\Blade &amp; Sorcery&quot;" />
+  </Target>
+
+</Project>

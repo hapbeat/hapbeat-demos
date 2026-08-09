@@ -1,0 +1,8 @@
+{
+    "Name": "HapbeatBS",
+    "Description": "Hapbeat haptic feedback for Blade & Sorcery (PCVR 1.0). Sends UDP haptic commands to Hapbeat devices on enemy hit / kill / parry / deflect / player damage / low health / being surrounded.",
+    "Author": "Hapbeat",
+    "ModVersion": "0.1.0",
+    "GameVersion": "1.0.0.0",
+    "Thumbnail": ""
+}

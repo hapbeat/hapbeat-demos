@@ -1,0 +1,88 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       Pistol Whip 側のパスはここだけ直せばよい。
+       Steam の既定インストール先以外に入れている場合は <GameDir> を書き換えるか、
+       ビルド時に上書きする:
+         dotnet build -c Release -p:GameDir="D:\SteamLibrary\steamapps\common\Pistol Whip"
+       ========================================================================== -->
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Pistol Whip</GameDir>
+
+    <!-- MelonLoader が生成する 2 つのフォルダ。通常は変更不要 -->
+    <MelonLoaderDir Condition="'$(MelonLoaderDir)' == ''">$(GameDir)\MelonLoader\net6</MelonLoaderDir>
+    <Il2CppAssembliesDir Condition="'$(Il2CppAssembliesDir)' == ''">$(GameDir)\MelonLoader\Il2CppAssemblies</Il2CppAssembliesDir>
+
+    <!-- BGM 拍 (Koreographer) 連携を丸ごと外してビルドする場合は true。
+         Assembly-CSharp に SonicBloom.Koreo が無い / 名前空間が違う場合の避難口。 -->
+    <DisableBeatSync Condition="'$(DisableBeatSync)' == ''">false</DisableBeatSync>
+
+    <!-- MelonLoader が生成した proxy DLL で Koreographer が
+         Il2CppSonicBloom.Koreo 名前空間に入っている場合は true。 -->
+    <KoreoIl2CppNamespace Condition="'$(KoreoIl2CppNamespace)' == ''">false</KoreoIl2CppNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>PistolWhipHapbeat</AssemblyName>
+    <RootNamespace>Hapbeat.PistolWhip</RootNamespace>
+    <Version>0.1.0</Version>
+    <DebugType>none</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <!-- MelonLoader / ゲーム側の DLL は実行時に供給されるので出力に混ぜない -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(DisableBeatSync)' == 'true'">
+    <DefineConstants>$(DefineConstants);HAPBEAT_NO_BEATSYNC</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(KoreoIl2CppNamespace)' == 'true'">
+    <DefineConstants>$(DefineConstants);HAPBEAT_KOREO_IL2CPP_NS</DefineConstants>
+  </PropertyGroup>
+
+  <!-- 共通送信コアはソース共有。DLL を mod と一緒に配らないため -->
+  <ItemGroup>
+    <Compile Include="..\..\shared\HapbeatModCore\*.cs" LinkBase="HapbeatModCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="MelonLoader">
+      <HintPath>$(MelonLoaderDir)\MelonLoader.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(MelonLoaderDir)\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- 管理デリゲート → Il2Cpp デリゲート変換 (DelegateSupport)。BGM 拍連携で使う -->
+    <Reference Include="Il2CppInterop.Runtime" Condition="'$(DisableBeatSync)' != 'true'">
+      <HintPath>$(MelonLoaderDir)\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Koreographer (SonicBloom.Koreo) の型。BGM 拍連携でのみ必要 -->
+    <Reference Include="Assembly-CSharp" Condition="'$(DisableBeatSync)' != 'true'">
+      <HintPath>$(Il2CppAssembliesDir)\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib" Condition="'$(DisableBeatSync)' != 'true'">
+      <HintPath>$(Il2CppAssembliesDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule" Condition="'$(DisableBeatSync)' != 'true'">
+      <HintPath>$(Il2CppAssembliesDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 参照解決より前に止める。Build の直前だと CS0246 が大量に出た後になるため
+       (BeforeTargets="Build" では参照解決済みでエラーが埋もれる)。 -->
+  <Target Name="HapbeatCheckGameDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(MelonLoaderDir)\MelonLoader.dll')"
+           Text="MelonLoader.dll が見つかりません: $(MelonLoaderDir)。README の手順で MelonLoader を導入し、ゲームを一度起動してから、-p:GameDir=&quot;...&quot; で Pistol Whip のインストール先を指定してください。" />
+  </Target>
+
+</Project>
