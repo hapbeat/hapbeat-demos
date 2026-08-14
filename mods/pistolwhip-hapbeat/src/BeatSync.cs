@@ -101,16 +101,19 @@ namespace Hapbeat.PistolWhip
         }
 
         /// <summary>
-        /// The ids to listen on: the user's explicit list when set (even if the song did
-        /// not advertise them — a song may load its tracks after this point), otherwise
-        /// the beat-looking subset of what the song advertises.
+        /// The ids to listen on, or <c>null</c> to leave the current registration alone.
         /// <para>
         /// Not every Koreography track is a beat track. Pistol Whip's songs ship
-        /// <c>Beat</c> alongside <c>NoBeat</c>, <c>Event</c> and <c>GameplayProp</c>
-        /// (observed on a real install); registering for all of them fires haptics at
-        /// moments that have nothing to do with the pulse. Falling back to everything
-        /// when nothing looks like a beat keeps a differently-named song working, and
-        /// the warning tells the user how to pin it down.
+        /// <c>Beat</c> alongside <c>NoBeat</c>, <c>Event</c>, <c>GameplayProp</c> and
+        /// <c>ScrollingBackground</c>, and the game also loads non-musical Koreographies
+        /// of its own — the lobby's <c>LandingAreaLoop</c> is one. Registering for all of
+        /// those fires haptics at moments unrelated to the pulse.
+        /// </para>
+        /// <para>
+        /// Returning <c>null</c> for a Koreography with no beat track is what keeps the
+        /// lobby loop from stealing the registration: those loads arrive *after* the
+        /// song's, and re-registering on them would tear down the <c>Beat</c> hookup and
+        /// leave the actual gameplay silent (observed on a real install).
         /// </para>
         /// </summary>
         private static List<string> SelectIds(List<string> discovered)
@@ -131,7 +134,7 @@ namespace Hapbeat.PistolWhip
 
             if (discovered.Count > 0)
                 WarnNoBeatTrack(discovered);
-            return discovered;
+            return null; // keep whatever is already registered
         }
 
         /// <summary>
@@ -162,14 +165,19 @@ namespace Hapbeat.PistolWhip
             _warnedNoBeatTrack = true;
 
             PistolWhipHapbeatMod.LogWarning(
-                "No Koreography track looks like a beat track (found: " +
-                string.Join(", ", discovered.ToArray()) + "), so every id is used. " +
-                "Haptics may fire off-beat. Put the right id(s) in \"beatEventIds\" in " +
-                "hapbeat_settings.json to pin it down.");
+                "A Koreography with no beat track was loaded (found: " +
+                string.Join(", ", discovered.ToArray()) + "); it is ignored and the " +
+                "current registration is kept. If beats never fire at all, name the " +
+                "right id(s) in \"beatEventIds\" in hapbeat_settings.json.");
         }
 
         private static void Register(List<string> ids)
         {
+            // null = "this Koreography has nothing to listen on" (see SelectIds). Leave
+            // the existing registration in place rather than tearing it down.
+            if (ids == null)
+                return;
+
             Koreo.Koreographer instance = Koreo.Koreographer.Instance;
             if (instance == null)
             {

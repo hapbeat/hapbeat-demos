@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using Hapbeat.ModCore;
 using MelonLoader;
 
@@ -42,6 +43,12 @@ namespace Hapbeat.PistolWhip
 
                 HookInstaller.InstallAll(HarmonyInstance);
                 BeatSync.Install(HarmonyInstance);
+
+                // Silence is the worst outcome to debug: without a device the mod runs
+                // perfectly and produces no haptics, with nothing in the log to say why.
+                // One deferred check turns that into an actionable line.
+                _deviceCheckTimer = new Timer(WarnIfNoDeviceAnswered, null,
+                    DeviceCheckDelayMs, Timeout.Infinite);
             }
             catch (Exception ex)
             {
@@ -69,6 +76,13 @@ namespace Hapbeat.PistolWhip
             }
 
             try { BeatSync.Shutdown(); } catch (Exception) { /* teardown race */ }
+
+            Timer deviceCheck = _deviceCheckTimer;
+            _deviceCheckTimer = null;
+            if (deviceCheck != null)
+            {
+                try { deviceCheck.Dispose(); } catch (Exception) { /* teardown race */ }
+            }
 
             HapbeatModClient client = _client;
             _client = null;
@@ -148,9 +162,31 @@ namespace Hapbeat.PistolWhip
         private static long _lastPongReportMs;
         private static long _rttSumUs;
         private static int _rttCount;
-        private static bool _sawFirstPong;
+        private static volatile bool _sawFirstPong;
+        private static Timer _deviceCheckTimer;
 
         private const int PongReportIntervalMs = 15000;
+
+        /// <summary>How long to wait for a first device reply before saying so. Long
+        /// enough to cover a device still joining Wi-Fi, short enough to see before the
+        /// first song starts.</summary>
+        private const int DeviceCheckDelayMs = 15000;
+
+        private static void WarnIfNoDeviceAnswered(object state)
+        {
+            if (_sawFirstPong)
+                return;
+
+            LogWarning(
+                "No Hapbeat device has answered in " + (DeviceCheckDelayMs / 1000) + " s, " +
+                "so nothing will vibrate. The mod itself is fine — commands are going out " +
+                "but no reply is coming back. Check, in this order: (1) the device is " +
+                "powered on and shows it is connected, (2) this PC and the device are on " +
+                "the same Wi-Fi / LAN (a guest network or AP isolation blocks it), " +
+                "(3) Windows Firewall is not blocking 'Pistol Whip.exe' on the private " +
+                "network. Nothing else in the mod depends on this — hooks and beat sync " +
+                "keep working, they just have nowhere to send to.");
+        }
 
         private static void OnDeviceReplied(long rttUs, long serverTimeUs)
         {
