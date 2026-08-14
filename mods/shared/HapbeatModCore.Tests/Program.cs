@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading;
 using Hapbeat.ModCore;
@@ -616,6 +617,80 @@ namespace Hapbeat.ModCore.Tests
             }
 
             HapticDelay();
+            BroadcastRouting();
+        }
+
+        /// <summary>
+        /// Discovery has to reach a device that the limited broadcast never gets to on a
+        /// multi-homed host (Hyper-V / WSL2 / Docker leave an always-up virtual switch
+        /// with a lower metric than Wi-Fi), so every local subnet gets its own
+        /// subnet-directed destination.
+        /// </summary>
+        private static void BroadcastRouting()
+        {
+            Section("Broadcast routing (multi-homed hosts)");
+
+            // Address <-> uint round trip, the base the subnet maths sits on.
+            AreEqual(0xC0A80105u, HapbeatModClient.BroadcastRoute.ToUInt32(IPAddress.Parse("192.168.1.5")),
+                "an address converts to host-order bits");
+            AreEqual("192.168.1.5", HapbeatModClient.BroadcastRoute.ToAddress(0xC0A80105u).ToString(),
+                "and converts back");
+
+            // The broadcast address must come from the real mask, not an assumed .255.
+            AreEqual("192.168.1.255", BroadcastOf("192.168.1.5", "255.255.255.0"), "/24 broadcasts to .255");
+            AreEqual("192.168.255.255", BroadcastOf("192.168.1.5", "255.255.0.0"), "/16 broadcasts to x.y.255.255");
+            AreEqual("192.168.1.127", BroadcastOf("192.168.1.5", "255.255.255.128"), "/25 broadcasts to .127");
+            AreEqual("10.1.2.255", BroadcastOf("10.1.2.30", "255.255.255.0"), "a 10.x subnet is handled the same");
+
+            // Contains() is what pins playback to the subnet a device answered on.
+            var route = MakeRoute("192.168.1.5", "255.255.255.0");
+            Check(route.Contains(IPAddress.Parse("192.168.1.50")), "a device on the subnet matches");
+            Check(!route.Contains(IPAddress.Parse("192.168.2.50")), "a device on another subnet does not");
+            Check(!route.Contains(IPAddress.Parse("172.30.1.5")), "nor does one behind a virtual switch");
+            Check(!route.Contains(null), "a null address never matches");
+
+            var wide = MakeRoute("192.168.1.5", "255.255.0.0");
+            Check(wide.Contains(IPAddress.Parse("192.168.99.7")), "/16 covers the whole range");
+
+            // The limited route is the catch-all and must never claim a device, or it
+            // would win the lock and defeat the whole mechanism.
+            var limited = new HapbeatModClient.BroadcastRoute();
+            limited.EndPoint = new IPEndPoint(IPAddress.Broadcast, 7700);
+            limited.IsLimited = true;
+            Check(!limited.Contains(IPAddress.Parse("192.168.1.50")),
+                "the limited broadcast never claims a device");
+
+            // Enumeration on this host: whatever it finds, the catch-all must be there
+            // and destinations must be unique (a duplicate would double-deliver).
+            string[] described = HapbeatModClient.DescribeBroadcastRoutes(7700);
+            Check(described.Length >= 1, "at least the catch-all is enumerated");
+            bool sawLimited = false;
+            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            foreach (string d in described)
+            {
+                string address = d.Split(' ')[0];
+                Check(seen.Add(address), "destination " + address + " appears only once");
+                if (address == "255.255.255.255")
+                    sawLimited = true;
+            }
+            Check(sawLimited, "the limited broadcast is always kept as a fallback");
+        }
+
+        private static HapbeatModClient.BroadcastRoute MakeRoute(string ip, string mask)
+        {
+            uint i = HapbeatModClient.BroadcastRoute.ToUInt32(IPAddress.Parse(ip));
+            uint m = HapbeatModClient.BroadcastRoute.ToUInt32(IPAddress.Parse(mask));
+            var route = new HapbeatModClient.BroadcastRoute();
+            route.EndPoint = new IPEndPoint(HapbeatModClient.BroadcastRoute.ToAddress((i & m) | ~m), 7700);
+            route.Network = i & m;
+            route.Mask = m;
+            route.IsLimited = false;
+            return route;
+        }
+
+        private static string BroadcastOf(string ip, string mask)
+        {
+            return MakeRoute(ip, mask).EndPoint.Address.ToString();
         }
 
         /// <summary>

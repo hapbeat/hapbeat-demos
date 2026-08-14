@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading;
 
@@ -100,6 +101,16 @@ namespace Hapbeat.ModCore
         private Thread _delayThread;
         private volatile bool _isRunning;
 
+        // Broadcast destinations, one per local IPv4 subnet plus the limited broadcast
+        // catch-all (see BroadcastRoute / EnumerateBroadcastRoutes). Discovery fans out
+        // to all of them; playback uses _lockedRoute once a device has answered, so no
+        // device ever receives the same PLAY twice.
+        private List<BroadcastRoute> _broadcastRoutes = new List<BroadcastRoute>();
+
+        // The route a device actually replied on. Null until the first PONG. Written
+        // from the receive thread, read from the send paths.
+        private volatile BroadcastRoute _lockedRoute;
+
         // PLAYs waiting out HapbeatModSettings.HapticDelayMs. Kept in a list rather than
         // one timer per fire: firing is rate limited, so the list stays a handful of
         // entries, and a single thread makes cancellation (see CancelDelayedPlays) and
@@ -192,6 +203,8 @@ namespace Hapbeat.ModCore
                 SuppressUdpConnReset(_udpClient);
                 _targetEndPoint = new IPEndPoint(IPAddress.Broadcast, port);
                 IsBroadcast = true;
+                _broadcastRoutes = EnumerateBroadcastRoutes(port);
+                _lockedRoute = null;
 
                 _isRunning = true;
                 _receiveThread = new Thread(ReceiveLoop);
@@ -273,6 +286,8 @@ namespace Hapbeat.ModCore
             // suppress the broadcast fallback (total silence on the new network).
             _knownDeviceIps.Clear();
             _deviceAddresses.Clear();
+            _lockedRoute = null;
+            _broadcastRoutes = new List<BroadcastRoute>();
             _loggedRecoverableReceiveError = false;
 
             InvokeConnectionStateChanged(false);
@@ -412,7 +427,9 @@ namespace Hapbeat.ModCore
             byte group = settings.Group >= 1 ? (byte)settings.Group : (byte)0;
             byte[] payload = HapbeatProtocol.BuildConnectStatusPayload(
                 connected, group, settings.AppName, GetHostName());
-            SendPacket(HapbeatProtocol.CMD_CONNECT_STATUS, payload);
+            // Idempotent display state, so the discovery fan-out is safe here: a device
+            // that receives it twice just shows "connected" twice.
+            SendDiscoveryPacket(HapbeatProtocol.CMD_CONNECT_STATUS, payload);
         }
 
         /// <summary>
@@ -428,7 +445,9 @@ namespace Hapbeat.ModCore
             byte[] packet = HapbeatProtocol.BuildPacket(HapbeatProtocol.CMD_PING, seq, payload);
 
             _pendingPings[seq] = timestampUs;
-            SendRaw(packet);
+            // Fans out until a device answers — this is what finds a Hapbeat that the
+            // limited broadcast never reaches on a multi-homed host.
+            SendDiscoveryRaw(packet);
             return seq;
         }
 
@@ -623,14 +642,78 @@ namespace Hapbeat.ModCore
             SendRaw(packet);
         }
 
+        /// <summary>
+        /// Send one discovery packet (PING / CONNECT_STATUS) to every candidate subnet
+        /// until a device answers, then fall back to the single locked route.
+        /// <para>
+        /// The limited broadcast address leaves a multi-homed host through the one
+        /// interface with the lowest metric. On a machine with Hyper-V / WSL2 / Docker
+        /// that is often an always-up virtual switch with no Hapbeat behind it — and no
+        /// Ethernet cable has to be plugged in for that to happen. A subnet-directed
+        /// address instead resolves through the directly-connected route for that
+        /// subnet, so the metric never applies.
+        /// </para>
+        /// </summary>
+        private void SendDiscoveryPacket(byte commandType, byte[] payload)
+        {
+            ushort seq = GetNextSequenceNumber();
+            byte[] packet = HapbeatProtocol.BuildPacket(commandType, seq, payload);
+            SendDiscoveryRaw(packet);
+        }
+
+        private void SendDiscoveryRaw(byte[] data)
+        {
+            UdpClient client = _udpClient;
+            if (!IsConnected || client == null)
+                return;
+
+            List<BroadcastRoute> routes = _broadcastRoutes;
+            // Not in broadcast mode, nothing enumerated, or already pinned to the
+            // subnet a device answered on: one destination is enough.
+            if (!IsBroadcast || routes == null || routes.Count == 0 || _lockedRoute != null)
+            {
+                SendRaw(data);
+                return;
+            }
+
+            for (int i = 0; i < routes.Count; i++)
+            {
+                try
+                {
+                    client.Send(data, data.Length, routes[i].EndPoint);
+                }
+                catch (SocketException ex)
+                {
+                    // One unreachable subnet must not stop the others: that is the
+                    // whole point of probing several.
+                    Write("Discovery send to " + routes[i].EndPoint.Address + " failed: " + ex.Message);
+                }
+                catch (ObjectDisposedException)
+                {
+                    HandleDisconnection();
+                    return;
+                }
+            }
+        }
+
         private void SendRaw(byte[] data)
         {
             if (!IsConnected || _udpClient == null)
                 return;
 
+            // Once a device has answered we know which subnet it is on, so send there
+            // instead of relying on the limited broadcast reaching it.
+            IPEndPoint destination = _targetEndPoint;
+            if (IsBroadcast)
+            {
+                BroadcastRoute locked = _lockedRoute;
+                if (locked != null)
+                    destination = locked.EndPoint;
+            }
+
             try
             {
-                _udpClient.Send(data, data.Length, _targetEndPoint);
+                _udpClient.Send(data, data.Length, destination);
             }
             catch (SocketException ex)
             {
@@ -770,6 +853,169 @@ namespace Hapbeat.ModCore
             lock (_seqLock)
             {
                 return _sequenceNumber++;
+            }
+        }
+
+        #endregion
+
+        #region Broadcast routing (multi-homed hosts)
+
+        /// <summary>One address this client can broadcast to. Internal so the test
+        /// project (which compiles these sources directly) can exercise the subnet
+        /// maths without opening it up to mods.</summary>
+        internal sealed class BroadcastRoute
+        {
+            public IPEndPoint EndPoint;
+            public uint Network;   // host byte order, already masked
+            public uint Mask;      // host byte order; unused for the limited route
+            public bool IsLimited;
+
+            /// <summary>Whether <paramref name="address"/> sits on this subnet.</summary>
+            public bool Contains(IPAddress address)
+            {
+                if (IsLimited || Mask == 0 || address == null
+                    || address.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    return false;
+                }
+                return (ToUInt32(address) & Mask) == Network;
+            }
+
+            public static uint ToUInt32(IPAddress address)
+            {
+                byte[] b = address.GetAddressBytes();
+                return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
+            }
+
+            public static IPAddress ToAddress(uint value)
+            {
+                return new IPAddress(new byte[]
+                {
+                    (byte)(value >> 24), (byte)(value >> 16),
+                    (byte)(value >> 8),  (byte)value,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Build one destination per local IPv4 subnet, plus the limited broadcast
+        /// address as a catch-all.
+        /// <para>
+        /// The broadcast address is derived from each interface's own mask rather than
+        /// assumed to end in .255: a /16 broadcasts to x.y.255.255 and a /25 to
+        /// x.y.z.127, and the subnet itself is whatever the router hands out. Duplicates
+        /// are dropped, since two interfaces on one subnet would otherwise double-deliver.
+        /// </para>
+        /// </summary>
+        internal static List<BroadcastRoute> EnumerateBroadcastRoutes(int port)
+        {
+            var routes = new List<BroadcastRoute>();
+            var seen = new HashSet<string>();
+
+            try
+            {
+                foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up)
+                        continue;
+                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                        continue;
+
+                    foreach (UnicastIPAddressInformation info in nic.GetIPProperties().UnicastAddresses)
+                    {
+                        if (info.Address.AddressFamily != AddressFamily.InterNetwork)
+                            continue;
+
+                        IPAddress mask;
+                        try
+                        {
+                            mask = info.IPv4Mask;
+                        }
+                        catch (NotImplementedException)
+                        {
+                            // Some runtimes don't surface the mask; the limited
+                            // broadcast added below still covers them.
+                            continue;
+                        }
+                        if (mask == null)
+                            continue;
+
+                        uint ip = BroadcastRoute.ToUInt32(info.Address);
+                        uint m = BroadcastRoute.ToUInt32(mask);
+                        if (m == 0)
+                            continue;
+
+                        IPAddress broadcast = BroadcastRoute.ToAddress((ip & m) | ~m);
+                        if (!seen.Add(broadcast.ToString()))
+                            continue;
+
+                        var route = new BroadcastRoute();
+                        route.EndPoint = new IPEndPoint(broadcast, port);
+                        route.Network = ip & m;
+                        route.Mask = m;
+                        route.IsLimited = false;
+                        routes.Add(route);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Best-effort: a host that restricts interface enumeration still works
+                // through the limited broadcast appended below.
+            }
+
+            // Always keep the original behaviour available: SoftAP setups and unusual
+            // masks still reach devices this way, and on a single-NIC host the
+            // subnet-directed route above already covers everything anyway.
+            var limited = new BroadcastRoute();
+            limited.EndPoint = new IPEndPoint(IPAddress.Broadcast, port);
+            limited.IsLimited = true;
+            routes.Add(limited);
+
+            return routes;
+        }
+
+        /// <summary>
+        /// The broadcast destinations this host will probe, most specific first, for
+        /// logging. A mod can print this at startup so "nothing vibrates" can be told
+        /// apart from "the packets went out of the wrong interface" without a capture.
+        /// </summary>
+        public static string[] DescribeBroadcastRoutes(int port = DefaultPort)
+        {
+            List<BroadcastRoute> routes = EnumerateBroadcastRoutes(port);
+            var described = new string[routes.Count];
+            for (int i = 0; i < routes.Count; i++)
+            {
+                described[i] = routes[i].IsLimited
+                    ? routes[i].EndPoint.Address + " (all interfaces, lowest metric wins)"
+                    : routes[i].EndPoint.Address.ToString();
+            }
+            return described;
+        }
+
+        /// <summary>
+        /// Remember which subnet a device answered on, so playback stops going out as a
+        /// limited broadcast that may never reach it. First reply wins; the lock is
+        /// dropped with the connection.
+        /// </summary>
+        private void LockRouteFor(IPAddress deviceAddress)
+        {
+            if (!IsBroadcast || _lockedRoute != null || deviceAddress == null)
+                return;
+
+            List<BroadcastRoute> routes = _broadcastRoutes;
+            if (routes == null)
+                return;
+
+            for (int i = 0; i < routes.Count; i++)
+            {
+                if (!routes[i].Contains(deviceAddress))
+                    continue;
+
+                _lockedRoute = routes[i];
+                Write("Broadcasting to " + routes[i].EndPoint.Address +
+                      " (a device answered from " + deviceAddress + ").");
+                return;
             }
         }
 
@@ -995,6 +1241,10 @@ namespace Hapbeat.ModCore
             _knownDeviceIps[sender.Address] = nowUs;
             if (!string.IsNullOrEmpty(address))
                 _deviceAddresses[sender.Address] = address;
+
+            // Pin broadcast playback to the subnet this reply came from, so it stops
+            // relying on a limited broadcast that may leave through the wrong NIC.
+            LockRouteFor(sender.Address);
 
             long sentTimeUs;
             long rttUs = _pendingPings.TryRemove(seq, out sentTimeUs)

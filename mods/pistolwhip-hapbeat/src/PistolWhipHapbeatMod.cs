@@ -38,6 +38,12 @@ namespace Hapbeat.PistolWhip
                 _client.Log = LogInfo;
                 _client.OnPong += OnDeviceReplied;
                 _client.OpenBroadcast();
+
+                // Print where discovery actually goes. On a host with Hyper-V / WSL2 /
+                // Docker the limited broadcast leaves through a virtual switch with no
+                // device behind it, which is invisible without this line.
+                LogInfo("Looking for devices on: " +
+                        string.Join(", ", HapbeatModClient.DescribeBroadcastRoutes()));
                 LogInfo("UDP client open (appName='" + _settings.Base.AppName + "'). " +
                         "Edit " + path + " to retune events, then restart the game.");
 
