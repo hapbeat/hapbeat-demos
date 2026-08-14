@@ -35,6 +35,12 @@ namespace Hapbeat.PistolWhip
         /// <summary><c>GunAmmoDisplay.Update</c> — per-frame ammo observation, no haptic.</summary>
         public static void AfterAmmoDisplayUpdate(object __instance)
         {
+            // Runs every frame at VR refresh rates. Everything below this line costs
+            // il2cpp interop and a marshalled string, so it is sampled rather than run
+            // per frame — see AmmoTracker.ShouldSample.
+            if (!AmmoTracker.ShouldSample())
+                return;
+
             try
             {
                 object gun = GameReflection.GetMember(__instance, "gun");

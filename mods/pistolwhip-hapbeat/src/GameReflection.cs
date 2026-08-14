@@ -22,8 +22,12 @@ namespace Hapbeat.PistolWhip
         private const BindingFlags Instance =
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
-        private static readonly Dictionary<string, MemberInfo> _cache =
-            new Dictionary<string, MemberInfo>(StringComparer.Ordinal);
+        // Nested rather than keyed by "type|name": the flat form had to build that key
+        // string on every lookup, which allocates. One of these lookups sits on a
+        // per-frame hook at VR refresh rates, where a per-call allocation turns into GC
+        // pressure and visible hitching.
+        private static readonly Dictionary<Type, Dictionary<string, MemberInfo>> _cache =
+            new Dictionary<Type, Dictionary<string, MemberInfo>>();
         private static readonly object _cacheLock = new object();
 
         /// <summary>Value of the field or property <paramref name="name"/> on
@@ -144,12 +148,15 @@ namespace Hapbeat.PistolWhip
 
         private static MemberInfo FindMember(Type type, string name)
         {
-            string key = type.FullName + "|" + name;
+            Dictionary<string, MemberInfo> byName;
             lock (_cacheLock)
             {
-                MemberInfo cached;
-                if (_cache.TryGetValue(key, out cached))
-                    return cached;
+                if (_cache.TryGetValue(type, out byName))
+                {
+                    MemberInfo cached;
+                    if (byName.TryGetValue(name, out cached))
+                        return cached;
+                }
             }
 
             MemberInfo found = null;
@@ -166,7 +173,12 @@ namespace Hapbeat.PistolWhip
 
             lock (_cacheLock)
             {
-                _cache[key] = found; // null is cached deliberately: a miss must stay cheap
+                if (!_cache.TryGetValue(type, out byName))
+                {
+                    byName = new Dictionary<string, MemberInfo>(StringComparer.Ordinal);
+                    _cache[type] = byName;
+                }
+                byName[name] = found; // null is cached deliberately: a miss must stay cheap
             }
             return found;
         }

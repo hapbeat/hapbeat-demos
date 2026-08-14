@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using Hapbeat.ModCore;
@@ -35,6 +36,15 @@ namespace Hapbeat.PistolWhip
         /// <summary>Log every Koreography event id discovered when a song loads. This is
         /// how a user finds values for <see cref="BeatEventIds"/>.</summary>
         public bool LogDiscoveredBeatIds = true;
+
+        /// <summary>
+        /// How often (ms) to read the ammo count from the HUD, which is the mod's only
+        /// per-frame hook. Lower is more accurate about dry trigger pulls; higher costs
+        /// the frame less. <c>0</c> stops reading it altogether — nothing else breaks,
+        /// but firing on an empty gun then produces a recoil haptic.
+        /// See <see cref="AmmoTracker.ShouldSample"/> for why this is sampled at all.
+        /// </summary>
+        public int AmmoPollMs = 50;
 
         private const string AppName = "PistolWhip";
 
@@ -104,6 +114,7 @@ namespace Hapbeat.PistolWhip
 
             BeatEnabled = root.GetBool("beatEnabled", BeatEnabled);
             LogDiscoveredBeatIds = root.GetBool("logDiscoveredBeatIds", LogDiscoveredBeatIds);
+            AmmoPollMs = root.GetInt("ammoPollMs", AmmoPollMs);
 
             JsonValue ids = root.GetMember("beatEventIds");
             if (ids != null && ids.Type == JsonType.Array)
@@ -143,7 +154,8 @@ namespace Hapbeat.PistolWhip
                 extras.Append(MiniJson.Quote(BeatEventIds[i]));
             }
             extras.Append("],\n");
-            extras.Append("  \"logDiscoveredBeatIds\": ").Append(LogDiscoveredBeatIds ? "true" : "false");
+            extras.Append("  \"logDiscoveredBeatIds\": ").Append(LogDiscoveredBeatIds ? "true" : "false").Append(",\n");
+            extras.Append("  \"ammoPollMs\": ").Append(AmmoPollMs.ToString(CultureInfo.InvariantCulture));
 
             int close = baseJson.LastIndexOf('}');
             if (close < 0)

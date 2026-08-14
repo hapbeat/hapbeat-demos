@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Hapbeat.PistolWhip
 {
@@ -19,6 +20,38 @@ namespace Hapbeat.PistolWhip
     {
         private static readonly ConcurrentDictionary<string, int> _bulletsByHand =
             new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+
+        private static readonly Stopwatch _clock = Stopwatch.StartNew();
+        private static long _lastSampleMs = long.MinValue;
+
+        /// <summary>
+        /// Whether the per-frame HUD hook should actually read the ammo count this time.
+        /// <para>
+        /// <c>GunAmmoDisplay.Update</c> is the only hook on a per-frame path, and reading
+        /// through it is not cheap: each pass crosses into il2cpp for a member lookup and
+        /// marshals a Unity <c>name</c> string back. At 90–120 Hz that allocates steadily
+        /// and shows up as hitching. Ammo cannot change faster than the trigger, so
+        /// sampling on a short interval keeps the dry-fire guard while taking the cost
+        /// off the frame. <c>ammoPollMs</c> = 0 turns the sampling off entirely (dry
+        /// trigger pulls then produce a recoil).
+        /// </para>
+        /// </summary>
+        public static bool ShouldSample()
+        {
+            int intervalMs = PistolWhipHapbeatMod.Settings.AmmoPollMs;
+            if (intervalMs <= 0)
+                return false;
+
+            long nowMs = _clock.ElapsedMilliseconds;
+            // Not locked: a duplicated sample on a race costs one extra read, and a
+            // missed one is picked up on the next frame. Neither is worth contention on
+            // a hot path.
+            if (nowMs - _lastSampleMs < intervalMs)
+                return false;
+
+            _lastSampleMs = nowMs;
+            return true;
+        }
 
         /// <summary>Record the current round count for one gun.</summary>
         public static void Report(string handName, int bulletCount)
