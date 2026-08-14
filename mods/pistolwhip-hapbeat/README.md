@@ -1,12 +1,16 @@
 # PistolWhipHapbeat — Pistol Whip に Hapbeat の触覚を後付けする mod
 
-Steam PCVR 版 **Pistol Whip** に MelonLoader mod を入れて、発砲・被弾・リロード・低体力・
+PC VR 版 **Pistol Whip** に MelonLoader mod を入れて、発砲・被弾・リロード・低体力・
 死亡・そして **BGM の拍** を Hapbeat デバイスへ触覚として送る。
 
 ゲーム本体は改変しない。mod DLL を 1 つ置くだけで、外すときは削除するだけで元に戻る。
 
+**Steam 版と Oculus (Meta) ストア版のどちらでも使える。** どちらも同じ IL2CPP ビルドで、
+違いはインストール先だけ。`GameDir` にそのパスを渡せばよい（→ [3-2](#3-2-ビルド)）。
+Quest 単体版（Android）は対象外。
+
 > **ゲームを持っている人向けの手順書。** 上から順にやれば導入できる。
-> ただし、この mod の**フック対象は現行 Steam ビルドで未検証**。
+> ただし、この mod の**フック対象は現行ビルドで未検証**。
 > 最後の「[実機確認チェックリスト](#実機確認チェックリスト)」に、
 > 初回導入時に確認すべきことをまとめてある。
 
@@ -16,7 +20,7 @@ Steam PCVR 版 **Pistol Whip** に MelonLoader mod を入れて、発砲・被�
 
 | | 内容 |
 |---|---|
-| ゲーム | Pistol Whip（Steam PCVR 版。Quest 単体版は非対応） |
+| ゲーム | Pistol Whip の **PC VR 版**（Steam / Oculus ストアのどちらでも可。Quest 単体版は非対応） |
 | OS | Windows 10 / 11 |
 | ビルド環境 | [.NET SDK 8 以降](https://dotnet.microsoft.com/download)（`dotnet --version` が通ること） |
 | MelonLoader | 自動インストーラ（後述） |
@@ -51,8 +55,13 @@ mod を作り直さずに、メモ帳で触覚の割り当てや強さを変え�
 ### 3-1. MelonLoader を入れる
 
 1. <https://melonwiki.xyz/#/?id=automated-installation> から自動インストーラを落とす。
-2. 起動し、**Unity Game** に `Pistol Whip.exe` を指定して Install。
-   （既定パス例: `C:\Program Files (x86)\Steam\steamapps\common\Pistol Whip\Pistol Whip.exe`）
+2. 起動し、**Unity Game** に `Pistol Whip.exe` を指定して Install。パス例:
+   - Steam: `C:\Program Files (x86)\Steam\steamapps\common\Pistol Whip\Pistol Whip.exe`
+   - Oculus (Meta) ストア: `<ドライブ>\Program Files\Oculus\Software\Software\cloudhead-games-ltd-pistol-whip\Pistol Whip.exe`
+
+   > **Oculus ストア版の注意**: MelonLoader はゲームフォルダにファイルを追加する。
+   > Oculus アプリの整合性チェックが働いて元に戻される可能性がある（未検証）。
+   > 更新やリペア後に mod が消えていたら、この工程からやり直す。
 3. **一度ゲームを普通に起動し、メインメニューまで進んでから終了する。**
    初回だけ MelonLoader がゲームの型情報を C# から使える形に変換するため、
    起動に数分かかることがある。**この工程を飛ばすと次のビルドが必ず失敗する。**
@@ -75,10 +84,16 @@ Pistol Whip\
 dotnet build src\PistolWhipHapbeat.csproj -c Release
 ```
 
-ゲームを既定パス以外に入れている場合は、インストール先を渡す:
+ゲームを既定パス（Steam の標準インストール先）以外に入れている場合は、インストール先を渡す:
 
 ```powershell
 dotnet build src\PistolWhipHapbeat.csproj -c Release -p:GameDir="D:\SteamLibrary\steamapps\common\Pistol Whip"
+```
+
+Oculus (Meta) ストア版の例:
+
+```powershell
+dotnet build src\PistolWhipHapbeat.csproj -c Release -p:GameDir="S:\Program Files\Oculus\Software\Software\cloudhead-games-ltd-pistol-whip"
 ```
 
 `MelonLoader.dll が見つかりません` と出たら、パス指定か 3-1 の工程 3 が抜けている。
