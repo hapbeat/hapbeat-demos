@@ -14,7 +14,15 @@ namespace Il2CppInterop.Runtime
     }
 }
 
+// The namespace follows the same switch BeatSync.cs uses, so compile-check exercises
+// whichever shape the build targets. MelonLoader 0.7.x generates the Il2Cpp-prefixed
+// one for Pistol Whip (verified on a real install); older/other setups may emit the
+// bare name, which is what -p:KoreoIl2CppNamespace=false selects.
+#if HAPBEAT_KOREO_IL2CPP_NS
+namespace Il2CppSonicBloom.Koreo
+#else
 namespace SonicBloom.Koreo
+#endif
 {
     /// <summary>Stub of Koreographer's timed event callback.</summary>
     public delegate void KoreographyEventCallbackWithTime(KoreographyEvent koreoEvent,

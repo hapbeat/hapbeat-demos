@@ -105,6 +105,7 @@ mod が初回起動時に書き出したファイルを見ること（各 mod �
   "player": -1,
   "masterGain": 1.0,
   "minIntervalMs": 60,
+  "hapticDelayMs": 0,
   "events": {
     "shot":      { "eventId": "vr-shooter-kit.shot_recoil", "gain": 1.0, "enabled": true },
     "hit":       { "eventId": "vr-shooter-kit.hit_heavy",   "gain": 1.0, "enabled": true },
@@ -120,6 +121,11 @@ mod が初回起動時に書き出したファイルを見ること（各 mod �
   （unity-sdk の Address Override と同じ意味論）
 - `masterGain` — 全イベント共通の倍率。実際のゲインは `masterGain × events[].gain`
 - `minIntervalMs` — **同一論理イベント**の最小送信間隔。連射フックのパケットストーム抑止。`0` で無効
+- `hapticDelayMs` — PLAY の送信を遅らせる時間 (ms)。既定 `0`。**無線ストリーミング（Air Link /
+  Virtual Desktop / Steam Link）でプレイする場合の同期用**: 映像・音は 40〜60 ms 遅れて HMD に
+  届くのに触覚は LAN で直行するため、そのままだと触覚が先行する。同じくらいの値を入れると揃う。
+  レート制限は「ゲームが発火した時刻」で判定するので、遅延を入れても間引かれ方は変わらない。
+  **STOP は遅延しない**（ループが止まらなくなるため）。遅延待ちの PLAY はその clip の STOP で破棄される
 - `events` を JSON に書いた場合、既定のマップを**丸ごと置き換える**（バインドを削除できる）
 - 壊れた JSON はファイルを残したまま既定値で起動し、警告を 1 行出す
 

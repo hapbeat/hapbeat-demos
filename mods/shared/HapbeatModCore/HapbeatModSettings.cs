@@ -64,6 +64,25 @@ namespace Hapbeat.ModCore
         /// milliseconds. Suppresses packet storms from rapid-fire hooks. 0 disables.</summary>
         public int MinIntervalMs = 60;
 
+        /// <summary>
+        /// Hold every PLAY back by this many milliseconds. 0 (the default) sends
+        /// immediately.
+        /// <para>
+        /// A haptic command leaves the mod the instant the game fires it and reaches the
+        /// device over the LAN in a few milliseconds, while the picture and sound the
+        /// player is reacting to may arrive much later — wireless streaming to a headset
+        /// (Air Link, Virtual Desktop, Steam Link) typically adds 40–60 ms of encode and
+        /// transmission delay. The haptic then lands *before* the event that caused it.
+        /// Delaying the send by roughly that amount puts them back together.
+        /// </para>
+        /// <para>
+        /// Tune by feel: raise it until the pulse sits on the shot instead of ahead of
+        /// it. Wired Link or a flat-screen build usually needs 0. STOP commands are never
+        /// delayed — a looping clip must stop the moment it is asked to.
+        /// </para>
+        /// </summary>
+        public int HapticDelayMs = 0;
+
         /// <summary>Logical event name ("shot", "hit", ...) to its binding.</summary>
         public readonly Dictionary<string, HapbeatEventSetting> Events =
             new Dictionary<string, HapbeatEventSetting>(StringComparer.OrdinalIgnoreCase);
@@ -147,6 +166,7 @@ namespace Hapbeat.ModCore
             s.Player = root.GetInt("player", s.Player);
             s.MasterGain = root.GetFloat("masterGain", s.MasterGain);
             s.MinIntervalMs = root.GetInt("minIntervalMs", s.MinIntervalMs);
+            s.HapticDelayMs = root.GetInt("hapticDelayMs", s.HapticDelayMs);
 
             JsonValue events = root.GetMember("events");
             if (events != null && events.Type == JsonType.Object)
@@ -186,6 +206,7 @@ namespace Hapbeat.ModCore
             sb.Append("  \"player\": ").Append(Player.ToString(CultureInfo.InvariantCulture)).Append(",\n");
             sb.Append("  \"masterGain\": ").Append(MiniJson.Number(MasterGain)).Append(",\n");
             sb.Append("  \"minIntervalMs\": ").Append(MinIntervalMs.ToString(CultureInfo.InvariantCulture)).Append(",\n");
+            sb.Append("  \"hapticDelayMs\": ").Append(HapticDelayMs.ToString(CultureInfo.InvariantCulture)).Append(",\n");
             sb.Append("  \"events\": {\n");
 
             int i = 0;

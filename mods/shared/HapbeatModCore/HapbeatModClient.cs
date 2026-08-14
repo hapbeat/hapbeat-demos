@@ -97,7 +97,32 @@ namespace Hapbeat.ModCore
         private IPEndPoint _targetEndPoint;
         private Thread _receiveThread;
         private Thread _keepAliveThread;
+        private Thread _delayThread;
         private volatile bool _isRunning;
+
+        // PLAYs waiting out HapbeatModSettings.HapticDelayMs. Kept in a list rather than
+        // one timer per fire: firing is rate limited, so the list stays a handful of
+        // entries, and a single thread makes cancellation (see CancelDelayedPlays) and
+        // teardown ordering trivial. Guarded by _pendingPlayLock, which is also the
+        // wait handle the thread sleeps on.
+        private readonly List<PendingPlay> _pendingPlays = new List<PendingPlay>();
+        private readonly object _pendingPlayLock = new object();
+
+        private struct PendingPlay
+        {
+            public long DueMs;
+            public string EventId;
+            public float Gain;
+        }
+
+        /// <summary>
+        /// How many PLAYs are waiting out <see cref="HapbeatModSettings.HapticDelayMs"/>.
+        /// Diagnostics and tests; 0 whenever the delay is off.
+        /// </summary>
+        public int PendingDelayedCount
+        {
+            get { lock (_pendingPlayLock) { return _pendingPlays.Count; } }
+        }
         private ushort _sequenceNumber;
         private readonly object _seqLock = new object();
         private readonly Stopwatch _stopwatch;
@@ -179,6 +204,11 @@ namespace Hapbeat.ModCore
                 _keepAliveThread.IsBackground = true;
                 _keepAliveThread.Start();
 
+                _delayThread = new Thread(DelayLoop);
+                _delayThread.Name = "HapbeatModDelay";
+                _delayThread.IsBackground = true;
+                _delayThread.Start();
+
                 IsConnected = true;
                 InvokeConnectionStateChanged(true);
 
@@ -214,6 +244,14 @@ namespace Hapbeat.ModCore
             IsConnected = false;
             IsBroadcast = false;
 
+            // Drop anything still waiting out its delay and wake the thread so it can
+            // observe _isRunning instead of sleeping out its timeout.
+            lock (_pendingPlayLock)
+            {
+                _pendingPlays.Clear();
+                Monitor.PulseAll(_pendingPlayLock);
+            }
+
             try { if (_udpClient != null) _udpClient.Close(); }
             catch { /* Suppress exceptions during cleanup */ }
 
@@ -221,10 +259,13 @@ namespace Hapbeat.ModCore
                 _receiveThread.Join(1000);
             if (_keepAliveThread != null && _keepAliveThread.IsAlive)
                 _keepAliveThread.Join(1000);
+            if (_delayThread != null && _delayThread.IsAlive)
+                _delayThread.Join(1000);
 
             _udpClient = null;
             _receiveThread = null;
             _keepAliveThread = null;
+            _delayThread = null;
             _pendingPings.Clear();
 
             // Device knowledge is per-connection: after a reconnect the previous IPs may
@@ -276,9 +317,20 @@ namespace Hapbeat.ModCore
             if (!PassesRateLimit(logicalEvent, settings.MinIntervalMs))
                 return false;
 
+            float gain = settings.MasterGain * ev.Gain;
+
+            // The rate limit above is judged on when the game fired, not on when the
+            // packet leaves, so a delay never changes which events survive it.
+            int delayMs = settings.HapticDelayMs;
+            if (delayMs > 0)
+            {
+                EnqueueDelayedPlay(ev.EventId, gain, delayMs);
+                return true;
+            }
+
             // targetTimeUs = 0 means "play immediately" (message-format.md §8) — the
             // same value HapbeatManager.Play uses for its immediate path.
-            SendPlay(ev.EventId, 0, settings.MasterGain * ev.Gain, null);
+            SendPlay(ev.EventId, 0, gain, null);
             return true;
         }
 
@@ -292,6 +344,11 @@ namespace Hapbeat.ModCore
             HapbeatEventSetting ev = Settings.GetEvent(logicalEvent);
             if (ev == null)
                 return false;
+
+            // Drop any not-yet-sent PLAY for this same clip first. Without this, a stop
+            // issued inside the delay window would be overtaken by the delayed start and
+            // a looping clip (the low-health heartbeat) would run forever.
+            CancelDelayedPlays(ev.EventId);
 
             SendStop(ev.EventId, null);
             return true;
@@ -719,6 +776,100 @@ namespace Hapbeat.ModCore
         #endregion
 
         #region Background threads
+
+        /// <summary>Queue a PLAY to go out <paramref name="delayMs"/> from now.</summary>
+        private void EnqueueDelayedPlay(string eventId, float gain, int delayMs)
+        {
+            lock (_pendingPlayLock)
+            {
+                PendingPlay p;
+                p.DueMs = _stopwatch.ElapsedMilliseconds + delayMs;
+                p.EventId = eventId;
+                p.Gain = gain;
+                _pendingPlays.Add(p);
+                Monitor.Pulse(_pendingPlayLock);
+            }
+        }
+
+        /// <summary>Discard queued PLAYs for one clip (see <see cref="FireStop"/>).</summary>
+        private void CancelDelayedPlays(string eventId)
+        {
+            if (string.IsNullOrEmpty(eventId))
+                return;
+
+            lock (_pendingPlayLock)
+            {
+                for (int i = _pendingPlays.Count - 1; i >= 0; i--)
+                {
+                    if (string.Equals(_pendingPlays[i].EventId, eventId, StringComparison.Ordinal))
+                        _pendingPlays.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sends queued PLAYs once they come due. Sleeps until the nearest due time
+        /// rather than polling on a fixed tick, so an idle mod costs nothing and a due
+        /// packet is not held back by a coarse interval.
+        /// </summary>
+        private void DelayLoop()
+        {
+            var due = new List<PendingPlay>();
+
+            while (_isRunning)
+            {
+                due.Clear();
+
+                lock (_pendingPlayLock)
+                {
+                    if (_pendingPlays.Count == 0)
+                    {
+                        // Woken by Enqueue/Close; the timeout is just a liveness backstop.
+                        Monitor.Wait(_pendingPlayLock, 500);
+                        continue;
+                    }
+
+                    long nowMs = _stopwatch.ElapsedMilliseconds;
+                    long nextDueMs = long.MaxValue;
+
+                    for (int i = _pendingPlays.Count - 1; i >= 0; i--)
+                    {
+                        if (_pendingPlays[i].DueMs <= nowMs)
+                        {
+                            due.Add(_pendingPlays[i]);
+                            _pendingPlays.RemoveAt(i);
+                        }
+                        else if (_pendingPlays[i].DueMs < nextDueMs)
+                        {
+                            nextDueMs = _pendingPlays[i].DueMs;
+                        }
+                    }
+
+                    if (due.Count == 0)
+                    {
+                        int waitMs = (int)Math.Min(500L, Math.Max(1L, nextDueMs - nowMs));
+                        Monitor.Wait(_pendingPlayLock, waitMs);
+                        continue;
+                    }
+                }
+
+                // Sent outside the lock: SendPlay walks the known-device table and can
+                // block on the socket, which must not stall Fire() on the game thread.
+                for (int i = 0; i < due.Count; i++)
+                {
+                    if (!_isRunning)
+                        break;
+                    try
+                    {
+                        SendPlay(due[i].EventId, 0, due[i].Gain, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        Write("Delayed play for '" + due[i].EventId + "' failed: " + ex.Message);
+                    }
+                }
+            }
+        }
 
         private void KeepAliveLoop()
         {

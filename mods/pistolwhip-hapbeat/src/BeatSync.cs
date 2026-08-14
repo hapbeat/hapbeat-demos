@@ -38,7 +38,7 @@ namespace Hapbeat.PistolWhip
         private static Koreo.KoreographyEventCallbackWithTime _callback;
         private static bool _conversionFailed;
 
-        public static void Install(Harmony harmony)
+        public static void Install(HarmonyLib.Harmony harmony)
         {
             if (!PistolWhipHapbeatMod.Settings.BeatEnabled)
             {
@@ -78,9 +78,17 @@ namespace Hapbeat.PistolWhip
                 List<string> discovered = DiscoverEventIds(koreography);
                 if (PistolWhipHapbeatMod.Settings.LogDiscoveredBeatIds)
                 {
-                    PistolWhipHapbeatMod.LogInfo(discovered.Count == 0
-                        ? "Song loaded but no Koreography event id could be read from it."
-                        : "Song loaded. Koreography event ids: " + string.Join(", ", discovered.ToArray()));
+                    // The game preloads every song's Koreography at startup, so this
+                    // runs ~100 times with the same handful of ids. Log only when the
+                    // set actually changes, otherwise the useful lines are buried.
+                    string signature = string.Join(", ", discovered.ToArray());
+                    if (signature != _lastLoggedIds)
+                    {
+                        _lastLoggedIds = signature;
+                        PistolWhipHapbeatMod.LogInfo(discovered.Count == 0
+                            ? "Song loaded but no Koreography event id could be read from it."
+                            : "Song loaded. Koreography event ids: " + signature);
+                    }
                 }
 
                 List<string> wanted = SelectIds(discovered);
@@ -95,12 +103,69 @@ namespace Hapbeat.PistolWhip
         /// <summary>
         /// The ids to listen on: the user's explicit list when set (even if the song did
         /// not advertise them — a song may load its tracks after this point), otherwise
-        /// every id found in the song.
+        /// the beat-looking subset of what the song advertises.
+        /// <para>
+        /// Not every Koreography track is a beat track. Pistol Whip's songs ship
+        /// <c>Beat</c> alongside <c>NoBeat</c>, <c>Event</c> and <c>GameplayProp</c>
+        /// (observed on a real install); registering for all of them fires haptics at
+        /// moments that have nothing to do with the pulse. Falling back to everything
+        /// when nothing looks like a beat keeps a differently-named song working, and
+        /// the warning tells the user how to pin it down.
+        /// </para>
         /// </summary>
         private static List<string> SelectIds(List<string> discovered)
         {
             List<string> configured = PistolWhipHapbeatMod.Settings.BeatEventIds;
-            return configured.Count > 0 ? new List<string>(configured) : discovered;
+            if (configured.Count > 0)
+                return new List<string>(configured);
+
+            var beats = new List<string>();
+            foreach (string id in discovered)
+            {
+                if (LooksLikeBeat(id))
+                    beats.Add(id);
+            }
+
+            if (beats.Count > 0)
+                return beats;
+
+            if (discovered.Count > 0)
+                WarnNoBeatTrack(discovered);
+            return discovered;
+        }
+
+        /// <summary>
+        /// Whether a Koreography event id names a beat track. Matches ids containing
+        /// "beat" while rejecting negations such as <c>NoBeat</c> / <c>OffBeat</c>.
+        /// </summary>
+        private static bool LooksLikeBeat(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return false;
+
+            int idx = id.IndexOf("beat", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return false;
+
+            string prefix = id.Substring(0, idx);
+            return prefix.IndexOf("no", StringComparison.OrdinalIgnoreCase) < 0
+                && prefix.IndexOf("off", StringComparison.OrdinalIgnoreCase) < 0
+                && prefix.IndexOf("anti", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private static bool _warnedNoBeatTrack;
+
+        private static void WarnNoBeatTrack(List<string> discovered)
+        {
+            if (_warnedNoBeatTrack)
+                return;
+            _warnedNoBeatTrack = true;
+
+            PistolWhipHapbeatMod.LogWarning(
+                "No Koreography track looks like a beat track (found: " +
+                string.Join(", ", discovered.ToArray()) + "), so every id is used. " +
+                "Haptics may fire off-beat. Put the right id(s) in \"beatEventIds\" in " +
+                "hapbeat_settings.json to pin it down.");
         }
 
         private static void Register(List<string> ids)
@@ -140,9 +205,23 @@ namespace Hapbeat.PistolWhip
                     }
                 }
 
-                PistolWhipHapbeatMod.LogInfo("Beat sync listening on " + _registered.Count + " event id(s).");
+                // Same reason as the discovery log above: only report a change.
+                string listening = string.Join(", ", new List<string>(_registered.Keys).ToArray());
+                if (listening != _lastLoggedRegistration)
+                {
+                    _lastLoggedRegistration = listening;
+                    PistolWhipHapbeatMod.LogInfo(_registered.Count == 0
+                        ? "Beat sync registered for no event id."
+                        : "Beat sync listening on: " + listening);
+                }
             }
         }
+
+        /// <summary>Last logged discovery / registration, so the ~100 preload passes do
+        /// not each write a line. Guarded by <see cref="_lock"/> for the registration
+        /// one; the discovery one is only touched from the patched method.</summary>
+        private static string _lastLoggedIds;
+        private static string _lastLoggedRegistration;
 
         /// <summary>The single il2cpp-side delegate every id is registered with. Built
         /// once: unregistration has to pass the same delegate instance back.</summary>
@@ -309,7 +388,7 @@ namespace Hapbeat.PistolWhip
     /// <summary>Beat sync compiled out (<c>-p:DisableBeatSync=true</c>).</summary>
     internal static class BeatSync
     {
-        public static void Install(Harmony harmony)
+        public static void Install(HarmonyLib.Harmony harmony)
         {
             PistolWhipHapbeatMod.LogInfo("Beat sync was compiled out of this build (DisableBeatSync).");
         }

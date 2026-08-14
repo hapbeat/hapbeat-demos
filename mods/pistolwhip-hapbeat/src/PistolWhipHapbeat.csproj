@@ -18,8 +18,10 @@
     <DisableBeatSync Condition="'$(DisableBeatSync)' == ''">false</DisableBeatSync>
 
     <!-- MelonLoader が生成した proxy DLL で Koreographer が
-         Il2CppSonicBloom.Koreo 名前空間に入っている場合は true。 -->
-    <KoreoIl2CppNamespace Condition="'$(KoreoIl2CppNamespace)' == ''">false</KoreoIl2CppNamespace>
+         Il2CppSonicBloom.Koreo 名前空間に入っている場合は true。
+         実機 (MelonLoader 0.7.x / Pistol Whip PC 版) で確認した実際の姿がこちらなので
+         既定を true にしてある。素の SonicBloom.Koreo で生成される環境なら false に。 -->
+    <KoreoIl2CppNamespace Condition="'$(KoreoIl2CppNamespace)' == ''">true</KoreoIl2CppNamespace>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -63,7 +65,21 @@
       <HintPath>$(MelonLoaderDir)\Il2CppInterop.Runtime.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <!-- Koreographer (SonicBloom.Koreo) の型。BGM 拍連携でのみ必要 -->
+    <!-- Koreographer の型。BGM 拍連携でのみ必要。
+         Koreographer は Unity Asset Store プラグインなので、MelonLoader は
+         Assembly-CSharp ではなく専用の proxy DLL を生成する (実機で確認)。
+         素の SonicBloom.Koreo 名で生成される環境向けに、そちらの名前も候補に入れてある。 -->
+    <Reference Include="Il2CppSonicBloom.Koreo"
+               Condition="'$(DisableBeatSync)' != 'true' AND Exists('$(Il2CppAssembliesDir)\Il2CppSonicBloom.Koreo.dll')">
+      <HintPath>$(Il2CppAssembliesDir)\Il2CppSonicBloom.Koreo.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SonicBloom.Koreo"
+               Condition="'$(DisableBeatSync)' != 'true' AND Exists('$(Il2CppAssembliesDir)\SonicBloom.Koreo.dll')">
+      <HintPath>$(Il2CppAssembliesDir)\SonicBloom.Koreo.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Koreographer の型が参照する基底型 (MonoBehaviour 等) の解決に使う -->
     <Reference Include="Assembly-CSharp" Condition="'$(DisableBeatSync)' != 'true'">
       <HintPath>$(Il2CppAssembliesDir)\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>

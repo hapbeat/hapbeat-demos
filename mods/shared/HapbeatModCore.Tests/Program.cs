@@ -614,6 +614,80 @@ namespace Hapbeat.ModCore.Tests
                 Check(client.Fire("reload"), "unlimited: first fire");
                 Check(client.Fire("reload"), "unlimited: immediate re-fire also passes");
             }
+
+            HapticDelay();
+        }
+
+        /// <summary>
+        /// hapticDelayMs holds PLAYs back so they land with wirelessly-streamed picture
+        /// and sound instead of ahead of it (Air Link and friends add 40–60 ms).
+        /// </summary>
+        private static void HapticDelay()
+        {
+            Section("Haptic delay (hapticDelayMs)");
+
+            // Round-trips through JSON like every other setting.
+            var written = HapbeatModSettings.CreateDefault("Test");
+            written.HapticDelayMs = 45;
+            var read = HapbeatModSettings.Parse(written.ToJson(), HapbeatModSettings.CreateDefault("Test"));
+            AreEqual(45, read.HapticDelayMs, "hapticDelayMs survives a save/load round trip");
+            AreEqual(0, HapbeatModSettings.CreateDefault("Test").HapticDelayMs,
+                "the delay is off by default (wired setups need no compensation)");
+
+            var settings = HapbeatModSettings.CreateDefault("Test");
+            settings.MinIntervalMs = 0;
+            settings.HapticDelayMs = 400;
+
+            // No socket: the queue is still filled, but nothing drains it, so the queued
+            // entry stays observable. That is exactly what the stop path has to cancel.
+            using (var client = new HapbeatModClient(settings))
+            {
+                AreEqual(0, client.PendingDelayedCount, "nothing is queued before the first fire");
+
+                Check(client.Fire("heartbeat"), "a delayed fire still reports success");
+                AreEqual(1, client.PendingDelayedCount, "the play is queued rather than sent immediately");
+
+                Check(client.FireStop("heartbeat"), "stop succeeds while a play is still queued");
+                AreEqual(0, client.PendingDelayedCount,
+                    "stop cancels the queued play (otherwise a looping clip would start after its stop)");
+
+                Check(client.Fire("shot"), "a second event queues independently");
+                Check(client.Fire("hit"), "and so does a third");
+                AreEqual(2, client.PendingDelayedCount, "both remain queued");
+
+                client.FireStop("shot");
+                AreEqual(1, client.PendingDelayedCount, "stop only cancels its own clip");
+            }
+
+            // With the delay off, Fire must send straight through — nothing may linger.
+            settings.HapticDelayMs = 0;
+            using (var client = new HapbeatModClient(settings))
+            {
+                Check(client.Fire("shot"), "fires with the delay disabled");
+                AreEqual(0, client.PendingDelayedCount, "no queue is used when the delay is off");
+            }
+
+            // With a socket open the worker drains the queue once the delay elapses.
+            // Skipped rather than failed where a UDP broadcast socket cannot be opened.
+            var live = HapbeatModSettings.CreateDefault("Test");
+            live.MinIntervalMs = 0;
+            live.HapticDelayMs = 120;
+            try
+            {
+                using (var client = new HapbeatModClient(live))
+                {
+                    client.OpenBroadcast();
+                    client.Fire("shot");
+                    AreEqual(1, client.PendingDelayedCount, "queued while the delay has not elapsed");
+
+                    Thread.Sleep(400);
+                    AreEqual(0, client.PendingDelayedCount, "the worker sends it once the delay elapses");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("  (skipped live-socket drain check: " + ex.Message + ")");
+            }
         }
 
         #endregion

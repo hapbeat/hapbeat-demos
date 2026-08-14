@@ -24,6 +24,17 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <!-- 成果物は捨てるだけなので参照 DLL のコピーも不要 -->
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+
+    <!-- src/PistolWhipHapbeat.csproj と同じ既定にそろえる。stubs 側の名前空間も
+         この定数で切り替わるので、両方の姿を検証できる:
+           dotnet build compile-check                              (Il2Cpp 名前空間)
+           dotnet build compile-check -p:KoreoIl2CppNamespace=false (素の名前空間)
+           dotnet build compile-check -p:DefineConstants=HAPBEAT_NO_BEATSYNC (拍なし) -->
+    <KoreoIl2CppNamespace Condition="'$(KoreoIl2CppNamespace)' == ''">true</KoreoIl2CppNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(KoreoIl2CppNamespace)' == 'true'">
+    <DefineConstants>$(DefineConstants);HAPBEAT_KOREO_IL2CPP_NS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

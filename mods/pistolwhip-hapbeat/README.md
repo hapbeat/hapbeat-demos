@@ -173,6 +173,7 @@ MelonLoader ごと外す場合は自動インストーラの Un-Install を使�
   "player": -1,
   "masterGain": 1.0,
   "minIntervalMs": 60,
+  "hapticDelayMs": 0,
   "events": {
     "shot": { "eventId": "vr-shooter-kit.shot_recoil", "gain": 1.0, "enabled": true },
     "melee": { "eventId": "vr-shooter-kit.hit_light", "gain": 0.9, "enabled": true },
@@ -195,6 +196,7 @@ MelonLoader ごと外す場合は自動インストーラの Un-Install を使�
 | `player` / `group` | 複数人・複数台で使うときの宛先固定（1〜99）。`-1` で無効 |
 | `masterGain` | 全体の強さ倍率。実際の強さは `masterGain × 各 gain` |
 | `minIntervalMs` | **同じ**イベントの最小送信間隔 (ms)。連射で埋まるのを防ぐ。`0` で無効 |
+| `hapticDelayMs` | 触覚を送るのを遅らせる時間 (ms)。**無線で HMD に飛ばしている場合の同期用**（下記） |
 | `events` | 論理イベント → Kit イベント / 強さ / 有効 |
 | `beatEnabled` | BGM 拍の触覚を出すか |
 | `beatEventIds` | 拍として使う Koreography イベント ID（空 = 曲に入っている全部） |
@@ -210,6 +212,28 @@ MelonLoader ごと外す場合は自動インストーラの Un-Install を使�
 
 JSON を壊すと、そのファイルはそのまま残したうえで既定値で起動し、
 コンソールに警告が 1 行出る（設定が消えることはない）。
+
+### 触覚が映像・音より「早すぎる」とき — `hapticDelayMs`
+
+Air Link / Virtual Desktop / Steam Link で HMD に無線で飛ばしていると、**映像と音だけが
+40〜60 ms 遅れて届く**。触覚は PC から Hapbeat へ LAN で直行するので数 ms で着いてしまい、
+結果として**撃つ前に振動が来る**ように感じる。
+
+`hapticDelayMs` に映像側の遅延と同じくらいの値を入れると揃う。
+
+| 接続方法 | 目安 |
+|---|---|
+| 有線 Link / フラットスクリーン | `0` |
+| Air Link・Virtual Desktop 等の無線 | `40`〜`60` から始めて、体感で前後させる |
+
+合わせ方は「発砲」で見るのが分かりやすい。振動が銃口の光より先なら値を増やし、
+遅れて感じるなら減らす。**停止コマンドは遅延しない**（ループ中の心拍が止まらなくなるため）。
+遅延待ちのあいだに停止が来た場合、その未送信の再生は破棄される。
+
+なお **`Devices alive: 1, average round-trip 4.1 ms` のようなログが 15 秒ごとに出る**。
+この往復時間が数 ms なら通信は健全で、ズレの原因は映像側の遅延だと判断してよい。
+逆に数十〜数百 ms 出ていたり `Devices alive: 0` なら、Wi-Fi が混んでいる（無線ストリーミングと
+帯域を奪い合っている）ので、そちらの改善が先。
 
 ---
 

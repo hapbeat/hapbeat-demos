@@ -25,7 +25,7 @@ namespace Hapbeat.PistolWhip
         /// <summary>Number of hooks whose target could not be found or patched.</summary>
         public static int FailedCount { get; private set; }
 
-        public static void InstallAll(Harmony harmony)
+        public static void InstallAll(HarmonyLib.Harmony harmony)
         {
             AppliedCount = 0;
             FailedCount = 0;
@@ -52,7 +52,7 @@ namespace Hapbeat.PistolWhip
 
         /// <param name="expectedArgCount">Parameter count of the intended overload, or -1
         /// when the target is expected to be unique by name.</param>
-        private static void Patch(Harmony harmony, string typeName, string methodName,
+        private static void Patch(HarmonyLib.Harmony harmony, string typeName, string methodName,
             string postfixName, int expectedArgCount = -1)
         {
             string label = typeName + "." + methodName;

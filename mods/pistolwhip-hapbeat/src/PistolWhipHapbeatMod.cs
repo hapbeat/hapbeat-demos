@@ -35,6 +35,7 @@ namespace Hapbeat.PistolWhip
 
                 _client = new HapbeatModClient(_settings.Base);
                 _client.Log = LogInfo;
+                _client.OnPong += OnDeviceReplied;
                 _client.OpenBroadcast();
                 LogInfo("UDP client open (appName='" + _settings.Base.AppName + "'). " +
                         "Edit " + path + " to retune events, then restart the game.");
@@ -136,6 +137,54 @@ namespace Hapbeat.PistolWhip
         #endregion
 
         #region Logging
+
+        // --- Device liveness / latency reporting -----------------------------------
+        // Haptics travelling late is the one symptom that cannot be diagnosed from the
+        // hook logs: a PLAY leaves the mod the instant the game fires, so anything after
+        // that is the network or the device. PONG round-trip time measures exactly that
+        // segment, which is what separates "the Wi-Fi is congested" (a shared link with
+        // Air Link is the usual culprit) from "the clip itself starts late".
+        private static readonly object _pongLock = new object();
+        private static long _lastPongReportMs;
+        private static long _rttSumUs;
+        private static int _rttCount;
+        private static bool _sawFirstPong;
+
+        private const int PongReportIntervalMs = 15000;
+
+        private static void OnDeviceReplied(long rttUs, long serverTimeUs)
+        {
+            string line = null;
+
+            lock (_pongLock)
+            {
+                _rttSumUs += rttUs;
+                _rttCount++;
+
+                long nowMs = Environment.TickCount & 0x7FFFFFFF;
+                if (!_sawFirstPong)
+                {
+                    _sawFirstPong = true;
+                    _lastPongReportMs = nowMs;
+                    line = "Device replied: round-trip " + (rttUs / 1000.0).ToString("0.0") + " ms.";
+                }
+                else if (nowMs - _lastPongReportMs >= PongReportIntervalMs && _rttCount > 0)
+                {
+                    _lastPongReportMs = nowMs;
+                    double avgMs = (_rttSumUs / (double)_rttCount) / 1000.0;
+                    int devices = _client != null ? _client.AliveDeviceCount : 0;
+                    _rttSumUs = 0;
+                    _rttCount = 0;
+                    line = "Devices alive: " + devices + ", average round-trip " +
+                           avgMs.ToString("0.0") + " ms over the last " +
+                           (PongReportIntervalMs / 1000) + " s.";
+                }
+            }
+
+            // Logged outside the lock: MelonLogger writes to console and file.
+            if (line != null)
+                LogInfo(line);
+        }
 
         internal static void LogInfo(string message)
         {
