@@ -15,6 +15,15 @@ minIntervalMs=60
 commandUnicast=true
 port=7700
 
+# Where discovery goes before a device answers. Empty = work it out
+# (one subnet-directed address per adapter + 255.255.255.255).
+# Set this by hand if nothing is found: 255.255.255.255 alone only
+# leaves through the adapter with the lowest metric, which on a PC
+# running Hyper-V / WSL2 / Docker is often a virtual switch with no
+# device behind it. Automatic detection assumes /24, so a /16 or /25
+# network needs the real address here (e.g. 192.168.255.255).
+broadcastAddress=
+
 # Logical event -> kit event id. Defining ANY event here replaces the
 # whole default map, so list every event you want.
 

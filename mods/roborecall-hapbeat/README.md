@@ -310,6 +310,7 @@ masterGain=1.000            # 実際のゲイン = masterGain × event.<name>.ga
 minIntervalMs=60            # 同じ論理イベントの最小送信間隔 (ms)。0 で無効
 commandUnicast=true         # false にすると常に broadcast
 port=7700
+broadcastAddress=           # 空 = 自動。デバイスが見つからない時だけ手で書く（下記）
 
 event.fire.id=vr-shooter-kit.shot_recoil
 event.fire.gain=1.000
@@ -319,6 +320,33 @@ event.fire.enabled=true
 - **1 つでも `event.` 行を書くと既定のイベントマップは丸ごと置き換わる。** 使うものを全部書くこと
 - 変更は **Hapbeat Reload Settings** ノードか、エディタ再起動で反映
 - `appName` は ASCII で書くこと（16 文字の切り詰め位置が非 ASCII だと他 SDK と 1 文字ずれ得る）
+
+### デバイスが見つからないとき — `broadcastAddress`
+
+`255.255.255.255` 宛のパケットは、**インターフェイスメトリックが最小のアダプタ 1 本からしか出ない**。
+Hyper-V / WSL2 / Docker を入れた PC では、常時 Connected な仮想スイッチがそれになりがちで、
+Hapbeat のいる Wi-Fi 網には一生届かない。**LAN ケーブルを挿していなくても起きる**のが分かりにくい点。
+
+そこで既定では、各アダプタのアドレスから**サブネット宛のブロードキャスト**（例 `192.168.0.255`）を
+組み立てて全部に探索を投げ、**デバイスが応答したサブネットに以後の送信を固定**する。
+起動時のログに実際の宛先が出る:
+
+```
+LogHapbeatMod: Looking for devices on: 192.168.0.255, 255.255.255.255
+LogHapbeatMod: Broadcasting to 192.168.0.255 (a device answered from 192.168.0.48).
+```
+
+自動判定は **/24（`255.255.255.0`）を仮定**している。家庭・オフィスのルータはこれを配るので通常は問題ないが、
+**/16 や /25 のネットワークでは外れる**。その場合は実際のブロードキャストアドレスを書く:
+
+```ini
+broadcastAddress=192.168.255.255
+```
+
+> 補足: `hapbeat-unreal-sdk` には Windows の `GetAdaptersAddresses` / POSIX の `getifaddrs` で
+> **実マスクを取得する完全な実装**（`Source/HapbeatSDK/Private/HapbeatNetInterfaces.cpp`）がある。
+> 本 mod が /24 仮定に留めているのは、Mod Kit のエンジンでヘッダ配置と `iphlpapi.lib` の
+> 追加が検証できないため。ビルドが通る環境が整ったら、そちらを移植するのが本筋。
 
 ---
 

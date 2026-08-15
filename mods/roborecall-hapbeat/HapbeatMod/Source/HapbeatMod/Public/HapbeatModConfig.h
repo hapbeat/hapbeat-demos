@@ -55,6 +55,23 @@ struct FHapbeatModConfig
 	/// Device UDP port (contracts specs/ports.md).
 	int32 Port;
 
+	/// Where discovery packets go when nothing has answered yet. Empty (the
+	/// default) means "work it out": one subnet-directed address per local
+	/// adapter, plus 255.255.255.255 as a catch-all.
+	///
+	/// Set it by hand when automatic detection guesses wrong. 255.255.255.255
+	/// alone leaves a multi-homed host through the single adapter with the
+	/// lowest metric — on a PC running Hyper-V / WSL2 / Docker that is often a
+	/// virtual switch with no device behind it, and no Ethernet cable has to be
+	/// plugged in for that to happen. A subnet-directed address (192.168.0.255)
+	/// resolves through the directly-connected route instead, so the metric
+	/// never applies.
+	///
+	/// Automatic detection assumes a /24 subnet, which is what home and office
+	/// routers hand out. On a /16 or /25 network, put the real broadcast address
+	/// here (192.168.255.255, 192.168.0.127, …).
+	FString BroadcastAddress;
+
 	/// Logical event name -> binding. Keys are compared case-insensitively.
 	TMap<FString, FHapbeatEventBinding> Events;
 

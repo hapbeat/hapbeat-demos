@@ -187,6 +187,7 @@ FHapbeatModConfig FHapbeatModConfig::LoadOrCreate(const FString& Path)
 		else if (Key.Equals(TEXT("minIntervalMs"), ESearchCase::IgnoreCase)) { C.MinIntervalMs = FCString::Atoi(*Value); }
 		else if (Key.Equals(TEXT("commandUnicast"), ESearchCase::IgnoreCase)) { C.bCommandUnicast = ParseBool(Value, C.bCommandUnicast); }
 		else if (Key.Equals(TEXT("port"), ESearchCase::IgnoreCase))        { C.Port = FCString::Atoi(*Value); }
+		else if (Key.Equals(TEXT("broadcastAddress"), ESearchCase::IgnoreCase)) { C.BroadcastAddress = Value; }
 		else if (Key.StartsWith(TEXT("event."), ESearchCase::IgnoreCase))
 		{
 			// event.<logical>.id / .gain / .enabled
@@ -256,6 +257,14 @@ FString FHapbeatModConfig::ToText() const
 	S += TEXT("# false = always broadcast instead of unicasting to devices that answered a PING.\n");
 	S += FString::Printf(TEXT("commandUnicast=%s\n"), bCommandUnicast ? TEXT("true") : TEXT("false"));
 	S += FString::Printf(TEXT("port=%d\n"), Port);
+	S += TEXT("\n# Where discovery goes before a device answers. Empty = work it out\n");
+	S += TEXT("# (one subnet-directed address per adapter + 255.255.255.255).\n");
+	S += TEXT("# Set this by hand if nothing is found: 255.255.255.255 alone only\n");
+	S += TEXT("# leaves through the adapter with the lowest metric, which on a PC\n");
+	S += TEXT("# running Hyper-V / WSL2 / Docker is often a virtual switch with no\n");
+	S += TEXT("# device behind it. Automatic detection assumes /24, so a /16 or /25\n");
+	S += TEXT("# network needs the real address here (e.g. 192.168.255.255).\n");
+	S += FString::Printf(TEXT("broadcastAddress=%s\n"), *BroadcastAddress);
 	S += TEXT("\n# Logical event -> kit event id. Defining ANY event here replaces the\n");
 	S += TEXT("# whole default map, so list every event you want.\n");
 

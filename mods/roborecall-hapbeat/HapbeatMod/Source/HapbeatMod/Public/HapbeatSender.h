@@ -85,8 +85,28 @@ private:
 	///    never stops.
 	EHapbeatSendRoute SendCommand(const hapbeat::Bytes& Packet, const std::string& ResolvedTarget);
 
-	/// Broadcast a raw packet (PING / CONNECT_STATUS / command fallback).
+	/// Broadcast a raw packet (command fallback). Goes to the subnet a device
+	/// answered on once one has, and to 255.255.255.255 until then.
 	void SendBroadcast(const hapbeat::Bytes& Packet);
+
+	/// Send a discovery packet (PING / CONNECT_STATUS) to every candidate subnet
+	/// until a device answers, then to that one only.
+	///
+	/// Both are idempotent, so a device sitting on two of the probed subnets just
+	/// receives them twice. Playback deliberately does NOT fan out: firmware
+	/// older than v0.3.0 has no seq de-duplication and would fire twice.
+	void SendDiscovery(const hapbeat::Bytes& Packet);
+
+	/// Build BroadcastTargets from the config, or from the local adapters when
+	/// the config leaves it empty. Called once per Open.
+	void RebuildBroadcastTargets();
+
+	/// Pin broadcasts to the subnet a device replied from. First reply wins.
+	void LockRouteFor(const FString& DeviceIp);
+
+	/// "192.168.0.67" -> "192.168.0.255". False for loopback, link-local and
+	/// anything that is not four dotted decimals.
+	static bool MakeSubnetBroadcast(const FString& Ip, FString& OutBroadcast);
 
 	bool SendTo(const hapbeat::Bytes& Packet, const FString& IpString);
 
@@ -107,6 +127,14 @@ private:
 	/// Device IP -> the address string it reported. Absent = unknown = fail open.
 	TMap<FString, FString> DeviceAddresses;
 	mutable FCriticalSection DeviceLock;
+
+	/// Candidate discovery destinations, built once per Open. Read-only after
+	/// that, so no lock is needed to send from it.
+	TArray<FString> BroadcastTargets;
+
+	/// The subnet a device answered on, or empty until one does. Written on the
+	/// receiver thread, read on the game thread — guarded by DeviceLock.
+	FString LockedBroadcastTarget;
 
 	/// Logical event -> FPlatformTime::Seconds() of its last accepted fire.
 	TMap<FString, double> LastFireTimes;

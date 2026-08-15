@@ -95,6 +95,9 @@ bool FHapbeatSender::Open(const FHapbeatModConfig& InConfig)
 	}
 	LastFireTimes.Empty();
 
+	// Work out where discovery goes before the first PING leaves below.
+	RebuildBroadcastTargets();
+
 	// The receiver polls with a 100 ms wait and simply continues when a RecvFrom
 	// fails, so ICMP "port unreachable" feedback from a powered-off device (which
 	// on Windows surfaces as an error on the NEXT receive) cannot kill the thread.
@@ -318,7 +321,7 @@ void FHapbeatSender::SendPing()
 {
 	const hapbeat::Bytes Packet = hapbeat::BuildPacket(hapbeat::kCmdPing, NextSeq(),
 		hapbeat::BuildPingPayload(NowMicros()));
-	SendBroadcast(Packet); // always broadcast: this is what discovers devices
+	SendDiscovery(Packet); // fans out until a device answers
 }
 
 void FHapbeatSender::SendConnectStatus(bool bConnected)
@@ -330,7 +333,7 @@ void FHapbeatSender::SendConnectStatus(bool bConnected)
 	const hapbeat::Bytes Packet = hapbeat::BuildPacket(hapbeat::kCmdConnectStatus, NextSeq(),
 		hapbeat::BuildConnectStatusPayload(bConnected, GroupByte,
 			ToStd(Config.AppName), ToStd(FString(FPlatformProcess::ComputerName()))));
-	SendBroadcast(Packet); // presence, not an addressed playback command
+	SendDiscovery(Packet); // presence, not an addressed playback command
 }
 
 EHapbeatSendRoute FHapbeatSender::SendCommand(const hapbeat::Bytes& Packet, const std::string& ResolvedTarget)
@@ -394,9 +397,148 @@ EHapbeatSendRoute FHapbeatSender::SendCommand(const hapbeat::Bytes& Packet, cons
 	return EHapbeatSendRoute::Unicast;
 }
 
+bool FHapbeatSender::MakeSubnetBroadcast(const FString& Ip, FString& OutBroadcast)
+{
+	TArray<FString> Parts;
+	Ip.ParseIntoArray(Parts, TEXT("."), true);
+	if (Parts.Num() != 4)
+	{
+		return false; // IPv6 or malformed
+	}
+
+	if (Parts[0] == TEXT("127"))
+	{
+		return false; // loopback
+	}
+	if (Parts[0] == TEXT("169") && Parts[1] == TEXT("254"))
+	{
+		return false; // link-local: no device is reachable there
+	}
+
+	// /24 assumption. See FHapbeatModConfig::BroadcastAddress for why this is
+	// good enough by default and how to override it.
+	OutBroadcast = Parts[0] + TEXT(".") + Parts[1] + TEXT(".") + Parts[2] + TEXT(".255");
+	return true;
+}
+
+void FHapbeatSender::RebuildBroadcastTargets()
+{
+	BroadcastTargets.Reset();
+	{
+		FScopeLock Lock(&DeviceLock);
+		LockedBroadcastTarget.Empty();
+	}
+
+	// An explicit address wins: it is the escape hatch for the networks the /24
+	// guess below gets wrong.
+	if (!Config.BroadcastAddress.IsEmpty())
+	{
+		BroadcastTargets.Add(Config.BroadcastAddress);
+	}
+	else
+	{
+		// VERIFY-4.16: GetLocalAdapterAddresses exists across UE4, but confirm the
+		// signature against the Mod Kit's engine before relying on the automatic
+		// path. If it does not compile, deleting this else-branch leaves the
+		// limited broadcast below plus the config override — the mod still works.
+		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+		if (SocketSubsystem != nullptr)
+		{
+			TArray<TSharedPtr<FInternetAddr>> Adapters;
+			if (SocketSubsystem->GetLocalAdapterAddresses(Adapters))
+			{
+				for (int32 i = 0; i < Adapters.Num(); ++i)
+				{
+					if (!Adapters[i].IsValid())
+					{
+						continue;
+					}
+
+					FString Subnet;
+					// ToString(false) = address only, no port.
+					if (MakeSubnetBroadcast(Adapters[i]->ToString(false), Subnet))
+					{
+						BroadcastTargets.AddUnique(Subnet); // two adapters can share a subnet
+					}
+				}
+			}
+		}
+	}
+
+	// Always keep the original destination as a catch-all: SoftAP setups and
+	// hosts where adapter enumeration fails still reach devices this way, and on
+	// a single-adapter PC it costs one extra datagram per keep-alive tick.
+	BroadcastTargets.AddUnique(TEXT("255.255.255.255"));
+
+	FString Joined;
+	for (int32 i = 0; i < BroadcastTargets.Num(); ++i)
+	{
+		Joined += (i == 0) ? BroadcastTargets[i] : TEXT(", ") + BroadcastTargets[i];
+	}
+	UE_LOG(LogHapbeatMod, Log, TEXT("Looking for devices on: %s"), *Joined);
+}
+
+void FHapbeatSender::LockRouteFor(const FString& DeviceIp)
+{
+	FString Subnet;
+	if (!MakeSubnetBroadcast(DeviceIp, Subnet))
+	{
+		return;
+	}
+
+	// Caller already holds DeviceLock (see the PONG handler).
+	if (!LockedBroadcastTarget.IsEmpty())
+	{
+		return; // first reply wins
+	}
+
+	LockedBroadcastTarget = Subnet;
+	UE_LOG(LogHapbeatMod, Log, TEXT("Broadcasting to %s (a device answered from %s)."),
+		*Subnet, *DeviceIp);
+}
+
 void FHapbeatSender::SendBroadcast(const hapbeat::Bytes& Packet)
 {
-	SendTo(Packet, TEXT("255.255.255.255"));
+	FString Destination;
+	{
+		FScopeLock Lock(&DeviceLock);
+		Destination = LockedBroadcastTarget;
+	}
+
+	if (Destination.IsEmpty())
+	{
+		Destination = TEXT("255.255.255.255");
+	}
+	SendTo(Packet, Destination);
+}
+
+void FHapbeatSender::SendDiscovery(const hapbeat::Bytes& Packet)
+{
+	FString Locked;
+	{
+		FScopeLock Lock(&DeviceLock);
+		Locked = LockedBroadcastTarget;
+	}
+
+	// Already pinned — no reason to keep probing the others.
+	if (!Locked.IsEmpty())
+	{
+		SendTo(Packet, Locked);
+		return;
+	}
+
+	if (BroadcastTargets.Num() == 0)
+	{
+		SendTo(Packet, TEXT("255.255.255.255"));
+		return;
+	}
+
+	for (int32 i = 0; i < BroadcastTargets.Num(); ++i)
+	{
+		// One unreachable subnet must not stop the others: probing several is
+		// the entire point.
+		SendTo(Packet, BroadcastTargets[i]);
+	}
 }
 
 bool FHapbeatSender::SendTo(const hapbeat::Bytes& Packet, const FString& IpString)
@@ -466,4 +608,8 @@ void FHapbeatSender::HandleReceived(const FArrayReaderPtr& Reader, const FIPv4En
 	{
 		DeviceAddresses.Add(SenderIp, ToFString(Pong.Address));
 	}
+
+	// Pin broadcasts to the subnet this reply came from, so they stop relying on
+	// a limited broadcast that may leave through the wrong adapter.
+	LockRouteFor(SenderIp);
 }
