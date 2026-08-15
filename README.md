@@ -18,36 +18,16 @@ Hapbeat を体験するためのデモを配布するリポジトリ。**ビル�
 
 Hapbeat と Quest を**同じ Wi-Fi** に接続してから起動する。
 
-## 2. 既存 VR ゲーム向け mod（`mods/`）
+## 2. 既存ゲーム向け mod / 触覚 Kit
 
-市販の VR ゲームに、ゲーム内イベント（発砲・被弾・敵撃破など）で Hapbeat へ UDP コマンドを送る
-mod を後付けする。**ゲーム本体は各自で用意する必要がある**（このリポジトリにゲームのデータや
-コードは一切含まれない）。いずれも PC VR 向け。
-
-| mod | 対象ゲーム | 方式 | 触覚が返るイベント |
-|---|---|---|---|
-| [`mods/pistolwhip-hapbeat`](mods/pistolwhip-hapbeat) | Pistol Whip (Steam) | MelonLoader | 発砲・近接・リロード・被弾・低体力・死亡・**BGM の拍** |
-| [`mods/roborecall-hapbeat`](mods/roborecall-hapbeat) | Robo Recall (Rift PC 版) | 公式 Mod Kit の UE プラグイン | 発砲・敵撃破・被弾（Blueprint から呼び出す） |
-| [`mods/bladesorcery-hapbeat`](mods/bladesorcery-hapbeat) | Blade & Sorcery (PCVR) | 公式 BasSDK の Scripted Mod | 敵ヒット・敵撃破・パリィ・被弾・低体力・囲まれ |
-
-導入手順・ビルド方法・実機確認チェックリストは、各 mod の README を参照。
-
-送信処理は [`mods/shared`](mods/shared) の共通コアに集約してある（プロトコル実装・宛先解決・
-keep-alive・設定ファイル）。mod 側は論理イベント名を投げるだけで、event ID と強度は
-`hapbeat_settings.json` で差し替えられる。
-
-## 3. 触覚 Kit（`kits/`）
-
-| Kit | 内容 |
-|---|---|
-| [`kits/vr-shooter-kit`](kits/vr-shooter-kit) | 上記 3 mod が共通で使うクリップ 9 本（発砲・被弾・鼓動・拍など）と manifest |
-
-Kit は [Hapbeat Studio](https://studio.hapbeat.com/) からデバイスへ deploy する。手順は Kit の README を参照。
+既存の市販ゲームに mod で触覚を後付けするツール群は、
+[hapbeat-modkit](https://github.com/hapbeat/hapbeat-modkit) に移動した。
+Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
+触覚 Kit (vr-shooter-kit) はそちらを参照。
 
 ## ライセンス
 
-このリポジトリに含まれる Hapbeat 製のソースコード（`mods/` の各 mod と共通コア、`kits/` の
-生成スクリプト）は **MIT ライセンス**（[LICENSE](LICENSE)）で提供する。
+このリポジトリに含まれる Hapbeat 製のソースコードは **MIT ライセンス**（[LICENSE](LICENSE)）。
 
 ただし **Releases で配布するビルド済みデモアプリは対象外** で、それらに同梱される
 サードパーティアセットは各々のライセンスに従う。デモごとの著作権表示は以下のとおり。
@@ -58,13 +38,6 @@ Unity 製の **XR Interaction Toolkit** のサンプルアセットを含む。
 
 - XR Interaction Toolkit copyright © Unity Technologies
 - ライセンス: [Unity Companion License](http://www.unity3d.com/legal/licenses/Unity_Companion_License)
-
-### VR ゲーム向け mod
-
-このリポジトリに含まれるのは Hapbeat 側の送信コードのみで、対象ゲームのコード・アセット・
-逆コンパイル結果は一切含まない。mod の利用はゲーム本体の EULA に従うこと（非公式 mod の
-導入を制限しているタイトルもある）。Blade & Sorcery 向けの mod は、Warpfrog の BasSDK
-ライセンスにより**無償配布に限る**。
 
 ## 関連
 
