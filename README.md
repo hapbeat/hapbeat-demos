@@ -1,32 +1,44 @@
 # hapbeat-demos
 
-Hapbeat のビルド済みデモアプリを配布するリポジトリ。開発環境を用意せずに触覚フィードバックを体験するためのものです。
+Hapbeat を体験するためのデモを配布するリポジトリ。**ビルド済みデモアプリ**と、**既存の VR ゲームに触覚を後付けする mod** の 2 系統を収録する。
 
-**すべてのデモに Hapbeat 実機が必要です。** デバイスが無いと何も起きません。
+**すべてのデモに Hapbeat 実機が必要。** デバイスが無いと何も起きない。
 
-## ダウンロード
+## 1. ビルド済みデモアプリ
 
-最新のビルドは [Releases](https://github.com/hapbeat/hapbeat-demos/releases/latest) から取得できます。
+最新のビルドは [Releases](https://github.com/hapbeat/hapbeat-demos/releases/latest) から取得できる。
 
 | ファイル | 内容 | 対象 |
 |---|---|---|
 | `hapbeat-handdemo_all.apk` | XR Interaction Toolkit の Hands Interaction Demo に Hapbeat の触覚を追加したもの。掴む・押す・スナップ・こするの各操作に haptics が返る | Meta Quest（ハンドトラッキング対応機） |
 
-## インストール方法
-
-adb / SideQuest / ストアのリリースチャンネルの 3 通りの手順を、ドキュメントポータルで説明しています。
+インストール手順（adb / SideQuest / ストアのリリースチャンネル）はドキュメントポータルで説明している。
 
 → **[XRI デモを APK で試す](https://devtools.hapbeat.com/docs/sdk-integration/unity-sdk/xri-handdemo-apk/)**
 
-Hapbeat と Quest を**同じ Wi-Fi** に接続してから起動してください。
+Hapbeat と Quest を**同じ Wi-Fi** に接続してから起動する。
+
+## 2. 既存ゲーム向け mod / 触覚 Kit
+
+既存の市販ゲームに mod で触覚を後付けするツール群は、
+[hapbeat-modkit](https://github.com/hapbeat/hapbeat-modkit) に移動した。
+Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
+触覚 Kit (vr-shooter-kit) はそちらを参照。
+
+## 3. Unity デモのソーススナップショット
+
+- [GloveBall](unity/gloveball/README.md) — Meta の Ultimate Glove Ball アリーナ資産を使った、Quest 向け 1 人プレイデモ
 
 ## ライセンス
 
-各デモに含まれるサードパーティアセットの著作権表示は、デモごとに以下に記載します。
+このリポジトリに含まれる Hapbeat 製のソースコードは **MIT ライセンス**（[LICENSE](LICENSE)）。
+
+ただし **Releases で配布するビルド済みデモアプリは対象外** で、それらに同梱される
+サードパーティアセットは各々のライセンスに従う。デモごとの著作権表示は以下のとおり。
 
 ### hapbeat-handdemo
 
-Unity 製の **XR Interaction Toolkit** のサンプルアセットを含みます。
+Unity 製の **XR Interaction Toolkit** のサンプルアセットを含む。
 
 - XR Interaction Toolkit copyright © Unity Technologies
 - ライセンス: [Unity Companion License](http://www.unity3d.com/legal/licenses/Unity_Companion_License)

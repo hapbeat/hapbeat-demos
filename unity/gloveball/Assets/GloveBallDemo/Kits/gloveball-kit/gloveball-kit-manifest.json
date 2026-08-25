@@ -1,0 +1,138 @@
+{
+  "schema_version": "2.0.0",
+  "version": "1.0.0",
+  "name": "gloveball-kit",
+  "description": "Glove Ball solo demo. Clips borrowed from the SDK showcase kit; levels are set by the EventMap gains, so every intensity here is 1.0.",
+  "author": "",
+  "events": {},
+  "stream_events": {
+    "gloveball-kit.l_grab": {
+      "clip": "grab.wav",
+      "description": "Left Grab",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.r_grab": {
+      "clip": "grab.wav",
+      "description": "Right Grab",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.l_release": {
+      "clip": "release.wav",
+      "description": "Left Release",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.r_release": {
+      "clip": "release.wav",
+      "description": "Right Release",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.l_arm_collide": {
+      "clip": "arm_collide.wav",
+      "description": "Left Arm Collide",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.r_arm_collide": {
+      "clip": "arm_collide.wav",
+      "description": "Right Arm Collide",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.body_collide": {
+      "clip": "body_collide.wav",
+      "description": "Body Collide",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.l_charge_loop": {
+      "clip": "charge_loop.wav",
+      "description": "Left Charge Loop",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": true
+      }
+    },
+    "gloveball-kit.r_charge_loop": {
+      "clip": "charge_loop.wav",
+      "description": "Right Charge Loop",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": true
+      }
+    },
+    "gloveball-kit.target_hit": {
+      "clip": "target_hit.wav",
+      "description": "Target Hit",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.launcher_hit": {
+      "clip": "launcher_hit.wav",
+      "description": "Launcher Hit",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.launcher_stunned": {
+      "clip": "launcher_stunned.wav",
+      "description": "Launcher Stunned",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.incoming_warn": {
+      "clip": "incoming_warn.wav",
+      "description": "Incoming Warning",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.wave_start": {
+      "clip": "wave_start.wav",
+      "description": "Wave Start",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.wave_clear": {
+      "clip": "wave_clear.wav",
+      "description": "Wave Clear",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    },
+    "gloveball-kit.game_over": {
+      "clip": "game_over.wav",
+      "description": "Game Over",
+      "parameters": {
+        "intensity": 1.0,
+        "loop": false
+      }
+    }
+  }
+}
