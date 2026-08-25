@@ -25,6 +25,10 @@ Hapbeat と Quest を**同じ Wi-Fi** に接続してから起動する。
 Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 触覚 Kit (vr-shooter-kit) はそちらを参照。
 
+## 3. Unity デモのソーススナップショット
+
+- [GloveBall](unity/gloveball/README.md) — Meta の Ultimate Glove Ball アリーナ資産を使った、Quest 向け 1 人プレイデモ
+
 ## ライセンス
 
 このリポジトリに含まれる Hapbeat 製のソースコードは **MIT ライセンス**（[LICENSE](LICENSE)）。

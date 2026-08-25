@@ -28,6 +28,37 @@ DerivedDataCache/
 *.opendb
 *.sdf
 
+# Unity generated (unity/* projects)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+.utmp/
+ExportedObj/
+*.csproj
+*.unityproj
+*.tmp
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.apk
+*.aab
+*.unitypackage
+*.app
+sysinfo.txt
+crashlog.txt
+*_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+unity/*/tools/logs/
+unity/*/Assets/Resources/PerformanceTestRunInfo.json
+unity/*/Assets/Resources/PerformanceTestRunSettings.json
+
 # IDE / OS
 .vs/
 .vscode/

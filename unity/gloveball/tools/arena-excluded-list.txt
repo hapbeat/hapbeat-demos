@@ -1,0 +1,130 @@
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Common/Prefabs/LipSyncInput.prefab	banned path fragment 'Assets/Samples/'
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scenes/AvatarRetargeting/Animations/jump_anim.fbx	banned path fragment 'Assets/Samples/'
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scenes/LegsNetworkLoopback/DefaultAnimations/Humanoid Avatar Rig.fbx	banned path fragment 'Assets/Samples/'
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scenes/LegsNetworkLoopback/HumanoidAnimations/CustomAnimationControllerWithDefaultTransition.controller	banned path fragment 'Assets/Samples/'
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scenes/LegsNetworkLoopback/Resources/Humanoid Avatar Rig Variant.prefab	banned path fragment 'Assets/Samples/'
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scripts/LegsBehavior/OvrAvatarAnimationBehavior.cs	banned extension .cs
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scripts/LegsBehavior/OvrAvatarDefaultStateListener.cs	banned extension .cs
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scripts/LegsBehavior/OvrAvatarRigRootIdentifier.cs	banned extension .cs
+Assets/Samples/Meta Avatars SDK/33.0.0/Sample Scenes/Scripts/LipSyncMicInput.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/BallNetworking.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/BallSpawner.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/BallSpinVisual.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/BallStateSync.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/ElectricBall.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/GhostBall.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/HomingBall.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/SpawnPoint.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Balls/TripleBall.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Crowd/CrowdController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Crowd/CrowdNPC.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Environment/BannerScrolling.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Environment/Floor.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Environment/Obstacle.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Environment/ObstacleManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Environment/ScoreBoard.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/CountdownView.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/GameManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/GameMusicManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/GameState.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/NetworkedScore.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/NetworkedTeam.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Gameplay/TeamColoringNetComponent.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/CatAI.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/CatOwner.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Glove.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/GloveArmatureNetworking.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/GloveNetworking.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/GloveSpringController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/DebugInfoMenu.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/InGameSettingsMenu.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/PlayerInGameMenu.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/PlayerInfoItem.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/PlayersMenu.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Menu/TabButton.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerAvatarAnimationBehavior.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerAvatarEntity.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerControllerNetwork.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerInputController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerNameVisual.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/PlayerStateNetwork.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Respawning/RespawnController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/Shield.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Player/ShieldIndicator.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Services/ArenaPlayerSpawningManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Services/ArenaServerHandler.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Services/ArenaSessionManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Services/SpawnPointReservingService.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Services/TeamColorProfiles.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Spectator/FireworkLauncherItem.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Spectator/Projectile.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Spectator/SpectatorFireworkController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Spectator/SpectatorItem.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/Spectator/SpectatorNetwork.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/VFX/Electric.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/VFX/FireworkController.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/VFX/RespawnVFX.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/VFX/ScreenFXManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Arena/VFX/VFXManager.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Design/BallAudio.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Design/BallData.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Design/BallSpawningData.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Input/CustomPointableCanvasModule.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/MainMenu/MainMenuButton.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Networking/Pooling/NetworkObjectPool.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Utils/AudioFadeInOut.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Utils/FacePlayerOnZUI.cs	banned extension .cs
+Assets/UltimateGloveBall/Scripts/Utils/LightingSetup.cs	banned extension .cs
+Packages/com.meta.multiplayer.netcode-photon/Avatar/AvatarNetworking.cs	outside Assets/ (package asset)
+Packages/com.meta.multiplayer.netcode-photon/Core/ClientNetworkTransform.cs	outside Assets/ (package asset)
+Packages/com.meta.multiplayer.netcode-photon/Core/VoipHandler.cs	outside Assets/ (package asset)
+Packages/com.meta.utilities/CameraFacing.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.audio/Runtime/scripts/MetaXRAudioRoomAcousticProperties.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.audio/Runtime/scripts/MetaXRAudioSource.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.audio/Runtime/scripts/MetaXRAudioSourceExperimentalFeatures.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/CustomHandPoses/OvrAvatarCustomHandPose.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/CustomHandPoses/OvrAvatarHandJointType.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/LOD/AvatarLOD.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/OvrAvatarEyeTrackingBehaviorOvrPlugin.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/OvrAvatarFaceTrackingBehaviorOvrPlugin.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.avatars/Scripts/OvrAvatarLipSyncContext.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.interaction/Runtime/Scripts/Interaction/Models/Ray/RayInteractable.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.interaction/Runtime/Scripts/Interaction/Surfaces/ColliderSurface.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.interaction/Runtime/Scripts/Unity/PointableCanvas.cs	outside Assets/ (package asset)
+Packages/com.meta.xr.sdk.interaction/Runtime/Textures/Reticle-Dot.png	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Actions/InputActionAsset.cs	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Actions/InputActionReference.cs	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Editor/AssetImporter/InputActionImporter.cs	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Editor/Icons/InputAction.png	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Editor/Icons/InputSystemUIInputModule@64.png	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Plugins/PlayerInput/DefaultInputActions.inputactions	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Plugins/PlayerInput/PlayerInput.cs	outside Assets/ (package asset)
+Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs	outside Assets/ (package asset)
+Packages/com.unity.netcode.gameobjects/Components/NetworkRigidbody.cs	outside Assets/ (package asset)
+Packages/com.unity.netcode.gameobjects/Runtime/Core/NetworkObject.cs	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Editor/AssetVersion.cs	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Editor/ShaderGraph/UniversalMetadata.cs	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Runtime/Materials/Lit.mat	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Runtime/UniversalAdditionalCameraData.cs	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Runtime/UniversalAdditionalLightData.cs	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Shaders/Lit.shader	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Shaders/Particles/ParticlesUnlit.shader	outside Assets/ (package asset)
+Packages/com.unity.render-pipelines.universal/Shaders/Unlit.shader	outside Assets/ (package asset)
+Packages/com.unity.shadergraph/Editor/Importers/ShaderGraphImporter.cs	outside Assets/ (package asset)
+Packages/com.unity.shadergraph/Editor/Importers/ShaderGraphMetadata.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Editor Resources/Gizmos/TMP - Font Asset Icon.psd	outside Assets/ (package asset)
+Packages/com.unity.ugui/Editor Resources/Gizmos/TMP - Text Component Icon.psd	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/TMP/TMP_FontAsset.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/TMP/TextMeshProUGUI.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/EventSystem/EventSystem.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Button.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/GraphicRaycaster.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Image.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/CanvasScaler.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/ContentSizeFitter.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/VerticalLayoutGroup.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Mask.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/ScrollRect.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Scrollbar.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Slider.cs	outside Assets/ (package asset)
+Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Toggle.cs	outside Assets/ (package asset)

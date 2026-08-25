@@ -1,0 +1,241 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf9c34b08ac7b8c4f954b03abe0affb3, type: 3}
+  m_Name: GloveBallEventMap
+  m_EditorClassIdentifier: 
+  entries:
+  - _id: fb588d1a32c942dcac63adae39f4d0e9
+    mode: 1
+    displayName: Left Grab
+    category: gloveball-kit
+    eventName: l_grab
+    streamClip: {fileID: 8300000, guid: a33071c8d4215a34bb16d15b46eb849b, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Left hand grip confirmation.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: a6ba69fa455f4097b85447b7de1d238f
+    mode: 1
+    displayName: Left Release
+    category: gloveball-kit
+    eventName: l_release
+    streamClip: {fileID: 8300000, guid: b5c631a9d5854464185cda24d6bce1ab, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.5
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Left hand release.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: dcb567c7e89d4888944cd21b07ca4648
+    mode: 1
+    displayName: Left Arm Collide
+    category: gloveball-kit
+    eventName: l_arm_collide
+    streamClip: {fileID: 8300000, guid: c2b5c595d2b1d7545b3ff1d374116884, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Incoming ball reflected by left arm.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 8e55ee0b8f6c4015b4d3b85f6cdcc932
+    mode: 1
+    displayName: Left Charge Loop
+    category: gloveball-kit
+    eventName: l_charge_loop
+    streamClip: {fileID: 8300000, guid: a499f73e50cd0964d9e887bfc5fd2e66, type: 3}
+    loop: 1
+    bindings: []
+    gain: 0.4
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Left trigger charge loop.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 4dd09edaf221458b9a9c4bb3fb5db274
+    mode: 1
+    displayName: Right Grab
+    category: gloveball-kit
+    eventName: r_grab
+    streamClip: {fileID: 8300000, guid: a33071c8d4215a34bb16d15b46eb849b, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Right hand grip confirmation.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 4ea380911af94ef89e852eeff1d4b628
+    mode: 1
+    displayName: Right Release
+    category: gloveball-kit
+    eventName: r_release
+    streamClip: {fileID: 8300000, guid: b5c631a9d5854464185cda24d6bce1ab, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.5
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Right hand release.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: b41791e7805c40fb8aeeb3ffe7c16e21
+    mode: 1
+    displayName: Right Arm Collide
+    category: gloveball-kit
+    eventName: r_arm_collide
+    streamClip: {fileID: 8300000, guid: c2b5c595d2b1d7545b3ff1d374116884, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Incoming ball reflected by right arm.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 68d56c931f7c4dd8bcc1a47a0acaf11a
+    mode: 1
+    displayName: Right Charge Loop
+    category: gloveball-kit
+    eventName: r_charge_loop
+    streamClip: {fileID: 8300000, guid: a499f73e50cd0964d9e887bfc5fd2e66, type: 3}
+    loop: 1
+    bindings: []
+    gain: 0.4
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Right trigger charge loop.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 1652ecf4cda44eb29f71de5e97cddc92
+    mode: 1
+    displayName: Body Collide
+    category: gloveball-kit
+    eventName: body_collide
+    streamClip: {fileID: 8300000, guid: fbed084fd3098a449a4f8d381b2ed01f, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: 'The hardest hit in the demo: taking a ball to the body resets the combo.'
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 04cf50c775754680afa3022084dc0db7
+    mode: 1
+    displayName: Target Hit
+    category: gloveball-kit
+    eventName: target_hit
+    streamClip: {fileID: 8300000, guid: 2d83358a7df901b4cb744873c4a1d285, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.6
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Bright hit that reads as a score.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 661a158a99c54988bab8dcb228aa56fb
+    mode: 1
+    displayName: Wave Start
+    category: gloveball-kit
+    eventName: wave_start
+    streamClip: {fileID: 8300000, guid: f295ecbefe96bba4d8473f5211d3e620, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.5
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Wave transition jingle.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: fc63da4e9441428ba4ef4f14a860797f
+    mode: 1
+    displayName: Wave Clear
+    category: gloveball-kit
+    eventName: wave_clear
+    streamClip: {fileID: 8300000, guid: 2e35167872a859841a9f5510025541b5, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.5
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Wave transition jingle.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: dee32b8641c5472bbd7d52f5e50e5f20
+    mode: 1
+    displayName: Game Over
+    category: gloveball-kit
+    eventName: game_over
+    streamClip: {fileID: 8300000, guid: bd292eb8d5231a74188d7daa797e79e9, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.5
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: End of run.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 30036e03c51a4cd7aaead86f904882ba
+    mode: 1
+    displayName: Launcher Hit
+    category: gloveball-kit
+    eventName: launcher_hit
+    streamClip: {fileID: 8300000, guid: e60a5b9d2d28d7f48a4baacec5d483bd, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_r_ankle'
+    delayOffsetSeconds: 0
+    notes: 'Heavier than a panel hit: launchers are worth more and take three to
+      stun.'
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 47b75122967744a2bb29f486c1104a92
+    mode: 1
+    displayName: Launcher Stunned
+    category: gloveball-kit
+    eventName: launcher_stunned
+    streamClip: {fileID: 8300000, guid: b5c88e2a4adc0374bb9a2f2615300be1, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.6
+    target: '*/pos_r_ankle'
+    delayOffsetSeconds: 0
+    notes: The reward moment when a launcher goes quiet for five seconds.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 1a58c0546a5f48669a3f5c0688045c81
+    mode: 1
+    displayName: Incoming Warning
+    category: gloveball-kit
+    eventName: incoming_warn
+    streamClip: {fileID: 8300000, guid: e29fbc2e6a330534f9871bc0f141763d, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.3
+    target: '*/pos_r_ankle'
+    delayOffsetSeconds: 0
+    notes: Fires 0.6 s before a shot. Weak on purpose - a cue, not an event.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  revertPlayModeChanges: 0
