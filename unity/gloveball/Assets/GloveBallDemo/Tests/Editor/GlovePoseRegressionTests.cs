@@ -268,7 +268,7 @@ namespace GloveBallDemo.Tests
         }
 
         [Test]
-        public void GeneratedTargetPrefabExposesAModestlyInsetHitVolume()
+        public void GeneratedTargetPrefabUsesTheAuthoredHitVolumePoseAndSize()
         {
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/GloveBallDemo/Prefabs/TargetPanel.prefab");
             var panel = prefab != null ? prefab.GetComponent<TargetPanel>() : null;
@@ -276,10 +276,10 @@ namespace GloveBallDemo.Tests
             var properties = new SerializedObject(panel);
             var collider = properties.FindProperty("_hitVolume").objectReferenceValue as MeshCollider;
             Assert.That(collider, Is.Not.Null);
-            Assert.That(properties.FindProperty("_hitVolumeOffset").vector3Value, Is.EqualTo(new Vector3(0f, 0f, .02f)));
-            Assert.That(properties.FindProperty("_hitVolumeScale").vector3Value, Is.EqualTo(new Vector3(1.2f, .2f, 1.2f)));
-            Assert.That(collider.transform.localScale.x * .5f, Is.LessThan(.68f),
-                "hit radius stays modestly inside the visible CyanRing radius");
+            Assert.That(properties.FindProperty("_hitVolumeOffset").vector3Value, Is.EqualTo(Vector3.zero));
+            Assert.That(properties.FindProperty("_hitVolumeScale").vector3Value, Is.EqualTo(new Vector3(.7f, .1f, .7f)));
+            Assert.That(collider.transform.localPosition, Is.EqualTo(Vector3.zero));
+            Assert.That(collider.transform.localScale, Is.EqualTo(new Vector3(.7f, .1f, .7f)));
         }
 
         [TestCase("LeftHand")]

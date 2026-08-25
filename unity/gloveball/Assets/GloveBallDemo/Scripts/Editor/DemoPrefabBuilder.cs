@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using GloveBallDemo.Runtime;
 using UnityEditor;
@@ -59,11 +60,149 @@ namespace GloveBallDemo.Editor
             var model = InstantiateModel(DemoAssetPaths.BallModel, root.transform, "Model");
             if (model != null)
             {
+                NormalizeBallModelForQuest(model);
                 ScaleToDiameter(model, BallDiameter);
                 StripColliders(model);
             }
 
             SavePrefab(root, DemoAssetPaths.BallPrefab);
+        }
+
+        /// <summary>
+        /// Upgrades only the existing Ball prefab so its imported model cannot be culled by an
+        /// LODGroup on Android quality tiers. This deliberately does not rebuild scenes or any
+        /// other prefab.
+        /// </summary>
+        [MenuItem("GloveBall Demo/Upgrade Ball Prefab for Quest")]
+        public static void UpgradeBallPrefabForQuest()
+        {
+            var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(DemoAssetPaths.BallPrefab);
+            if (prefabAsset == null)
+            {
+                throw new System.InvalidOperationException($"Ball prefab not found: {DemoAssetPaths.BallPrefab}");
+            }
+
+            var root = PrefabUtility.LoadPrefabContents(DemoAssetPaths.BallPrefab);
+            try
+            {
+                var model = root.transform.Find("Model");
+                if (model == null)
+                {
+                    throw new System.InvalidOperationException("Ball prefab has no Model child.");
+                }
+
+                NormalizeBallModelForQuest(model.gameObject);
+                var renderers = model.GetComponentsInChildren<Renderer>(true);
+                if (renderers.Length == 0)
+                {
+                    throw new System.InvalidOperationException("Ball model has no renderer after LOD normalization.");
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(root, DemoAssetPaths.BallPrefab, out var success);
+                if (!success)
+                {
+                    throw new System.InvalidOperationException($"Failed to save Ball prefab: {DemoAssetPaths.BallPrefab}");
+                }
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[DemoPrefabs] upgraded {DemoAssetPaths.BallPrefab} for Quest distance rendering");
+        }
+
+        private static void NormalizeBallModelForQuest(GameObject model)
+        {
+            foreach (var lodGroup in model.GetComponentsInChildren<LODGroup>(true))
+            {
+                if (lodGroup == null)
+                {
+                    continue;
+                }
+
+                var lods = lodGroup.GetLODs();
+                if (lods.Length == 0)
+                {
+                    Object.DestroyImmediate(lodGroup);
+                    continue;
+                }
+
+                var retainedRenderers = new HashSet<Renderer>();
+                foreach (var renderer in lods[0].renderers)
+                {
+                    if (renderer == null)
+                    {
+                        continue;
+                    }
+
+                    retainedRenderers.Add(renderer);
+                    renderer.enabled = true;
+                }
+
+                var lowerRenderers = new HashSet<Renderer>();
+                for (var lodIndex = 1; lodIndex < lods.Length; lodIndex++)
+                {
+                    foreach (var renderer in lods[lodIndex].renderers)
+                    {
+                        if (renderer != null && !retainedRenderers.Contains(renderer))
+                        {
+                            lowerRenderers.Add(renderer);
+                        }
+                    }
+                }
+
+                foreach (var renderer in lowerRenderers)
+                {
+                    if (renderer == null)
+                    {
+                        continue;
+                    }
+
+                    var rendererTransform = renderer.transform;
+                    if (ContainsRetainedRenderer(rendererTransform, retainedRenderers))
+                    {
+                        // A lower-LOD renderer can share a GameObject or parent with LOD0.
+                        // Remove only that renderer rather than destroying retained hierarchy.
+                        Object.DestroyImmediate(renderer);
+                        continue;
+                    }
+
+                    var parent = rendererTransform.parent;
+                    Object.DestroyImmediate(renderer.gameObject);
+                    PruneEmptyLodParents(parent, lodGroup.transform);
+                }
+
+                Object.DestroyImmediate(lodGroup);
+            }
+        }
+
+        private static bool ContainsRetainedRenderer(
+            Transform candidate,
+            HashSet<Renderer> retainedRenderers)
+        {
+            foreach (var renderer in retainedRenderers)
+            {
+                if (renderer != null &&
+                    (renderer.transform == candidate || renderer.transform.IsChildOf(candidate)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void PruneEmptyLodParents(Transform candidate, Transform lodGroupRoot)
+        {
+            while (candidate != null && candidate != lodGroupRoot &&
+                   candidate.childCount == 0 && candidate.GetComponents<Component>().Length == 1)
+            {
+                var parent = candidate.parent;
+                Object.DestroyImmediate(candidate.gameObject);
+                candidate = parent;
+            }
         }
 
         // ----------------------------------------------------------------- glove
@@ -238,9 +377,9 @@ namespace GloveBallDemo.Editor
         {
             var existing = AssetDatabase.LoadAssetAtPath<GameObject>(DemoAssetPaths.TargetPanelPrefab);
             var existingCollider = existing != null ? existing.transform.Find("HitCollider") ?? existing.transform.Find("HitTrigger") : null;
-            var colliderPosition = existingCollider != null ? existingCollider.localPosition : new Vector3(0f, 0f, .02f);
+            var colliderPosition = existingCollider != null ? existingCollider.localPosition : Vector3.zero;
             var colliderRotation = existingCollider != null ? existingCollider.localRotation : Quaternion.Euler(90f, 0f, 0f);
-            var colliderScale = existingCollider != null ? existingCollider.localScale : new Vector3(1.2f, 0.2f, 1.2f);
+            var colliderScale = existingCollider != null ? existingCollider.localScale : new Vector3(0.7f, 0.1f, 0.7f);
             var idleColor = new Color(0.15f, 0.45f, 0.75f);
             var hitColor = new Color(1f, 0.85f, 0.25f);
             var flashDuration = 0.2f;
