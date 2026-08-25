@@ -13,9 +13,9 @@ namespace GloveBallDemo.Runtime
         [Tooltip("Pass-through trigger used for thrown-ball hit detection.")]
         [SerializeField] private MeshCollider _hitVolume;
         [Tooltip("Local offset of the hit trigger from the target centre.")]
-        [SerializeField] private Vector3 _hitVolumeOffset = new Vector3(0f, 0f, 0.02f);
+        [SerializeField] private Vector3 _hitVolumeOffset = Vector3.zero;
         [Tooltip("Local scale of the cylinder trigger. X/Z control radius; Y controls depth.")]
-        [SerializeField] private Vector3 _hitVolumeScale = new Vector3(1.2f, 0.2f, 1.2f);
+        [SerializeField] private Vector3 _hitVolumeScale = new Vector3(0.7f, 0.1f, 0.7f);
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorId = Shader.PropertyToID("_Color");

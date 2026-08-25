@@ -60,6 +60,24 @@ namespace GloveBallDemo.Tests
         }
 
         [Test]
+        public void GeneratedBallPrefabKeepsRenderingWithoutDistanceLodCulling()
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/GloveBallDemo/Prefabs/Ball.prefab");
+            Assert.That(prefab, Is.Not.Null);
+            Assert.That(prefab.GetComponentsInChildren<LODGroup>(true), Is.Empty);
+
+            var renderers = prefab.GetComponentsInChildren<Renderer>(true);
+            Assert.That(renderers, Is.Not.Empty);
+            var hasEnabledRenderer = false;
+            foreach (var renderer in renderers)
+            {
+                hasEnabledRenderer |= renderer.enabled;
+            }
+
+            Assert.That(hasEnabledRenderer, Is.True);
+        }
+
+        [Test]
         public void HeldBallDoesNotExpireAtFlightLifetime()
         {
             _ball.LaunchIncoming(Vector3.zero, Vector3.zero);

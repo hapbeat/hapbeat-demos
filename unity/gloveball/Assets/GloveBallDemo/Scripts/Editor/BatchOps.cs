@@ -114,6 +114,13 @@ namespace GloveBallDemo.Editor
                 $"recordedPrevious={EditorPrefs.GetBool(AudioMutePreviousKey, false)}");
         }
 
+        /// <summary>Upgrades only Ball.prefab so its model is never distance-culled.</summary>
+        public static void UpgradeBallPrefabForQuest()
+        {
+            MuteEditorAudio();
+            DemoPrefabBuilder.UpgradeBallPrefabForQuest();
+        }
+
         /// <summary>
         /// Clears the shared mute outright, for recovering from runs made before the restore
         /// existed. Deliberately does not call <see cref="MuteEditorAudio"/>.
