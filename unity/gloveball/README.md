@@ -23,23 +23,15 @@ Unity Package Manager はプロジェクトを開くと `Packages/manifest.json`
    git lfs pull
    ```
 
-2. 開発用 workspace では、`hapbeat-demos` と `hapbeat-unity-sdk` を次の相対配置にする。
-
-   ```text
-   hapbeat-sdk-workspace/
-     repos-sdk/hapbeat-unity-sdk/
-     repos-tools/hapbeat-demos/unity/gloveball/
-   ```
-
-3. 移管直後の `Packages/manifest.json` は、未リリースの Unity 6000.0 互換修正を使うため、SDK を次のローカル checkout で暫定参照する。
+2. `Packages/manifest.json` は、Unity 6000.0 互換修正を含む SDK の固定 Git commit を参照する。
 
    ```json
-   "com.hapbeat.sdk": "file:../../../../../repos-sdk/hapbeat-unity-sdk"
+   "com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#21e56fe3875f942d8230e91bffbaaf5aa963803c"
    ```
 
-4. Unity Hub でこの `unity/gloveball` ディレクトリを Unity 6000.0.59f2 のプロジェクトとして開き、package import と script compilation の完了を待つ。
-5. Project Settings > Player > Other Settings > Active Input Handling が **Input System Package (New)** のみになっていることを確認する。Both と Input Manager (Old) は使用しない。
-6. Android を active build target にし、Project Settings > XR Plug-in Management > Android で OpenXR が有効であることを確認する。Quest Pro 向け eye tracking requirement は有効化しない。
+3. Unity Hub でこの `unity/gloveball` ディレクトリを Unity 6000.0.59f2 のプロジェクトとして開き、package import と script compilation の完了を待つ。
+4. Project Settings > Player > Other Settings > Active Input Handling が **Input System Package (New)** のみになっていることを確認する。Both と Input Manager (Old) は使用しない。
+5. Android を active build target にし、Project Settings > XR Plug-in Management > Android で OpenXR が有効であることを確認する。Quest Pro 向け eye tracking requirement は有効化しない。
 
 ## 安全な検証とビルド
 
@@ -63,17 +55,8 @@ Unity Hub の標準配置以外へインストールした場合は、各コマ�
 ## 別 PC での再現
 
 1. Unity 6000.0.59f2 と同版の Android Build Support 一式を Unity Hub で導入する。
-2. 上記の workspace 配置で両 repository を clone し、`hapbeat-demos` で `git lfs install` と `git lfs pull` を実行する。
-3. Unity を開く前に `Packages/manifest.json` の SDK path が存在することを確認する。
-4. 初回 import 後、compile check、EditMode tests、scene health、APK build の順に実行する。`BuildDemo` は実行しない。
-5. `git status --short` で、意図しない ProjectSettings や生成 asset の差分が残っていないことを確認する。
-
-## 公開前の依存固定
-
-ローカル `file:` 参照は workspace 開発専用で、単独 clone からは再現できない。public push の前に Unity 6000.0 互換修正を含む Hapbeat Unity SDK の immutable Git tag を発行し、`Packages/manifest.json` と `Packages/packages-lock.json` を次の形式へ更新して、clean clone から再検証する。
-
-```json
-"com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#vX.Y.Z"
-```
+2. `hapbeat-demos` だけを clone し、`git lfs install` と `git lfs pull` を実行する。
+3. 初回 import 後、compile check、EditMode tests、scene health、APK build の順に実行する。`BuildDemo` は実行しない。
+4. `git status --short` で、意図しない ProjectSettings や生成 asset の差分が残っていないことを確認する。
 
 第三者アセットのライセンスは [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照する。

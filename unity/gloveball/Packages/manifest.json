@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.hapbeat.sdk": "file:../../../../../repos-sdk/hapbeat-unity-sdk",
+    "com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#21e56fe3875f942d8230e91bffbaaf5aa963803c",
     "com.unity.ai.navigation": "2.0.9",
     "com.unity.collections": "2.5.1",
     "com.unity.inputsystem": "1.14.2",

@@ -1,9 +1,10 @@
-# Why `com.hapbeat.sdk` is a local path, not a git URL
+# Why `com.hapbeat.sdk` is pinned to a Git commit
 
-`manifest.json` pulls the Hapbeat Unity SDK from the workspace checkout:
+`manifest.json` pins the Hapbeat Unity SDK to the exact commit that contains the
+Unity 6000.0 compatibility fix:
 
 ```json
-"com.hapbeat.sdk": "file:../../../../../repos-sdk/hapbeat-unity-sdk"
+"com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#21e56fe3875f942d8230e91bffbaaf5aa963803c"
 ```
 
 The published `v0.4.0` tag cannot be used here. Its editor assembly calls
@@ -20,8 +21,6 @@ Editor\HapbeatEventMapPlaySnapshot.cs(88,41): error CS0117:
 `Hapbeat.Editor` failing takes the whole project's compilation with it, so referencing
 only the SDK runtime is not a workaround either.
 
-The fix (a version-guarded `HapbeatEditorCompat.IdToObject` helper) is committed in the
-workspace checkout but is not in any release yet. **Switch back to
-`https://github.com/hapbeat/hapbeat-unity-sdk.git#<tag>` as soon as a released tag
-contains it** — a git URL is the reproducible reference for anyone cloning this repo
-without the SDK workspace beside it.
+The fixed commit uses the version-guarded `HapbeatEditorCompat.IdToObject` helper.
+Pinning its immutable commit ID lets a standalone clone restore the package without a
+neighbouring SDK checkout while keeping the Unity version compatibility reproducible.
