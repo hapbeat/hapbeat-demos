@@ -14,6 +14,8 @@ Meta の Ultimate Glove Ball アリーナ資産を使った、Meta Quest 向け�
 
 Unity Package Manager はプロジェクトを開くと `Packages/manifest.json` から Universal Render Pipeline、Input System、XR Interaction Toolkit、XR Plug-in Management、OpenXR などを復元する。Meta XR SDK は使用しない。
 
+GloveBall は `Resources/HapbeatDemoSwitchSettings.asset` が存在するため、前面時だけ UDP 7710 の Demo Switch receiver を起動する。current demo ID は `gloveball`、target allowlist は初期状態で空。Inspector で logical demo ID、Android package/activity、shared secret を設定する。shared secret が空の初期 asset は isolated-LAN unsigned mode で警告を出すため、運用前に全 APK と M5 controller へ同じ secret をローカル設定し、その値を commit しない。
+
 ## 初回セットアップ
 
 1. リポジトリを clone し、LFS を有効化して大容量アセットを取得する。

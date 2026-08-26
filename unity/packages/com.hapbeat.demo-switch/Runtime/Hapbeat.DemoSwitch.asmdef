@@ -1,0 +1,9 @@
+{
+  "name": "Hapbeat.DemoSwitch",
+  "rootNamespace": "Hapbeat.DemoSwitch",
+  "references": [
+    "Unity.Newtonsoft.Json"
+  ],
+  "autoReferenced": true,
+  "noEngineReferences": false
+}

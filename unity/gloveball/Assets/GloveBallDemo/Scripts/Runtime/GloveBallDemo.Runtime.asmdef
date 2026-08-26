@@ -4,7 +4,8 @@
     "references": [
         "GloveBallDemo.Core",
         "Unity.InputSystem",
-        "Hapbeat.Runtime"
+        "Hapbeat.Runtime",
+        "Hapbeat.DemoSwitch"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

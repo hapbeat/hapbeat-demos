@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.hapbeat.demo-switch": "file:../../packages/com.hapbeat.demo-switch",
     "com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#21e56fe3875f942d8230e91bffbaaf5aa963803c",
     "com.unity.ai.navigation": "2.0.9",
     "com.unity.collections": "2.5.1",
@@ -43,5 +44,8 @@
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0",
     "com.unity.pipeline": "0.5.0-exp.1"
-  }
+  },
+  "testables": [
+    "com.hapbeat.demo-switch"
+  ]
 }
