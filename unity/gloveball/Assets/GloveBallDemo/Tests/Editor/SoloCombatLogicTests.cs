@@ -140,6 +140,114 @@ namespace GloveBallDemo.Tests
         }
 
         [Test]
+        public void QuestMenu_OpenPausesAndCloseRestoresPreviousTimeScaleAcrossDuplicateCalls()
+        {
+            var menuObject = new GameObject("Menu");
+            menuObject.SetActive(false);
+            var menu = menuObject.AddComponent<QuestMenuController>();
+            var originalTimeScale = Time.timeScale;
+            try
+            {
+                Time.timeScale = 0.35f;
+                Invoke(menu, "SetOpen", true);
+                Assert.That(Time.timeScale, Is.Zero);
+
+                Invoke(menu, "SetOpen", true);
+                Invoke(menu, "SetOpen", false);
+
+                Assert.That(Time.timeScale, Is.EqualTo(0.35f));
+                Assert.That(GameInputGate.IsBlocked, Is.False);
+            }
+            finally
+            {
+                Invoke(menu, "OnDisable");
+                GameInputGate.SetBlocked(false);
+                Time.timeScale = originalTimeScale;
+                Object.DestroyImmediate(menuObject);
+            }
+        }
+
+        [Test]
+        public void QuestMenu_AwakeSynchronizesAnInitiallyClosedMenuPanel()
+        {
+            var menuObject = new GameObject("Menu");
+            menuObject.SetActive(false);
+            var panel = new GameObject("Panel");
+            var menu = menuObject.AddComponent<QuestMenuController>();
+            SetField(menu, "_panel", panel);
+            try
+            {
+                Assert.That(panel.activeSelf, Is.True);
+
+                Invoke(menu, "Awake");
+
+                Assert.That(menu.IsOpen, Is.False);
+                Assert.That(panel.activeSelf, Is.False);
+                Assert.That(GameInputGate.IsBlocked, Is.False);
+            }
+            finally
+            {
+                Invoke(menu, "OnDisable");
+                GameInputGate.SetBlocked(false);
+                Object.DestroyImmediate(menuObject);
+                Object.DestroyImmediate(panel);
+            }
+        }
+
+        [Test]
+        public void QuestMenu_DisableWhileOpenRestoresPreviousTimeScale()
+        {
+            var menuObject = new GameObject("Menu");
+            menuObject.SetActive(false);
+            var menu = menuObject.AddComponent<QuestMenuController>();
+            var originalTimeScale = Time.timeScale;
+            try
+            {
+                Time.timeScale = 0.6f;
+                Invoke(menu, "SetOpen", true);
+
+                Invoke(menu, "OnDisable");
+
+                Assert.That(menu.IsOpen, Is.False);
+                Assert.That(Time.timeScale, Is.EqualTo(0.6f));
+                Assert.That(GameInputGate.IsBlocked, Is.False);
+            }
+            finally
+            {
+                GameInputGate.SetBlocked(false);
+                Time.timeScale = originalTimeScale;
+                Object.DestroyImmediate(menuObject);
+            }
+        }
+
+        [Test]
+        public void QuestMenu_OnDestroyCallbackRestoresPreviousTimeScale()
+        {
+            var menuObject = new GameObject("Menu");
+            var menu = menuObject.AddComponent<QuestMenuController>();
+            var originalTimeScale = Time.timeScale;
+            try
+            {
+                Time.timeScale = 0.8f;
+                Invoke(menu, "SetOpen", true);
+
+                Invoke(menu, "OnDestroy");
+
+                Assert.That(Time.timeScale, Is.EqualTo(0.8f));
+                Assert.That(GameInputGate.IsBlocked, Is.False);
+            }
+            finally
+            {
+                GameInputGate.SetBlocked(false);
+                Time.timeScale = originalTimeScale;
+                if (menuObject != null)
+                {
+                    Object.DestroyImmediate(menuObject);
+                }
+            }
+        }
+
+        [Test]
         public void BallPool_IgnoresBallToBallCollisionsOnly()
         {
             var prefabObject = new GameObject("BallPrefab");

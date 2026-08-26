@@ -28,6 +28,8 @@ namespace GloveBallDemo.Runtime
         private InputAction _rightPrimaryAction;
         private int _selection;
         private bool _navigateReady = true;
+        private bool _ownsTimeScale;
+        private float _timeScaleBeforeMenu = 1f;
 
         private const float NavigatePressThreshold = 0.60f;
         private const float NavigateReleaseThreshold = 0.25f;
@@ -59,6 +61,18 @@ namespace GloveBallDemo.Runtime
             Unsubscribe(ref _leftPrimaryAction, Confirm);
             Unsubscribe(ref _rightPrimaryAction, Confirm);
             SetOpen(false);
+        }
+
+        private void OnDestroy()
+        {
+            // OnDisable normally closes the menu first. Keep destruction independently safe for
+            // unusual lifecycle paths (for example a component destroyed while already disabled).
+            RestoreTimeScale();
+            if (IsOpen)
+            {
+                IsOpen = false;
+                GameInputGate.SetBlocked(false);
+            }
         }
 
         private void Toggle(InputAction.CallbackContext _) => SetOpen(!IsOpen);
@@ -112,8 +126,20 @@ namespace GloveBallDemo.Runtime
 
         private void SetOpen(bool open)
         {
+            var wasOpen = IsOpen;
             IsOpen = open;
             GameInputGate.SetBlocked(open);
+            if (open && !wasOpen)
+            {
+                _timeScaleBeforeMenu = Time.timeScale;
+                _ownsTimeScale = true;
+                Time.timeScale = 0f;
+            }
+            else if (!open)
+            {
+                RestoreTimeScale();
+            }
+
             if (_panel != null)
             {
                 _panel.SetActive(open);
@@ -125,6 +151,17 @@ namespace GloveBallDemo.Runtime
                 _navigateReady = Mathf.Abs(currentY) <= NavigateReleaseThreshold;
                 Refresh();
             }
+        }
+
+        private void RestoreTimeScale()
+        {
+            if (!_ownsTimeScale)
+            {
+                return;
+            }
+
+            Time.timeScale = _timeScaleBeforeMenu;
+            _ownsTimeScale = false;
         }
 
         private void Refresh()
