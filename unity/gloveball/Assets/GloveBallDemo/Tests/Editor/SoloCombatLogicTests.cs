@@ -648,6 +648,138 @@ namespace GloveBallDemo.Tests
         }
 
         [Test]
+        public void GripAndArmOverlapInSamePhysicsTick_GrabSuppressesArmCollisionHaptic()
+        {
+            var previousMode = Physics.simulationMode;
+            var relayObject = new GameObject("Relay");
+            var relay = relayObject.AddComponent<HapticEventRelay>();
+            Invoke(relay, "Awake");
+            var reported = new List<DemoHapticEvent>();
+            relay.EventReported += (evt, _, __) => reported.Add(evt);
+
+            var gloveObject = new GameObject("LeftGlove");
+            var anchor = new GameObject("GripAnchor");
+            anchor.transform.SetParent(gloveObject.transform, false);
+            var catchObject = new GameObject("CatchVolume");
+            catchObject.transform.SetParent(gloveObject.transform, false);
+            var catchCollider = catchObject.AddComponent<SphereCollider>();
+            catchCollider.radius = 0.5f;
+            catchCollider.isTrigger = true;
+            var catchVolume = catchObject.AddComponent<CatchVolume>();
+            var glove = gloveObject.AddComponent<GloveController>();
+            SetField(glove, "_side", GloveSide.Left);
+            SetField(glove, "_gripAnchor", anchor.transform);
+            SetField(glove, "_catchVolume", catchVolume);
+            Invoke(glove, "Awake");
+            glove.SetGripOverride(1f);
+
+            var armObject = new GameObject("LeftArm");
+            armObject.AddComponent<BoxCollider>().size = Vector3.one;
+            var arm = armObject.AddComponent<ArmImpactSurface>();
+            SetField(arm, "_side", GloveSide.Left);
+
+            var ballObject = CreateIncomingBall("IncomingBall", out var ball);
+            ballObject.transform.position = Vector3.right * 1.3f;
+            ball.Body.position = ballObject.transform.position;
+            ball.Body.useGravity = false;
+            ball.Body.linearVelocity = Vector3.left * 20f;
+            SetField(ball, "_stateAge", 1f);
+
+            try
+            {
+                Physics.simulationMode = SimulationMode.Script;
+                Physics.SyncTransforms();
+                Physics.Simulate(Time.fixedDeltaTime);
+                typeof(ArmImpactSurface).GetMethod("HandleImpact", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(arm, new object[] { ball, ball.transform.position });
+                // Mirror the competing trigger callback after the production impact path in
+                // the same simulated tick to pin the callback-order race.
+                Invoke(catchVolume, "OnTriggerEnter", ballObject.GetComponent<Collider>());
+                Invoke(arm, "FixedUpdate");
+
+                Assert.That(ball.State, Is.EqualTo(BallState.Held), "precondition: the grip must win the overlapping catch");
+                Assert.That(reported.Count(evt => evt == DemoHapticEvent.LeftGrab), Is.EqualTo(1));
+                Assert.That(reported.Count(evt => evt == DemoHapticEvent.LeftArmCollide), Is.Zero);
+            }
+            finally
+            {
+                Physics.simulationMode = previousMode;
+                Object.DestroyImmediate(ballObject);
+                Object.DestroyImmediate(armObject);
+                Object.DestroyImmediate(gloveObject);
+                Object.DestroyImmediate(relayObject);
+            }
+        }
+
+        [Test]
+        [TestCase(GloveSide.Left, DemoHapticEvent.LeftArmCollide)]
+        [TestCase(GloveSide.Right, DemoHapticEvent.RightArmCollide)]
+        public void IncomingArmImpact_FlushesOnceOnNextFixedUpdateForCorrectSide(
+            GloveSide side,
+            DemoHapticEvent expected)
+        {
+            var relayObject = new GameObject("Relay");
+            var relay = relayObject.AddComponent<HapticEventRelay>();
+            Invoke(relay, "Awake");
+            var reported = new List<DemoHapticEvent>();
+            relay.EventReported += (evt, _, __) => reported.Add(evt);
+            var armObject = new GameObject("Arm");
+            armObject.AddComponent<BoxCollider>();
+            var arm = armObject.AddComponent<ArmImpactSurface>();
+            SetField(arm, "_side", side);
+            var ballObject = CreateIncomingBall("IncomingBall", out var ball);
+            SetField(ball, "_stateAge", 1f);
+
+            try
+            {
+                InvokeArmImpact(arm, ball);
+                InvokeArmImpact(arm, ball);
+                Assert.That(reported, Is.Empty, "impact must remain pending until the next fixed tick");
+                Invoke(arm, "FixedUpdate");
+                Invoke(arm, "FixedUpdate");
+                Assert.That(reported.Count(evt => evt == expected), Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(ballObject);
+                Object.DestroyImmediate(armObject);
+                Object.DestroyImmediate(relayObject);
+            }
+        }
+
+        [Test]
+        public void HeldBallArmImpact_ProducesNoArmCollisionHaptic()
+        {
+            var relayObject = new GameObject("Relay");
+            var relay = relayObject.AddComponent<HapticEventRelay>();
+            Invoke(relay, "Awake");
+            var reported = new List<DemoHapticEvent>();
+            relay.EventReported += (evt, _, __) => reported.Add(evt);
+            var armObject = new GameObject("Arm");
+            armObject.AddComponent<BoxCollider>();
+            var arm = armObject.AddComponent<ArmImpactSurface>();
+            var anchor = new GameObject("GripAnchor");
+            var ballObject = CreateIncomingBall("HeldBall", out var ball);
+            SetField(ball, "_stateAge", 1f);
+            Assert.That(ball.TryGrab(anchor.transform), Is.True);
+
+            try
+            {
+                InvokeArmImpact(arm, ball);
+                Invoke(arm, "FixedUpdate");
+                Assert.That(reported.Count(evt => evt == DemoHapticEvent.LeftArmCollide), Is.Zero);
+                Assert.That(reported.Count(evt => evt == DemoHapticEvent.RightArmCollide), Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(ballObject);
+                Object.DestroyImmediate(anchor);
+                Object.DestroyImmediate(armObject);
+                Object.DestroyImmediate(relayObject);
+            }
+        }
+
+        [Test]
         public void GripPressOnOverlappingIncomingBallSnapsToGripAnchorAndFollowsIt()
         {
             var gloveObject = new GameObject("Glove");
@@ -997,6 +1129,10 @@ namespace GloveBallDemo.Tests
 
         private static void SetField(object target, string name, object value) =>
             target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(target, value);
+
+        private static void InvokeArmImpact(ArmImpactSurface arm, Ball ball) =>
+            typeof(ArmImpactSurface).GetMethod("HandleImpact", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(arm, new object[] { ball, ball.transform.position });
 
         private static T GetField<T>(object target, string name) =>
             (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target);
