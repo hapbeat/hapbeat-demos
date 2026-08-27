@@ -17,4 +17,7 @@ MonoBehaviour:
   _currentDemoId: gloveball
   _sharedSecret: 
   _allowUnsignedOnIsolatedLan: 1
-  _targets: []
+  _targets:
+  - _demoId: handdemo
+    _packageName: com.Hapbeat.HapticHandDemo_G2
+    _activityName: com.unity3d.player.UnityPlayerGameActivity

@@ -1,0 +1,9 @@
+{
+  "name": "Hapbeat.DemoSwitch.Editor",
+  "rootNamespace": "Hapbeat.DemoSwitch.Editor",
+  "references": [
+    "Hapbeat.DemoSwitch"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false
+}

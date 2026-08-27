@@ -10,6 +10,12 @@ Foreground demo applications use this package to receive controller commands on 
 4. Configure the same non-empty Shared Secret in every APK and the controller. Do not commit that value. Empty secret plus Allow Unsigned is intended only for an isolated demo LAN and logs a warning.
 5. Subscribe to `DemoSwitch.BeforeSwitch` for application cleanup, or call `DemoSwitch.SwitchTo("logical-demo-id")` for a local UI-driven switch.
 
+For reproducible project setup, the package also provides an Editor command that creates or updates the settings asset while preserving its local Shared Secret:
+
+```powershell
+Unity.exe -batchmode -quit -projectPath . -executeMethod Hapbeat.DemoSwitch.Editor.DemoSwitchSettingsConfigurator.ConfigureFromCommandLine -demoSwitchCurrentDemo gloveball -demoSwitchTarget handdemo com.Hapbeat.HapticHandDemo_G2 com.unity3d.player.UnityPlayerGameActivity
+```
+
 No Scene component is required. Bootstrap occurs only when `Resources/HapbeatDemoSwitchSettings.asset` exists. Editor and non-Android players never start another application; the safe adapter logs a failure.
 
 ## Controller flow
@@ -17,7 +23,7 @@ No Scene component is required. Bootstrap occurs only when `Resources/HapbeatDem
 Send a version 1 `SWITCH` command to the current headset IP at UDP 7710 from a stable controller UDP port. Expect `ACK` from the current APK and `READY` from the next APK on that same controller port. `FAILED` means the command was rejected or application launch failed. See `hapbeat-contracts/specs/demo-switch-control.md` for the canonical HMAC-SHA256 input and complete message contract.
 
 ```json
-{"version":1,"type":"SWITCH","controller_id":"m5-main","seq":42,"demo_id":"boxing","auth":"<64 lowercase hex HMAC-SHA256>"}
+{"version":1,"type":"SWITCH","controller_id":"m5-main","seq":42,"demo_id":"handdemo","auth":"<64 lowercase hex HMAC-SHA256>"}
 ```
 
 The working M5Unified sample is in `m5/demo-switch-controller/` at the repository root.

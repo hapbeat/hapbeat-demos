@@ -3,6 +3,7 @@
   "rootNamespace": "Hapbeat.DemoSwitch.Tests",
   "references": [
     "Hapbeat.DemoSwitch",
+    "Hapbeat.DemoSwitch.Editor",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
