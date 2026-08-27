@@ -31,7 +31,7 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 
 ## 4. 独立 APK の切替
 
-[`com.hapbeat.demo-switch`](unity/packages/com.hapbeat.demo-switch/README.md) は、前面の Unity APK が UDP 7710 の logical demo ID を受け、端末内 allowlist に登録した次の APK を起動する共通 package。M5 controller は独立した `hapbeat-demo-switch-controller-firmware` repo で管理し、[Demo Switch controller tool](https://devtools.hapbeat.com/tools/demo-switch-controller/) から書き込みと設定を行う。触覚 UDP 7700 とは独立しており、この controller は触覚・音声を送信しない。
+[`com.hapbeat.demo-switch`](unity/packages/com.hapbeat.demo-switch/README.md) は、前面の Unity APK が UDP 7710 の `DISCOVER` に `HERE` を unicast 応答して Quest の IPv4 を自動検出可能にし、logical demo ID を受けて端末内 allowlist に登録した次の APK を起動する共通 package。M5 controller は独立した `hapbeat-demo-switch-controller-firmware` repo で管理し、[Demo Switch controller tool](https://devtools.hapbeat.com/tools/demo-switch-controller/) から書き込みと設定を行う。触覚 UDP 7700 とは独立しており、この controller は触覚・音声を送信しない。
 
 ## ライセンス
 

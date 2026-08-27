@@ -50,6 +50,36 @@ namespace Hapbeat.DemoSwitch
         public string Auth { get; }
     }
 
+    internal sealed class DemoSwitchDiscover
+    {
+        public DemoSwitchDiscover(string controllerId, string nonce, string auth)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public string Auth { get; }
+    }
+
+    internal sealed class DemoSwitchHere
+    {
+        public DemoSwitchHere(string controllerId, string nonce, string currentDemoId, string auth = "")
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            CurrentDemoId = currentDemoId;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public string CurrentDemoId { get; }
+        public string Auth { get; }
+    }
+
     internal readonly struct CommandParseResult
     {
         public CommandParseResult(DemoSwitchCommand command, string errorCode, string errorMessage)
@@ -78,12 +108,40 @@ namespace Hapbeat.DemoSwitch
         public string ErrorMessage { get; }
     }
 
+    internal readonly struct DiscoveryParseResult
+    {
+        public DiscoveryParseResult(DemoSwitchDiscover discover, string errorMessage)
+        {
+            Discover = discover;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Discover != null;
+        public DemoSwitchDiscover Discover { get; }
+        public string ErrorMessage { get; }
+    }
+
+    internal readonly struct HereParseResult
+    {
+        public HereParseResult(DemoSwitchHere here, string errorMessage)
+        {
+            Here = here;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Here != null;
+        public DemoSwitchHere Here { get; }
+        public string ErrorMessage { get; }
+    }
+
     internal static class DemoSwitchProtocol
     {
         public const int MaxPayloadBytes = 1024;
         public const long MaxSequence = 9007199254740991L;
         private static readonly string[] CommandFields = { "version", "type", "controller_id", "seq", "demo_id", "auth" };
         private static readonly string[] StatusFields = { "version", "type", "controller_id", "seq", "demo_id", "current_demo_id", "code", "message", "auth" };
+        private static readonly string[] DiscoverFields = { "version", "type", "controller_id", "nonce", "auth" };
+        private static readonly string[] HereFields = { "version", "type", "controller_id", "nonce", "current_demo_id", "auth" };
         private static readonly HashSet<string> StatusTypes = new HashSet<string>(StringComparer.Ordinal) { "ACK", "READY", "FAILED" };
         private static readonly HashSet<string> StatusCodes = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -102,7 +160,7 @@ namespace Hapbeat.DemoSwitch
 
             try
             {
-                var value = JObject.Parse(json, StrictLoadSettings);
+                var value = ParseStrictObject(json);
                 if (value.Properties().Any(p => !CommandFields.Contains(p.Name, StringComparer.Ordinal)))
                     return Error("invalid_payload", "Command contains an unknown or duplicate field.");
 
@@ -133,6 +191,21 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        public static bool TryGetMessageType(string json, out string type)
+        {
+            type = null;
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes) return false;
+            try
+            {
+                var value = ParseStrictObject(json);
+                return TryString(value, "type", out type);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return false;
+            }
+        }
+
         public static StatusParseResult ParseStatus(string json)
         {
             if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
@@ -140,7 +213,7 @@ namespace Hapbeat.DemoSwitch
 
             try
             {
-                var value = JObject.Parse(json, StrictLoadSettings);
+                var value = ParseStrictObject(json);
                 if (value.Properties().Any(p => !StatusFields.Contains(p.Name, StringComparer.Ordinal)))
                     return new StatusParseResult(null, "Status contains an unknown field.");
                 if (!TryInteger(value, "version", out var version) || version != 1 ||
@@ -201,6 +274,93 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        public static DiscoveryParseResult ParseDiscover(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new DiscoveryParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !DiscoverFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new DiscoveryParseResult(null, "DISCOVER contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "DISCOVER" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce))
+                    return new DiscoveryParseResult(null, "DISCOVER is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String)
+                        return new DiscoveryParseResult(null, "DISCOVER auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth))
+                        return new DiscoveryParseResult(null, "DISCOVER auth is invalid.");
+                }
+                return new DiscoveryParseResult(new DemoSwitchDiscover(controllerId, nonce, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new DiscoveryParseResult(null, exception.Message);
+            }
+        }
+
+        public static HereParseResult ParseHere(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new HereParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !HereFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new HereParseResult(null, "HERE contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "HERE" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce) ||
+                    !TryString(value, "current_demo_id", out var currentDemoId) || !IsIdentifier(currentDemoId))
+                    return new HereParseResult(null, "HERE is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String)
+                        return new HereParseResult(null, "HERE auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new HereParseResult(null, "HERE auth is invalid.");
+                }
+                return new HereParseResult(new DemoSwitchHere(controllerId, nonce, currentDemoId, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new HereParseResult(null, exception.Message);
+            }
+        }
+
+        public static string SerializeHere(DemoSwitchHere here, string secret)
+        {
+            if (here == null || !IsIdentifier(here.ControllerId) || !IsNonce(here.Nonce) || !IsIdentifier(here.CurrentDemoId))
+                throw new ArgumentException("HERE fields do not satisfy the Demo Switch contract.", nameof(here));
+
+            var auth = string.IsNullOrEmpty(secret) ? string.Empty : ComputeAuth(here, secret);
+            var value = new JObject
+            {
+                ["version"] = 1,
+                ["type"] = "HERE",
+                ["controller_id"] = here.ControllerId,
+                ["nonce"] = here.Nonce,
+                ["current_demo_id"] = here.CurrentDemoId
+            };
+            if (auth.Length > 0) value["auth"] = auth;
+            var json = value.ToString(Formatting.None);
+            if (Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                throw new InvalidOperationException("HERE fields exceed the 1024-byte payload limit.");
+            return json;
+        }
+
         public static string Canonicalize(DemoSwitchCommand command) =>
             "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
             Field("version", "1") + Field("type", "SWITCH") +
@@ -213,10 +373,24 @@ namespace Hapbeat.DemoSwitch
             Field("seq", status.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", status.DemoId) +
             Field("current_demo_id", status.CurrentDemoId) + Field("code", status.Code) + Field("message", status.Message);
 
+        public static string Canonicalize(DemoSwitchDiscover discover) =>
+            "HAPBEAT-DEMO-SWITCH/1\nDISCOVER\n" +
+            Field("version", "1") + Field("type", "DISCOVER") + Field("controller_id", discover.ControllerId) +
+            Field("nonce", discover.Nonce);
+
+        public static string Canonicalize(DemoSwitchHere here) =>
+            "HAPBEAT-DEMO-SWITCH/1\nHERE\n" +
+            Field("version", "1") + Field("type", "HERE") + Field("controller_id", here.ControllerId) +
+            Field("nonce", here.Nonce) + Field("current_demo_id", here.CurrentDemoId);
+
         public static string ComputeAuth(DemoSwitchCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
         public static string ComputeAuth(DemoSwitchStatus status, string secret) => ComputeMac(Canonicalize(status), secret);
+        public static string ComputeAuth(DemoSwitchDiscover discover, string secret) => ComputeMac(Canonicalize(discover), secret);
+        public static string ComputeAuth(DemoSwitchHere here, string secret) => ComputeMac(Canonicalize(here), secret);
         public static bool Authenticate(DemoSwitchCommand command, string secret) => ConstantTimeMacEquals(command.Auth, ComputeAuth(command, secret));
         public static bool Authenticate(DemoSwitchStatus status, string secret) => ConstantTimeMacEquals(status.Auth, ComputeAuth(status, secret));
+        public static bool Authenticate(DemoSwitchDiscover discover, string secret) => ConstantTimeMacEquals(discover.Auth, ComputeAuth(discover, secret));
+        public static bool Authenticate(DemoSwitchHere here, string secret) => ConstantTimeMacEquals(here.Auth, ComputeAuth(here, secret));
 
         public static bool IsIdentifier(string value)
         {
@@ -231,7 +405,37 @@ namespace Hapbeat.DemoSwitch
 
         private static bool IsLowerIdentifierFirst(char value) => (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9');
         private static bool IsLowerHexMac(string value) => value != null && value.Length == 64 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+        private static bool IsNonce(string value) => value != null && value.Length == 16 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
         private static string Field(string name, string value) => name + "=" + Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value + "\n";
+
+        private static JObject ParseStrictObject(string json)
+        {
+            RejectJsonComments(json);
+            using (var textReader = new System.IO.StringReader(json))
+            using (var reader = new JsonTextReader(textReader) { DateParseHandling = DateParseHandling.None })
+            {
+                var value = JObject.Load(reader, StrictLoadSettings);
+                if (reader.Read()) throw new JsonReaderException("Trailing content is not allowed.");
+                return value;
+            }
+        }
+
+        private static void RejectJsonComments(string json)
+        {
+            var inString = false;
+            var escaped = false;
+            foreach (var character in json)
+            {
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (character == '\\') escaped = true;
+                    else if (character == '"') inString = false;
+                }
+                else if (character == '"') inString = true;
+                else if (character == '/') throw new JsonReaderException("JSON comments are not allowed.");
+            }
+        }
 
         private static string ComputeMac(string canonical, string secret)
         {
@@ -284,6 +488,46 @@ namespace Hapbeat.DemoSwitch
             var length = value.Length - 1;
             if (length > 0 && char.IsLowSurrogate(value[length]) && char.IsHighSurrogate(value[length - 1])) length--;
             return value.Substring(0, length);
+        }
+    }
+
+    internal readonly struct DiscoveryHandleResult
+    {
+        public DiscoveryHandleResult(string responseJson, string errorCode)
+        {
+            ResponseJson = responseJson;
+            ErrorCode = errorCode;
+        }
+
+        public bool ShouldReply => ResponseJson != null;
+        public string ResponseJson { get; }
+        public string ErrorCode { get; }
+    }
+
+    internal static class DemoSwitchDiscoveryHandler
+    {
+        public static DiscoveryHandleResult Handle(string json, string currentDemoId, string sharedSecret,
+            bool allowUnsignedOnIsolatedLan)
+        {
+            var parsed = DemoSwitchProtocol.ParseDiscover(json);
+            if (!parsed.Success) return new DiscoveryHandleResult(null, "invalid_payload");
+
+            var discover = parsed.Discover;
+            if (!string.IsNullOrEmpty(sharedSecret))
+            {
+                if (!DemoSwitchProtocol.Authenticate(discover, sharedSecret))
+                    return new DiscoveryHandleResult(null, "invalid_auth");
+            }
+            else if (!allowUnsignedOnIsolatedLan)
+            {
+                return new DiscoveryHandleResult(null, "unsigned_disabled");
+            }
+
+            if (!DemoSwitchProtocol.IsIdentifier(currentDemoId))
+                return new DiscoveryHandleResult(null, "invalid_payload");
+
+            var here = new DemoSwitchHere(discover.ControllerId, discover.Nonce, currentDemoId);
+            return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeHere(here, sharedSecret), null);
         }
     }
 }

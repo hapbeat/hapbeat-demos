@@ -7,6 +7,7 @@ namespace Hapbeat.DemoSwitch
 {
     internal sealed class DemoSwitchRuntime : MonoBehaviour
     {
+        private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private DemoSwitchSettings _settings;
         private DemoSwitchUdpTransport _transport;
         private DemoSwitchSequenceGuard _sequenceGuard;
@@ -71,7 +72,24 @@ namespace Hapbeat.DemoSwitch
 
         private void Handle(DemoSwitchDatagram datagram)
         {
-            var parsed = DemoSwitchProtocol.ParseCommand(Encoding.UTF8.GetString(datagram.Payload));
+            string json;
+            try
+            {
+                json = StrictUtf8.GetString(datagram.Payload);
+            }
+            catch (DecoderFallbackException)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected payload: invalid UTF-8.");
+                return;
+            }
+
+            if (DemoSwitchProtocol.TryGetMessageType(json, out var messageType) && messageType == "DISCOVER")
+            {
+                HandleDiscover(json, datagram.Source);
+                return;
+            }
+
+            var parsed = DemoSwitchProtocol.ParseCommand(json);
             if (!parsed.Success)
             {
                 Debug.LogWarning("[Demo Switch] Rejected payload: " + parsed.ErrorCode);
@@ -111,6 +129,26 @@ namespace Hapbeat.DemoSwitch
             SendStatus(datagram.Source, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
                 command.DemoId, _settings.CurrentDemoId, "launch_failed", error));
             TryStartListener(out _);
+        }
+
+        private void HandleDiscover(string json, IPEndPoint source)
+        {
+            var result = DemoSwitchDiscoveryHandler.Handle(json, _settings.CurrentDemoId, _settings.SharedSecret,
+                _settings.AllowUnsignedOnIsolatedLan);
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected DISCOVER payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] HERE send failed: " + exception.Message);
+            }
         }
 
         private void SendFailure(IPEndPoint endpoint, DemoSwitchCommand command, string code, string message) =>
