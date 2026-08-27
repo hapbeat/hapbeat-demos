@@ -6,6 +6,7 @@ namespace Hapbeat.DemoSwitch
     public static class DemoSwitch
     {
         public static event Action<string> BeforeSwitch;
+        public static event Action LaunchContextDetected;
 
         public static bool SwitchTo(string demoId)
         {
@@ -25,6 +26,17 @@ namespace Hapbeat.DemoSwitch
             foreach (Action<string> handler in handlers.GetInvocationList())
             {
                 try { handler(demoId); }
+                catch (Exception exception) { Debug.LogException(exception); }
+            }
+        }
+
+        internal static void NotifyLaunchContextDetected()
+        {
+            var handlers = LaunchContextDetected;
+            if (handlers == null) return;
+            foreach (Action handler in handlers.GetInvocationList())
+            {
+                try { handler(); }
                 catch (Exception exception) { Debug.LogException(exception); }
             }
         }

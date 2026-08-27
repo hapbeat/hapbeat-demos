@@ -2,7 +2,8 @@
   "name": "Hapbeat.DemoSwitch",
   "rootNamespace": "Hapbeat.DemoSwitch",
   "references": [
-    "Unity.Newtonsoft.Json"
+    "Unity.Newtonsoft.Json",
+    "Unity.XR.CoreUtils"
   ],
   "autoReferenced": true,
   "noEngineReferences": false

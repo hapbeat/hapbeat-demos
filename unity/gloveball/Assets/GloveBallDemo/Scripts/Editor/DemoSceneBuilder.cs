@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using GloveBallDemo.Core;
 using GloveBallDemo.Runtime;
 using Hapbeat;
+using Hapbeat.DemoSwitch;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -27,6 +28,9 @@ namespace GloveBallDemo.Editor
 
         /// <summary>Unity's built-in tag for objects that are stripped from player builds.</summary>
         public const string EditorOnlyTag = "EditorOnly";
+
+        /// <summary>Scene-authored horizontal pose used after the HMD reports tracking.</summary>
+        public const string XrStartAnchorName = "XR Start Anchor";
 
         /// <summary>Fallback play field if the arena floor cannot be measured (metres).</summary>
         private static readonly Vector2 FallbackFieldSize = new Vector2(13f, 21f);
@@ -83,7 +87,9 @@ namespace GloveBallDemo.Editor
             // Behind the far wall: the wall has no renderer, so nothing occludes the readout, and
             // a scoreboard inside the play volume would be pelted with balls.
             var scoreboard = BuildScoreboard(root.transform, field.max.z + 0.8f, floorY);
-            var head = BuildXrRig(root.transform, new Vector3(field.center.x + PlayerLaneOffset, floorY, playerZ), field);
+            var xrStart = new Vector3(field.center.x + PlayerLaneOffset, floorY, playerZ);
+            var head = BuildXrRig(root.transform, xrStart, field);
+            BuildXrStartAnchor(root.transform, xrStart);
             var hitZone = BuildHitZone(root.transform, head);
             var targetLayout = BuildTargetPanels(root.transform, head, floorY, field.min.x, field.max.x, field.min.z, field.max.z);
 
@@ -753,6 +759,19 @@ namespace GloveBallDemo.Editor
                 $"requestedTrackingOrigin={xrOrigin.RequestedTrackingOriginMode} cameraYOffset={xrOrigin.CameraYOffset:0.00}");
 
             return camGo.transform;
+        }
+
+        private static void BuildXrStartAnchor(Transform parent, Vector3 position)
+        {
+            var anchor = new GameObject(XrStartAnchorName);
+            anchor.transform.SetParent(parent, false);
+            anchor.transform.position = position;
+            anchor.transform.rotation = Quaternion.identity;
+            var alignment = anchor.AddComponent<XrStartAlignment>();
+            var alignmentSo = new SerializedObject(alignment);
+            alignmentSo.FindProperty("_xrOrigin").objectReferenceValue = parent.GetComponentInChildren<XROrigin>();
+            alignmentSo.FindProperty("_anchor").objectReferenceValue = anchor.transform;
+            alignmentSo.ApplyModifiedPropertiesWithoutUndo();
         }
 
         private static void BuildHand(

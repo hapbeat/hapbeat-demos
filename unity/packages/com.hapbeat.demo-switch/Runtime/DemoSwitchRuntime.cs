@@ -185,6 +185,7 @@ namespace Hapbeat.DemoSwitch
             if (_launcher == null || !_launcher.TryReadLaunchContext(out var context)) return;
             _pendingLaunchContext = context;
             _sequenceGuard.AdvanceTo(context.ControllerId, context.Sequence);
+            DemoSwitch.NotifyLaunchContextDetected();
         }
 
         private void ReportReady()
