@@ -26,4 +26,4 @@ Send a version 1 `SWITCH` command to the current headset IP at UDP 7710 from a s
 {"version":1,"type":"SWITCH","controller_id":"m5-main","seq":42,"demo_id":"handdemo","auth":"<64 lowercase hex HMAC-SHA256>"}
 ```
 
-The working M5Unified sample is in `m5/demo-switch-controller/` at the repository root.
+The M5 controller is maintained in the standalone `hapbeat-demo-switch-controller-firmware` repository and is flashed/configured from the [Demo Switch controller tool](https://devtools.hapbeat.com/tools/demo-switch-controller/).
