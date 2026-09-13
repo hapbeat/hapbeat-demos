@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#30d22075093d1d35dfb0091c1c7550e9ad948577",
     "com.hapbeat.demo-switch": "file:../../packages/com.hapbeat.demo-switch",
     "com.hapbeat.sdk": "https://github.com/hapbeat/hapbeat-unity-sdk.git#882275c1d4ec7b6cb4bf25d8b0532a56476037a8",
     "com.unity.ai.navigation": "2.0.9",
