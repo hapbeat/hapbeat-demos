@@ -2,7 +2,7 @@
 
 Hapbeat を体験するためのデモを配布するリポジトリ。**ビルド済みデモアプリ**と、**既存の VR ゲームに触覚を後付けする mod** の 2 系統を収録する。
 
-**すべてのデモに Hapbeat 実機が必要。** デバイスが無いと何も起きない。
+触覚の体験にはHapbeat実機が必要です。Boxingなどのゲーム操作・描画は、デバイス未接続でも確認できます。
 
 ## 1. ビルド済みデモアプリ
 
@@ -28,6 +28,7 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 ## 3. Unity デモのソーススナップショット
 
 - [GloveBall](unity/gloveball/README.md) — Meta の Ultimate Glove Ball アリーナ資産を使った、Quest 向け 1 人プレイデモ
+- [Boxing](unity/boxing-vr/README.md) — Quest Air Link / standalone向け90秒スパーリング。左右グローブと頭の判定、相対速度による触覚、コントローラー／手追跡入力。
 
 ## 4. 独立 APK の切替
 

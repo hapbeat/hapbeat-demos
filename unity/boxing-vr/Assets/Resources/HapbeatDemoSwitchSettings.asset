@@ -11,16 +11,16 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b426d3ab09dfb6946aff10f5ad16f09d, type: 3}
   m_Name: HapbeatDemoSwitchSettings
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: Hapbeat.DemoSwitch::Hapbeat.DemoSwitch.DemoSwitchSettings
   _receiverEnabled: 1
   _port: 7710
-  _currentDemoId: gloveball
-  _sharedSecret: 
+  _currentDemoId: boxing
+  _sharedSecret:
   _allowUnsignedOnIsolatedLan: 1
   _targets:
+  - _demoId: gloveball
+    _packageName: jp.hapbeat.gloveballdemo
+    _activityName: com.unity3d.player.UnityPlayerGameActivity
   - _demoId: handdemo
     _packageName: com.Hapbeat.HapticHandDemo_G2
-    _activityName: com.unity3d.player.UnityPlayerGameActivity
-  - _demoId: boxing
-    _packageName: com.hapbeat.boxing
     _activityName: com.unity3d.player.UnityPlayerGameActivity

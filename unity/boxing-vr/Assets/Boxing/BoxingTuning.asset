@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e08614c1e5f17fd41a6b823a9221056f, type: 3}
+  m_Name: BoxingTuning
+  m_EditorClassIdentifier: Hapbeat.Boxing::Hapbeat.Boxing.BoxingTuning
+  roundSeconds: 90
+  enemyInterval: 1.6
+  telegraphSeconds: 0.42
+  strikeSeconds: 0.22
+  recoverSeconds: 0.55
+  playRadius: 1
+  gloveRadius: 0.115
+  headRadius: 0.14
+  enemyHeadRadius: 0.17
+  enemyBodyRadius: 0.25
+  minimumImpactSpeed: 0.25
+  hitCooldown: 0.22
+  impactMode: 1
+  hardHitSpeed: 2.5
+  fullGainSpeed: 6
+  minimumGain: 0.12
+  maximumGain: 1
+  gainExponent: 0.85

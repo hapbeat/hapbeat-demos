@@ -1,0 +1,4 @@
+{
+  "name": "Hapbeat.Boxing",
+  "references": ["Hapbeat.Runtime", "Hapbeat.DemoSwitch", "Unity.InputSystem", "Unity.XR.Hands", "Unity.XR.CoreUtils", "Unity.XR.Management", "Unity.XR.OpenXR", "Unity.ugui"]
+}
