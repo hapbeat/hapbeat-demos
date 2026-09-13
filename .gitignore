@@ -65,6 +65,8 @@ unity/*/Assets/Resources/PerformanceTestRunSettings.json
 .idea/
 .DS_Store
 Thumbs.db
+*.blend1
+*.blend2
 
 # Internal dev notes / agent metadata (use the workspace repo instead — DEC-038)
 dev-notes/
