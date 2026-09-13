@@ -30,7 +30,7 @@ namespace GloveBallDemo.Runtime
             {
                 var ball = impact.Key;
                 if (ball == null || ball.State != BallState.Incoming) continue;
-                HapticEventRelay.Report(
+                HapticEventRelay.ReportBallImpact(ball,
                     _side == GloveSide.Left ? DemoHapticEvent.LeftArmCollide : DemoHapticEvent.RightArmCollide,
                     impact.Value);
             }

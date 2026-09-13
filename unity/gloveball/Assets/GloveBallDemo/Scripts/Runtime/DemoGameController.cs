@@ -396,7 +396,7 @@ namespace GloveBallDemo.Runtime
         {
             PlayerHitCount++;
             _score.RegisterPlayerHit();
-            HapticEventRelay.Report(DemoHapticEvent.BodyCollide, ball.transform.position);
+            HapticEventRelay.ReportBallImpact(ball, DemoHapticEvent.BodyCollide, ball.transform.position);
         }
 
         public void OnTargetHit(TargetPanel panel, Ball ball)

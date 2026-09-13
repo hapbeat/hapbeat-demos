@@ -1,0 +1,241 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf9c34b08ac7b8c4f954b03abe0affb3, type: 3}
+  m_Name: BallImpactEventMap
+  m_EditorClassIdentifier: 
+  entries:
+  - _id: 9004c0d4ae8c468598f596a9948e234e
+    mode: 1
+    displayName: Bowling / l_arm_collide
+    category: gloveball-ball-impacts
+    eventName: bowling_l_arm_collide
+    streamClip: {fileID: 8300000, guid: 29dacc631d0c3a747904a5f007718ece, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 7219c650743a43059b48fb40ae610578
+    mode: 1
+    displayName: Bowling / r_arm_collide
+    category: gloveball-ball-impacts
+    eventName: bowling_r_arm_collide
+    streamClip: {fileID: 8300000, guid: 29dacc631d0c3a747904a5f007718ece, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: e3423cd7d2b14be7be186d806030d8b1
+    mode: 1
+    displayName: Bowling / body_collide
+    category: gloveball-ball-impacts
+    eventName: bowling_body_collide
+    streamClip: {fileID: 8300000, guid: 29dacc631d0c3a747904a5f007718ece, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 705f8038e6674c3d8437147352a06089
+    mode: 1
+    displayName: Volleyball / l_arm_collide
+    category: gloveball-ball-impacts
+    eventName: volleyball_l_arm_collide
+    streamClip: {fileID: 8300000, guid: 7a2dae1c701bce546829c87c545cdea3, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 0303204a50704402a938dba26c69211a
+    mode: 1
+    displayName: Volleyball / r_arm_collide
+    category: gloveball-ball-impacts
+    eventName: volleyball_r_arm_collide
+    streamClip: {fileID: 8300000, guid: 7a2dae1c701bce546829c87c545cdea3, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: a96029e805d649a0bfa815b4b5a0fc2e
+    mode: 1
+    displayName: Volleyball / body_collide
+    category: gloveball-ball-impacts
+    eventName: volleyball_body_collide
+    streamClip: {fileID: 8300000, guid: 7a2dae1c701bce546829c87c545cdea3, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 424a6e5cffff43e88b7b9c238749f828
+    mode: 1
+    displayName: Foam / l_arm_collide
+    category: gloveball-ball-impacts
+    eventName: foam_l_arm_collide
+    streamClip: {fileID: 8300000, guid: 62fe9b06ffa1d72469007cf0cc48d07d, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 497261563f11445eaa15085175617bbb
+    mode: 1
+    displayName: Foam / r_arm_collide
+    category: gloveball-ball-impacts
+    eventName: foam_r_arm_collide
+    streamClip: {fileID: 8300000, guid: 62fe9b06ffa1d72469007cf0cc48d07d, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 8b9056722d824748b5000c4884c54a49
+    mode: 1
+    displayName: Foam / body_collide
+    category: gloveball-ball-impacts
+    eventName: foam_body_collide
+    streamClip: {fileID: 8300000, guid: 62fe9b06ffa1d72469007cf0cc48d07d, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 764a4e647e9e4c9cbaa0afbbe4067049
+    mode: 1
+    displayName: Basketball / l_arm_collide
+    category: gloveball-ball-impacts
+    eventName: basketball_l_arm_collide
+    streamClip: {fileID: 8300000, guid: d207949351ff8e24bbe4f1e2b263df81, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 0fce21e8679b43d19590f38c26be9b21
+    mode: 1
+    displayName: Basketball / r_arm_collide
+    category: gloveball-ball-impacts
+    eventName: basketball_r_arm_collide
+    streamClip: {fileID: 8300000, guid: d207949351ff8e24bbe4f1e2b263df81, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 416969e96ec14980825f549b337dcc64
+    mode: 1
+    displayName: Basketball / body_collide
+    category: gloveball-ball-impacts
+    eventName: basketball_body_collide
+    streamClip: {fileID: 8300000, guid: d207949351ff8e24bbe4f1e2b263df81, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 5bd3e6af17ef4ee0ba695c7482370827
+    mode: 1
+    displayName: Perforated / l_arm_collide
+    category: gloveball-ball-impacts
+    eventName: perforated_l_arm_collide
+    streamClip: {fileID: 8300000, guid: f05e298185a78934e926d69e006849ad, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 11bfecceb1aa4834a37a886d30017ccf
+    mode: 1
+    displayName: Perforated / r_arm_collide
+    category: gloveball-ball-impacts
+    eventName: perforated_r_arm_collide
+    streamClip: {fileID: 8300000, guid: f05e298185a78934e926d69e006849ad, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.7
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  - _id: 31dd55b00be04debb823070e89a1c84d
+    mode: 1
+    displayName: Perforated / body_collide
+    category: gloveball-ball-impacts
+    eventName: perforated_body_collide
+    streamClip: {fileID: 8300000, guid: f05e298185a78934e926d69e006849ad, type: 3}
+    loop: 0
+    bindings: []
+    gain: 1
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
+      events.
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: 1
+  revertPlayModeChanges: 0

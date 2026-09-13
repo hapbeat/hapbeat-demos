@@ -12,9 +12,10 @@ from mathutils import Vector
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path(__file__).parent / 'generated')
+parser.add_argument('--overwrite', action='store_true', help='Explicitly regenerate authored outputs.')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
 out = args.output.resolve()
-if (out / 'balls.blend').exists():
+if (out / 'balls.blend').exists() and not args.overwrite:
     raise RuntimeError('Output exists; choose a new --output directory to preserve manual edits.')
 out.mkdir(parents=True, exist_ok=True)
 bpy.ops.object.select_all(action='SELECT')
@@ -52,7 +53,7 @@ def sphere(name, x, mat, radius=0.11):
 bowling = material('Bowling | polished navy resin', (0.018, 0.035, 0.12), 0.18)
 ball = sphere('BowlingBall', -0.29, bowling)
 # Three real recessed finger holes, angled toward the comparison camera.
-for dx, dz, radius in [(-0.026, 0.035, 0.012), (0.015, 0.046, 0.012), (0.018, -0.003, 0.016)]:
+for dx, dz, radius in [(-0.018, 0.038, 0.010), (0.018, 0.038, 0.010), (0, -0.024, 0.013)]:
     direction = Vector((dx, -0.085, dz)).normalized()
     pos = ball.location + direction * 0.097
     bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=radius, depth=0.074, location=pos)
@@ -111,11 +112,87 @@ foam = material('Foam | matte orange', (0.95, 0.21, 0.035), 0.93)
 texture_bump(foam, 85, 0.8, 0.002)
 sphere('FoamBall', 0.29, foam)
 
+rubber = material('Basketball | orange pebbled rubber', (0.58, 0.12, 0.018), 0.82)
+texture_bump(rubber, 135, 0.45, 0.0008)
+sphere('Basketball', 0.58, rubber)
+for axis in range(3):
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.1091, minor_radius=0.0015,
+                                   major_segments=96, minor_segments=6, location=(0.58, 0, 0.12))
+    obj = bpy.context.object
+    obj.name = 'BasketballSeam'
+    obj.rotation_euler[axis] = math.pi / 2
+    obj.data.materials.append(seam)
+
+plastic = material('Perforated | lime plastic', (0.55, 0.8, 0.025), 0.36)
+perforated = sphere('PerforatedBall', 0.87, plastic)
+inner = sphere('Inner cutter', 0.87, plastic, 0.104)
+mod = perforated.modifiers.new('Hollow shell', 'BOOLEAN')
+mod.operation = 'DIFFERENCE'
+mod.object = inner
+bpy.context.view_layer.objects.active = perforated
+bpy.ops.object.modifier_apply(modifier=mod.name)
+bpy.data.objects.remove(inner, do_unlink=True)
+for i in range(32):
+    z = 1 - 2 * (i + 0.5) / 32
+    phi = i * math.pi * (3 - math.sqrt(5))
+    direction = Vector((math.sqrt(1-z*z)*math.cos(phi), math.sqrt(1-z*z)*math.sin(phi), z))
+    bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.0105, depth=0.04,
+                                      location=perforated.location + direction * 0.108)
+    cutter = bpy.context.object
+    cutter.rotation_euler = direction.to_track_quat('Z', 'Y').to_euler()
+    mod = perforated.modifiers.new('Vent hole', 'BOOLEAN')
+    mod.operation = 'DIFFERENCE'
+    mod.object = cutter
+    bpy.context.view_layer.objects.active = perforated
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(cutter, do_unlink=True)
+
+# Export only ball geometry. Bake procedural surface normals; no Blender dependency in Unity.
+export_dir = out / 'runtime'
+export_dir.mkdir(exist_ok=True)
+scene = bpy.context.scene
+scene.render.engine = 'CYCLES'
+scene.cycles.samples = 8
+for prefix, x in [('Bowling', -0.29), ('Volleyball', 0), ('Foam', 0.29), ('Basketball', 0.58), ('Perforated', 0.87)]:
+    objects = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.name.startswith(prefix)]
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in objects:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = objects[0]
+    bpy.ops.object.convert(target='MESH')
+    bpy.ops.object.join()
+    obj = bpy.context.object
+    obj.name = prefix
+    for index, mat in enumerate(obj.data.materials):
+        if mat is None:
+            obj.data.materials[index] = obj.data.materials[0]
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.smart_project(island_margin=0.02)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    normal = bpy.data.images.new(prefix + '_Normal', width=512, height=512)
+    normal.colorspace_settings.name = 'Non-Color'
+    for mat in obj.data.materials:
+        node = mat.node_tree.nodes.new('ShaderNodeTexImage')
+        node.image = normal
+        mat.node_tree.nodes.active = node
+    bpy.ops.object.bake(type='NORMAL', margin=8)
+    normal.filepath_raw = str(export_dir / (prefix + '_Normal.png'))
+    normal.file_format = 'PNG'
+    normal.save()
+    normal.pack()
+    original = obj.location.copy()
+    obj.location = (0, 0, 0)
+    bpy.ops.export_scene.fbx(filepath=str(export_dir / (prefix + '.fbx')), use_selection=True,
+                             object_types={'MESH'}, bake_anim=False, axis_forward='-Z', axis_up='Y')
+    obj.location = original
+
 floor_mat = material('Preview floor', (0.055, 0.065, 0.085), 0.8)
 bpy.ops.mesh.primitive_plane_add(size=200)
 bpy.context.object.name = 'PreviewFloor'
 bpy.context.object.data.materials.append(floor_mat)
-for x, label in [(-0.29, 'BOWLING'), (0, 'VOLLEYBALL'), (0.29, 'FOAM')]:
+for x, label in [(-0.29, 'BOWLING'), (0, 'VOLLEYBALL'), (0.29, 'FOAM'), (0.58, 'BASKETBALL'), (0.87, 'PLASTIC')]:
     bpy.ops.object.text_add(location=(x, -0.17, 0.004))
     obj = bpy.context.object
     obj.name = 'PreviewLabel_' + label
@@ -124,11 +201,11 @@ for x, label in [(-0.29, 'BOWLING'), (0, 'VOLLEYBALL'), (0.29, 'FOAM')]:
     obj.data.size = 0.022
     obj.data.materials.append(panel_mats[0])
 
-bpy.ops.object.camera_add(location=(0.42, -1.15, 0.7))
+bpy.ops.object.camera_add(location=(0.48, -1.65, 0.95))
 camera = bpy.context.object
-camera.rotation_euler = (Vector((0, 0, 0.09)) - camera.location).to_track_quat('-Z', 'Y').to_euler()
+camera.rotation_euler = (Vector((0.29, 0, 0.09)) - camera.location).to_track_quat('-Z', 'Y').to_euler()
 camera.data.type = 'ORTHO'
-camera.data.ortho_scale = 1.08
+camera.data.ortho_scale = 1.62
 bpy.context.scene.camera = camera
 for loc, power, size in [((-0.3, -0.4, 0.9), 80, 0.7), ((0.5, 0.2, 0.6), 65, 0.5)]:
     bpy.ops.object.light_add(type='AREA', location=loc)
@@ -146,7 +223,7 @@ scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'
 scene.render.filepath = str(out / 'comparison.png')
 scene.world.color = (0.2, 0.2, 0.2)
-scene['asset_stage'] = 'Look development; procedural materials need baking before Unity export.'
+scene['asset_stage'] = 'Runtime FBX and baked tangent normals in runtime/.'
 scene['ball_diameter_m'] = 0.22
 bpy.ops.wm.save_as_mainfile(filepath=str(out / 'balls.blend'))
 bpy.ops.render.render(write_still=True)

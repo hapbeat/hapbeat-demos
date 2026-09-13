@@ -23,6 +23,11 @@ namespace GloveBallDemo.Runtime
         WaveStarted,
         WaveCleared,
         GameOver,
+        BowlingLeftImpact, BowlingRightImpact, BowlingBodyImpact,
+        VolleyballLeftImpact, VolleyballRightImpact, VolleyballBodyImpact,
+        FoamLeftImpact, FoamRightImpact, FoamBodyImpact,
+        BasketballLeftImpact, BasketballRightImpact, BasketballBodyImpact,
+        PerforatedLeftImpact, PerforatedRightImpact, PerforatedBodyImpact,
     }
 
     [Serializable]
@@ -69,6 +74,7 @@ namespace GloveBallDemo.Runtime
         [SerializeField] private HapbeatLoopBinding[] _loopBindings = Array.Empty<HapbeatLoopBinding>();
 
         public static HapticEventRelay Instance { get; private set; }
+        private BallImpactBindings _ballImpactBindings;
 
         /// <summary>Subscribed by diagnostics (batch smoke runs) to observe the event stream.</summary>
         public event Action<DemoHapticEvent, Vector3, float> EventReported;
@@ -87,6 +93,8 @@ namespace GloveBallDemo.Runtime
             }
 
             Instance = this;
+            var impactPrefab = Resources.Load<GameObject>("BallImpactBindings");
+            if (impactPrefab != null) _ballImpactBindings = Instantiate(impactPrefab, transform).GetComponent<BallImpactBindings>();
             if (_audioSource == null)
             {
                 _audioSource = GetComponent<AudioSource>();
@@ -107,6 +115,12 @@ namespace GloveBallDemo.Runtime
             {
                 Instance.ReportInstance(evt, position, gain);
             }
+        }
+
+        public static void ReportBallImpact(Ball ball, DemoHapticEvent surface, Vector3 position)
+        {
+            PlayAudioOnly(surface, position);
+            ReportHapticOnly(ball.ImpactEvent(surface), position);
         }
 
         public void ReportInstance(DemoHapticEvent evt, Vector3 position, float gain)
@@ -175,6 +189,8 @@ namespace GloveBallDemo.Runtime
 
         private HapbeatUnityEventTrigger FindTrigger(DemoHapticEvent evt)
         {
+            if (_ballImpactBindings != null && evt >= DemoHapticEvent.BowlingLeftImpact)
+                return _ballImpactBindings.Find(evt);
             if (_hapbeatBindings == null)
             {
                 return null;

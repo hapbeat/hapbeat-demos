@@ -3,6 +3,7 @@ using UnityEngine;
 
 namespace GloveBallDemo.Runtime
 {
+    public enum BallKind { Bowling, Volleyball, Foam, Basketball, Perforated }
     public enum BallState
     {
         /// <summary>Parked in the pool.</summary>
@@ -34,6 +35,31 @@ namespace GloveBallDemo.Runtime
         private BallPool _pool;
         private Transform _holdAnchor;
         private float _stateAge;
+        [Header("Visual variants (Bowling, Volleyball, Foam, Basketball, Perforated)")]
+        [SerializeField] private GameObject[] _visualVariants = Array.Empty<GameObject>();
+        public int VariantIndex { get; private set; } = -1;
+        public int VariantCount => _visualVariants.Length;
+
+        public void SelectVariant(int index)
+        {
+            if (index < 0 || index >= _visualVariants.Length) throw new ArgumentOutOfRangeException(nameof(index));
+            for (var i = 0; i < _visualVariants.Length; i++) _visualVariants[i].SetActive(i == index);
+            VariantIndex = index;
+        }
+
+        public DemoHapticEvent ImpactEvent(DemoHapticEvent surface)
+        {
+            if (VariantIndex < 0) return surface;
+            int offset;
+            switch (surface)
+            {
+                case DemoHapticEvent.LeftArmCollide: offset = 0; break;
+                case DemoHapticEvent.RightArmCollide: offset = 1; break;
+                case DemoHapticEvent.BodyCollide: offset = 2; break;
+                default: throw new ArgumentOutOfRangeException(nameof(surface));
+            }
+            return (DemoHapticEvent)((int)DemoHapticEvent.BowlingLeftImpact + VariantIndex * 3 + offset);
+        }
 
         public BallState State { get; private set; } = BallState.Idle;
 

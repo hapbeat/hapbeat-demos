@@ -36,7 +36,6 @@ namespace GloveBallDemo.Runtime
 
             ApplyHitVolumeSettings();
 
-            _block = new MaterialPropertyBlock();
             ApplyColor(_idleColor);
         }
 
@@ -102,11 +101,14 @@ namespace GloveBallDemo.Runtime
 
         private void ApplyColor(Color color)
         {
+            // Layout generation can reset an inactive target before its first Awake.
+            if (_renderer == null) _renderer = GetComponentInChildren<Renderer>(true);
             if (_renderer == null)
             {
                 return;
             }
 
+            _block ??= new MaterialPropertyBlock();
             _renderer.GetPropertyBlock(_block);
             _block.SetColor(BaseColorId, color);
             _block.SetColor(ColorId, color);

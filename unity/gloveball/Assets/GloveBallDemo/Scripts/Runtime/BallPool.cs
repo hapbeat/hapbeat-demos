@@ -9,6 +9,9 @@ namespace GloveBallDemo.Runtime
         [SerializeField] private Ball _prefab;
         [SerializeField] private int _size = 16;
         [SerializeField] private bool _verboseLog;
+        [Tooltip("Only these ball types are launched. One entry fixes the type; empty stops launches. Duplicate entries increase that type's probability.")]
+        [SerializeField] private BallKind[] _launchBallKinds =
+            { BallKind.Bowling, BallKind.Volleyball, BallKind.Foam, BallKind.Basketball, BallKind.Perforated };
 
         private readonly Queue<Ball> _free = new Queue<Ball>();
         private readonly List<Ball> _all = new List<Ball>();
@@ -55,13 +58,22 @@ namespace GloveBallDemo.Runtime
         /// <summary>Returns a parked ball, or null when the pool is exhausted.</summary>
         public Ball Take()
         {
+            if (_launchBallKinds == null || _launchBallKinds.Length == 0) return null;
             if (_free.Count == 0)
             {
                 Debug.LogWarning($"[BallPool] exhausted ({_all.Count} balls in play)");
                 return null;
             }
 
-            var ball = _free.Dequeue();
+            var ball = _free.Peek();
+            var kind = (int)_launchBallKinds[Random.Range(0, _launchBallKinds.Length)];
+            if (ball.VariantCount > 0 && (kind < 0 || kind >= ball.VariantCount))
+            {
+                Debug.LogError("[BallPool] selected ball kind has no visual variant");
+                return null;
+            }
+            _free.Dequeue();
+            if (ball.VariantCount > 0) ball.SelectVariant(kind);
             TotalTaken++;
             return ball;
         }
