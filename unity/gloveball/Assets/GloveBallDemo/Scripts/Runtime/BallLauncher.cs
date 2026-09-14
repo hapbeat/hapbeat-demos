@@ -208,6 +208,10 @@ namespace GloveBallDemo.Runtime
                 return;
             }
 
+            // Keep the intended arrival point despite ball-specific air resistance.
+            // Re-use the planned flight time; light balls depart faster and visibly slow down.
+            if (ball.Body.linearDamping > 0f)
+                velocity = CompensateAirResistance(origin, _pendingAimPoint, velocity, ball.Body.linearDamping);
             _muzzle.rotation = Quaternion.LookRotation(velocity.normalized, Vector3.up);
             ball.LaunchIncoming(origin, velocity);
             HapticEventRelay.PlayAudioOnly(DemoHapticEvent.BallIncomingWarning, origin);
@@ -229,6 +233,27 @@ namespace GloveBallDemo.Runtime
                 _warningLight.enabled = false;
                 _warningLight.intensity = _baseLightIntensity;
             }
+        }
+
+        public static Vector3 CompensateAirResistance(Vector3 origin, Vector3 target, Vector3 planned, float damping)
+        {
+            var horizontalSpeed = new Vector2(planned.x, planned.z).magnitude;
+            if (horizontalSpeed < .01f || damping <= 0f) return planned;
+            float time = new Vector2(target.x - origin.x, target.z - origin.z).magnitude / horizontalSpeed;
+            float dt = Time.fixedDeltaTime;
+            int steps = Mathf.Max(1, Mathf.RoundToInt(time / dt));
+            float q = Mathf.Clamp01(1f - damping * dt);
+            // PhysX discrete integration: v=(v+g*dt)*q, p+=v*dt.
+            float velocityFactor = 1f, displacementFactor = 0f;
+            Vector3 gravityVelocity = Vector3.zero, gravityDisplacement = Vector3.zero;
+            for (int i = 0; i < steps; i++)
+            {
+                velocityFactor *= q;
+                displacementFactor += velocityFactor * dt;
+                gravityVelocity = (gravityVelocity + Physics.gravity * dt) * q;
+                gravityDisplacement += gravityVelocity * dt;
+            }
+            return displacementFactor > .0001f ? (target - origin - gravityDisplacement) / displacementFactor : planned;
         }
 
         private void OnTriggerEnter(Collider other)

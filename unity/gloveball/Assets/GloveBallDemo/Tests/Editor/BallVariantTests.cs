@@ -33,6 +33,9 @@ namespace GloveBallDemo.Tests
                 for (var i = 0; i < 5; i++)
                 {
                     ball.SelectVariant(i);
+                    Assert.That(ball.Feel, Is.Not.Null);
+                    Assert.That(ball.Body.mass, Is.EqualTo(ball.Feel.Mass));
+                    Assert.That(ball.Body.linearDamping, Is.EqualTo(ball.Feel.AirResistance));
                     foreach (var surface in new[] { DemoHapticEvent.LeftArmCollide, DemoHapticEvent.RightArmCollide, DemoHapticEvent.BodyCollide })
                         Assert.That(ids.Add(ball.ImpactEvent(surface)), Is.True);
                     var so = new SerializedObject(ball);
@@ -41,7 +44,6 @@ namespace GloveBallDemo.Tests
                         Assert.That(((GameObject)variants.GetArrayElementAtIndex(j).objectReferenceValue).activeSelf, Is.EqualTo(j == i));
                 }
                 Assert.That(ball.GetComponentsInChildren<Collider>(true).Length, Is.EqualTo(1));
-                Assert.That(ball.GetComponent<Rigidbody>().mass, Is.EqualTo(.25f));
             }
             finally { Object.DestroyImmediate(ball.gameObject); }
         }

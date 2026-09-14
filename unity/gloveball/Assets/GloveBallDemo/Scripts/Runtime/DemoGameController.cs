@@ -331,6 +331,8 @@ namespace GloveBallDemo.Runtime
             var t = Mathf.Clamp01(roundIndex / (float)denominator);
             var interval = Vector2.Lerp(_firstRoundLaunchInterval, _finalRoundLaunchInterval, t);
             var speed = Vector2.Lerp(_firstRoundBallSpeed, _finalRoundBallSpeed, t);
+            var feel = Resources.Load<BallFeelSettings>("BallFeelSettings");
+            if (feel != null) speed *= Mathf.Lerp(feel.FirstRoundSpeedMultiplier, feel.FinalRoundSpeedMultiplier, t);
             return new WaveDefinition(
                 Mathf.Max(1f, _roundDuration),
                 Mathf.Max(0.05f, Mathf.Min(interval.x, interval.y)),

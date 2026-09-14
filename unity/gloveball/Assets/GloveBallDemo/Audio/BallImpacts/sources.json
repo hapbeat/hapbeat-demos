@@ -1,0 +1,57 @@
+[
+  {
+    "ball": "Bowling",
+    "author": "mrrockcandy",
+    "source": "https://freesound.org/people/mrrockcandy/sounds/792203/",
+    "license": "CC0-1.0",
+    "preview": "https://cdn.freesound.org/previews/792/792203_17037949-hq.mp3",
+    "preview_sha256": "2fefdc8b8ae496c5c9c787a36a1ab26fecdadc9c8fe3506e30e172c0ba9a0aea",
+    "start_seconds": 0.10501133786848073,
+    "duration_seconds": 0.5,
+    "processing": "mono 44.1kHz, trim, peak normalization, edge fades"
+  },
+  {
+    "ball": "Volleyball",
+    "author": "Luisa_Sanchez",
+    "source": "https://freesound.org/people/Luisa_Sanchez/sounds/816991/",
+    "license": "CC0-1.0",
+    "preview": "https://cdn.freesound.org/previews/816/816991_17552599-hq.mp3",
+    "preview_sha256": "f50164057abbf262ac301128f9fb08dfc1026396072ec7059fdceeba0c7d659e",
+    "start_seconds": 0.3550113378684807,
+    "duration_seconds": 0.65,
+    "processing": "mono 44.1kHz, trim, peak normalization, edge fades"
+  },
+  {
+    "ball": "Foam",
+    "author": "MegaPenguin13",
+    "source": "https://freesound.org/people/MegaPenguin13/sounds/118204/",
+    "license": "CC0-1.0",
+    "preview": "https://cdn.freesound.org/previews/118/118204_2043421-hq.mp3",
+    "preview_sha256": "770914335ecf6c0dd66c6cac06ca88f8040b0aa5b24bdabebd115ad03bb9d90a",
+    "start_seconds": 0.5750113378684807,
+    "duration_seconds": 0.5,
+    "processing": "mono 44.1kHz, trim, peak normalization, edge fades"
+  },
+  {
+    "ball": "Basketball",
+    "author": "toddcircle",
+    "source": "https://freesound.org/people/toddcircle/sounds/451642/",
+    "license": "CC0-1.0",
+    "preview": "https://cdn.freesound.org/previews/451/451642_9133009-hq.mp3",
+    "preview_sha256": "a929399f009bb826386616e0d33ce5762005ab2d19a8c393ac7ca937f9022ae9",
+    "start_seconds": 0.5750113378684807,
+    "duration_seconds": 0.65,
+    "processing": "mono 44.1kHz, trim, peak normalization, edge fades"
+  },
+  {
+    "ball": "Perforated",
+    "author": "lori.mortimer",
+    "source": "https://freesound.org/people/lori.mortimer/sounds/723791/",
+    "license": "CC0-1.0",
+    "preview": "https://cdn.freesound.org/previews/723/723791_9190375-hq.mp3",
+    "preview_sha256": "d2501a4f454367d6551143f5b6f35a9370b16191b473b8b2f4e6da44d66bc386",
+    "start_seconds": 0.5450113378684808,
+    "duration_seconds": 0.5,
+    "processing": "mono 44.1kHz, trim, peak normalization, edge fades"
+  }
+]

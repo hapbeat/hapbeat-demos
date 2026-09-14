@@ -119,7 +119,16 @@ namespace GloveBallDemo.Runtime
 
         public static void ReportBallImpact(Ball ball, DemoHapticEvent surface, Vector3 position)
         {
-            PlayAudioOnly(surface, position);
+            if (Instance != null && ball.Feel != null && ball.Feel.ImpactClip != null)
+            {
+                Instance.AudioRequested?.Invoke(ball.ImpactEvent(surface), position, ball.Feel.ImpactVolume);
+                if (Instance._audioSource != null)
+                {
+                    Instance._audioSource.transform.position = position;
+                    Instance._audioSource.PlayOneShot(ball.Feel.ImpactClip, ball.Feel.ImpactVolume);
+                }
+            }
+            else PlayAudioOnly(surface, position);
             ReportHapticOnly(ball.ImpactEvent(surface), position);
         }
 

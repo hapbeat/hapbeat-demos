@@ -39,12 +39,24 @@ namespace GloveBallDemo.Runtime
         [SerializeField] private GameObject[] _visualVariants = Array.Empty<GameObject>();
         public int VariantIndex { get; private set; } = -1;
         public int VariantCount => _visualVariants.Length;
+        private BallFeelSettings _feelSettings;
+        public BallFeel Feel { get; private set; }
 
         public void SelectVariant(int index)
         {
             if (index < 0 || index >= _visualVariants.Length) throw new ArgumentOutOfRangeException(nameof(index));
             for (var i = 0; i < _visualVariants.Length; i++) _visualVariants[i].SetActive(i == index);
             VariantIndex = index;
+            EnsureBody();
+            if (_feelSettings == null) _feelSettings = Resources.Load<BallFeelSettings>("BallFeelSettings");
+            Feel = _feelSettings != null ? _feelSettings.Find((BallKind)index) : null;
+            if (Feel != null)
+            {
+                _rigidbody.mass = Mathf.Max(.01f, Feel.Mass);
+                _rigidbody.linearDamping = Mathf.Clamp(Feel.AirResistance, 0f, 2f);
+                foreach (var collider in GetComponentsInChildren<Collider>(true))
+                    if (!collider.isTrigger) collider.sharedMaterial = Feel.BounceMaterial;
+            }
         }
 
         public DemoHapticEvent ImpactEvent(DemoHapticEvent surface)
