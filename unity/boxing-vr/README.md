@@ -2,11 +2,21 @@
 
 Unity **6000.3.12f1** の90秒VRスパーリングデモ。左右のグローブで攻撃・ガードし、頭を動かして相手のパンチを避けます。3カウント後にラウンドが始まり、終了時に得点と再開メニューを表示します。Hapbeatが未接続でもゲームは動作します。
 
+## Editor + XR Interaction Simulator（HMD不要）
+
+1. `Hapbeat Boxing > Editor Input > Simulator` を選び、Playを押します。Gameビューをクリックしてキーボード入力を渡してください。
+2. ゲームの入力は `Controllers` のまま使います。`Desktop` は別の簡易操作モードです。
+3. `Hapbeat Boxing > Editor Input > Controls` に操作ガイドがあります。TabでFPS／デバイス操作を切替、Hで頭、`[`／`]`で左右デバイスを選択し、WASDで移動、Q/Eで上下移動、右マウスドラッグ／矢印キーで回転、Rでリセットします。仮想コントローラーの1がA/X、2がB/Yです。Escapeでゲームメニュー、Enterで決定もできます。
+
+Unity XRI 3.3.1の標準シミュレーターPrefab・入力設定を使用します。独自のテスト姿勢をゲームへ直接渡す機能ではなく、実機と同じInput System経由で頭・両手・ボタンを読みます。操作ガイドはEditorウィンドウに表示し、サンプルの装飾UIは取り込んでいません。
+
+シミュレーター選択時はEditorのネイティブOpenXR起動を無効にします。Air Linkへ戻す時はPlayを止め、`Hapbeat Boxing > Editor Input > Air Link` を選んでください。選択はこのPC・このプロジェクト専用です。AndroidのOpenXR設定は変えず、シミュレーター資産は `Assets/Boxing/Editor/Simulator` に隔離してAPKへ含めません。
+
 ## Editor + Quest Air Link
 
 1. この `boxing-vr` フォルダーをUnity 6000.3.12f1で開き、`Assets/Boxing/Scenes/Boxing.unity` を開きます。
 2. Meta Horizon LinkでQuestをAir Link接続します。WindowsのOpenXR runtimeはMeta Horizon Linkを選択してください。
-3. Unityのactive build targetをWindowsにし、Playを押します。起動時メニューの `START 90s ROUND` を選択します。
+3. `Hapbeat Boxing > Editor Input > Air Link` を選び、Unityのactive build targetをWindowsにしてPlayを押します。起動時メニューの `START 90s ROUND` を選択します。
 
 左右Touchコントローラーが既定です。A/Xで決定、左スティックで選択、Menu/B/Yでメニューを開閉します。Handsモード、またはコントローラー未追跡時は選択肢を1.5秒見つめても操作できます。追跡中のコントローラー選択を視線で上書きしません。起動時のHMD位置・向きをリング上の開始位置に合わせます。必要ならメニューから `RECENTER` を選択します。
 
@@ -43,6 +53,9 @@ Unity Editorを閉じて、PowerShellから実行します。Unityの場所が�
 
 ```powershell
 ./tools/run-unity.ps1 -Task Tests
+./tools/run-unity.ps1 -Task Simulator
+./tools/run-unity.ps1 -Task InputTests
+./tools/run-unity.ps1 -Task SimulatorSmoke
 ./tools/run-unity.ps1 -Task Smoke
 ./tools/run-unity.ps1 -Task Capture
 ./tools/run-unity.ps1 -Task Windows
@@ -51,6 +64,8 @@ Unity Editorを閉じて、PowerShellから実行します。Unityの場所が�
 ```
 
 `Logs/` にテスト結果・実行ログ・画像が出ます。Smokeは実際のPlay Modeで90秒ラウンド、パンチ、ガード、回避、被弾、メニュー停止を再生し、3部位・弱打／強打・ゲイン変化・触覚送信ゼロ・エラーゼロを検証します。`Builds/Windows/HapbeatBoxing.exe`、`Builds/HapbeatBoxing.apk` が生成先です。
+
+InputTestsはUnity公式InputTestFixtureを使うPlay Modeの入力テストです。SimulatorSmokeは標準Prefabへキーボードイベントを渡し、頭・左右の個別移動、ボタン、追跡喪失／復帰を実際のゲーム入力で確認します。全自動検証は無音・実機送信なしです。ビルドでは詳細レポートからEditorシミュレーター資産の混入も検査します。
 
 各コマンドは終了コードだけでなく起動・インポートログも検査します。Unityは設定ファイルの構文エラー後もテストやScene検証を続ける場合があるため、`BOXING_SCENE_VALID` 単独では成功と扱いません。任意の起動ログは `./tools/assert-unity-log.ps1 -LogPath ./Logs/AirLinkEditor.log` で確認できます。Unityのシリアライズ済みファイルを一括で末尾空白除去しないでください。空のレイヤー名は明示的な空文字列として保持します。
 

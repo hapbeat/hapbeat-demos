@@ -146,7 +146,7 @@ namespace Hapbeat.Boxing.Editor
             game.presentation.Render(game, pose, false);
             Render(camera, "Logs/boxing-menu.png");
         }
-        private static void Render(Camera camera, string path)
+        internal static void Render(Camera camera, string path)
         {
             var rt = new RenderTexture(1600, 1000, 24); rt.Create();
             var request = new UniversalRenderPipeline.SingleCameraRequest { destination = rt };

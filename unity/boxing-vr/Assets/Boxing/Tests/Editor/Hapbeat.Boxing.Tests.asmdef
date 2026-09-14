@@ -1,6 +1,6 @@
 {
   "name": "Hapbeat.Boxing.Tests",
-  "references": ["Hapbeat.Boxing", "Hapbeat.Runtime", "Hapbeat.DemoSwitch", "Hapbeat.Boxing.Editor", "Unity.InputSystem", "Unity.XR.CoreUtils", "Unity.ugui"],
+  "references": ["Hapbeat.Boxing", "Hapbeat.Runtime", "Hapbeat.DemoSwitch", "Hapbeat.Boxing.Editor", "Unity.InputSystem", "Unity.XR.CoreUtils", "Unity.XR.Interaction.Toolkit", "Unity.ugui"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"]
 }

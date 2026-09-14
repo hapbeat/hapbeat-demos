@@ -344,14 +344,16 @@ namespace Hapbeat.Boxing.Editor
         public static void BuildWindows()
         {
             Configure(); Validate(); Directory.CreateDirectory("Builds/Windows");
-            var report = BuildPipeline.BuildPlayer(new[] { ScenePath }, "Builds/Windows/HapbeatBoxing.exe", BuildTarget.StandaloneWindows64, BuildOptions.None);
+            var report = BuildPipeline.BuildPlayer(new[] { ScenePath }, "Builds/Windows/HapbeatBoxing.exe", BuildTarget.StandaloneWindows64, BuildOptions.DetailedBuildReport);
             if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded) throw new Exception("Windows build failed");
+            BoxingSimulator.AssertExcludedFromBuild(report);
         }
         public static void BuildAndroid()
         {
             Configure(); Validate(); Directory.CreateDirectory("Builds");
-            var report = BuildPipeline.BuildPlayer(new[] { ScenePath }, "Builds/HapbeatBoxing.apk", BuildTarget.Android, BuildOptions.None);
+            var report = BuildPipeline.BuildPlayer(new[] { ScenePath }, "Builds/HapbeatBoxing.apk", BuildTarget.Android, BuildOptions.DetailedBuildReport);
             if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded) throw new Exception("Android build failed");
+            BoxingSimulator.AssertExcludedFromBuild(report);
         }
         private static Material Material(string name, Color color, float smoothness = 0.15f)
         {

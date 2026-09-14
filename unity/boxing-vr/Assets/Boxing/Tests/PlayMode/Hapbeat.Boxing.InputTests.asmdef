@@ -1,0 +1,5 @@
+{
+  "name": "Hapbeat.Boxing.InputTests",
+  "references": ["Hapbeat.Boxing", "Unity.InputSystem", "Unity.InputSystem.TestFramework", "Unity.XR.Interaction.Toolkit"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

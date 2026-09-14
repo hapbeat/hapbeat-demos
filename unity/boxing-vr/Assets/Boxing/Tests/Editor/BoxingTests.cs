@@ -22,6 +22,16 @@ namespace Hapbeat.Boxing.Tests
             Assert.That(table.GetArrayElementAtIndex(31).stringValue, Is.Empty);
         }
         private BoxingTuning tuning;
+        [Test] public void SimulatorAssetsResolveWithoutMissingReferences() => BoxingSimulator.ValidateAssets();
+        [Test] public void SimulatorAssetsAreNotSceneOrResourcesDependencies()
+        {
+            foreach (var path in AssetDatabase.GetDependencies("Assets/Boxing/Scenes/Boxing.unity", true))
+                Assert.That(path, Does.Not.StartWith("Assets/Boxing/Editor/Simulator/"));
+            var config = AssetDatabase.LoadAllAssetsAtPath("Assets/XRI/Settings/Resources/XRDeviceSimulatorSettings.asset")[0];
+            var properties = new SerializedObject(config);
+            Assert.That(properties.FindProperty("m_AutomaticallyInstantiateSimulatorPrefab").boolValue, Is.False);
+            Assert.That(properties.FindProperty("m_SimulatorPrefab").objectReferenceValue, Is.Null);
+        }
         [SetUp] public void Setup() => tuning = ScriptableObject.CreateInstance<BoxingTuning>();
         [TearDown] public void Cleanup() => Object.DestroyImmediate(tuning);
         [Test] public void RelativeVelocityIsDifferenceNotSum()

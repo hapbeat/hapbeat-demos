@@ -30,6 +30,10 @@ namespace Hapbeat.Boxing
         private bool oldMenu, oldConfirm, handMenuLatched, aligned;
         private float openHandsTime, leftPunch, rightPunch;
         private float desktopYaw, desktopPitch;
+        private BoxingXrControls xrControls;
+
+        private void OnEnable() { xrControls = new BoxingXrControls(); aligned = false; }
+        private void OnDisable() { xrControls?.Dispose(); xrControls = null; HasTracking = false; }
 
         public void SetTestPose(BoxerPose pose) { HasOverride = true; testPose = Current = pose; HasTracking = pose.valid; }
         public void ClearTestPose() => HasOverride = false;
@@ -54,7 +58,8 @@ namespace Hapbeat.Boxing
             if (mode == BoxingInputMode.Desktop) ReadDesktop(ref frame);
             else
             {
-                bool headValid = TryNode(XRNode.Head, out var hp);
+                var xr = xrControls.Read();
+                bool headValid = xr.headTracked;
                 // Head transform is driven by the template's Input System TrackedPoseDriver (Update + BeforeRender).
                 if (headValid && !aligned)
                 {
@@ -65,7 +70,8 @@ namespace Hapbeat.Boxing
                 frame.head = headCamera.transform.position; frame.headRotation = headCamera.transform.rotation;
                 if (mode == BoxingInputMode.Controllers)
                 {
-                    bool l = TryNode(XRNode.LeftHand, out var lp), r = TryNode(XRNode.RightHand, out var rp);
+                    bool l = xr.leftTracked, r = xr.rightTracked;
+                    var lp = xr.left; var rp = xr.right;
                     var space = headCamera.transform.parent;
                     frame.left = space.TransformPoint(lp.position + lp.rotation * controllerOffset);
                     frame.right = space.TransformPoint(rp.position + rp.rotation * controllerOffset);
@@ -80,7 +86,8 @@ namespace Hapbeat.Boxing
                     bool r = ReadHand(false, out frame.right, out frame.rightRotation, out frame.rightClosed);
                     frame.valid = headValid && l && r;
                 }
-                ReadButtons();
+                MenuPressed = xr.menu && !oldMenu; ConfirmPressed = xr.confirm && !oldConfirm;
+                oldMenu = xr.menu; oldConfirm = xr.confirm; Navigate = xr.navigate;
             }
             if (Keyboard.current != null)
             {
@@ -97,15 +104,6 @@ namespace Hapbeat.Boxing
                 if (openHandsTime > 1.2f && !handMenuLatched) { MenuPressed = true; handMenuLatched = true; }
             }
             Current = frame; HasTracking = frame.valid;
-        }
-        private static bool TryNode(XRNode node, out Pose pose)
-        {
-            pose = Pose.identity;
-            var device = InputDevices.GetDeviceAtXRNode(node);
-            if (!device.isValid || !device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.isTracked, out bool tracked) || !tracked) return false;
-            bool p = device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.devicePosition, out var position);
-            bool r = device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.deviceRotation, out var rotation);
-            pose = new Pose(position, rotation); return p && r;
         }
         private void FindHands()
         {
@@ -130,20 +128,6 @@ namespace Hapbeat.Boxing
             // Scale against this hand's measured palm length, not a fixed hand size.
             closed = Vector3.Distance(tip.position, palm.position) < Vector3.Distance(knuckle.position, wrist.position) * 0.95f;
             return true;
-        }
-        private void ReadButtons()
-        {
-            var l = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
-            var r = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
-            l.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool menu);
-            l.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out bool y);
-            r.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out bool b);
-            l.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool x);
-            r.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool a);
-            l.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primary2DAxis, out Vector2 axis);
-            bool m = menu || y || b, confirm = x || a;
-            MenuPressed = m && !oldMenu; ConfirmPressed = confirm && !oldConfirm;
-            oldMenu = m; oldConfirm = confirm; Navigate = axis.y;
         }
         private void ReadDesktop(ref BoxerPose frame)
         {
