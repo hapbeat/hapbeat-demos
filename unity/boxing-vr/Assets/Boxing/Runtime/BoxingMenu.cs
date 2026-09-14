@@ -96,7 +96,7 @@ namespace Hapbeat.Boxing
                 case 3: game.tuning.impactMode = game.tuning.impactMode == ImpactMode.Continuous ? ImpactMode.WeakHard : ImpactMode.Continuous; break;
                 case 4: input.Recenter(); Open(); break;
                 case 5: game.feedback.hapticsEnabled = !game.feedback.hapticsEnabled; if (!game.feedback.hapticsEnabled) game.feedback.StopFeedback(); break;
-                case 6: game.feedback.soundEnabled = !game.feedback.soundEnabled; if (!game.feedback.soundEnabled) game.feedback.audioSource.Stop(); break;
+                case 6: game.feedback.soundEnabled = !game.feedback.soundEnabled; if (!game.feedback.soundEnabled) { game.feedback.audioSource.Stop(); game.feedback.bellSource.Stop(); } break;
             }
         }
         private void Refresh()

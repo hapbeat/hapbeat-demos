@@ -7,6 +7,7 @@ namespace Hapbeat.Boxing
     public enum BoxingInputMode { Controllers, Hands, Desktop }
     public enum ImpactMode { Continuous, WeakHard }
     public enum ImpactZone { LeftGlove, RightGlove, Head }
+    public enum ImpactSurface { Glove, Body }
 
     [CreateAssetMenu(menuName = "Hapbeat Boxing/Tuning")]
     public sealed class BoxingTuning : ScriptableObject
@@ -18,9 +19,11 @@ namespace Hapbeat.Boxing
         [Min(0.1f)] public float telegraphSeconds = 0.42f;
         [Min(0.08f)] public float strikeSeconds = 0.22f;
         [Min(0.1f)] public float recoverSeconds = 0.55f;
+        [Min(0.1f)] public float guardInterval = 2.5f;
+        [Min(0.4f)] public float guardSeconds = 1.2f;
         [Min(0.5f)] public float playRadius = 1.0f;
         [Header("Collision (metres / seconds)")]
-        [Min(0.01f)] public float gloveRadius = 0.115f;
+        [Min(0.01f)] public float gloveRadius = 0.09f;
         [Min(0.01f)] public float headRadius = 0.14f;
         [Min(0.01f)] public float enemyHeadRadius = 0.17f;
         [Min(0.01f)] public float enemyBodyRadius = 0.25f;
@@ -56,11 +59,12 @@ namespace Hapbeat.Boxing
         public readonly ImpactZone zone;
         public readonly float relativeSpeed, gain;
         public readonly bool hard, attack;
+        public readonly ImpactSurface surface;
         public readonly Vector3 point;
-        public BoxingImpact(ImpactZone zone, float speed, bool attack, Vector3 point, BoxingTuning tuning)
+        public BoxingImpact(ImpactZone zone, float speed, bool attack, Vector3 point, BoxingTuning tuning, ImpactSurface surface)
         {
             this.zone = zone; relativeSpeed = speed; gain = tuning.Gain(speed);
-            hard = tuning.IsHard(speed); this.attack = attack; this.point = point;
+            hard = tuning.IsHard(speed); this.attack = attack; this.point = point; this.surface = surface;
         }
     }
 
@@ -88,6 +92,7 @@ namespace Hapbeat.Boxing
         public float Countdown { get; private set; }
         public int Hits { get; private set; }
         public int Blocks { get; private set; }
+        public int EnemyBlocks { get; private set; }
         public int Taken { get; private set; }
         public int Dodges { get; private set; }
         public int Score { get; private set; }
@@ -98,7 +103,7 @@ namespace Hapbeat.Boxing
         {
             MaximumHealth = Mathf.Max(1, maximumHealth);
             PlayerHealth = EnemyHealth = MaximumHealth;
-            TimeLeft = duration; Countdown = 3; Hits = Blocks = Taken = Dodges = Score = 0; Phase = BoxingPhase.Countdown;
+            TimeLeft = duration; Countdown = 3; Hits = Blocks = EnemyBlocks = Taken = Dodges = Score = 0; Phase = BoxingPhase.Countdown;
         }
         public void Tick(float dt, bool paused)
         {
@@ -118,9 +123,12 @@ namespace Hapbeat.Boxing
         {
             if (Phase != BoxingPhase.Fighting) return;
             float damage = impact.hard ? 20 : 10;
-            if (impact.attack) { Hits++; Score += Mathf.RoundToInt(20 + 80 * Mathf.Clamp01(impact.gain)); EnemyHealth = Mathf.Max(0, EnemyHealth - damage); }
+            if (impact.surface == ImpactSurface.Glove)
+            {
+                if (impact.attack) EnemyBlocks++; else { Blocks++; Score += 15; }
+            }
+            else if (impact.attack) { Hits++; Score += Mathf.RoundToInt(20 + 80 * Mathf.Clamp01(impact.gain)); EnemyHealth = Mathf.Max(0, EnemyHealth - damage); }
             else if (impact.zone == ImpactZone.Head) { Taken++; PlayerHealth = Mathf.Max(0, PlayerHealth - damage); }
-            else { Blocks++; Score += 15; }
             if (PlayerHealth <= 0 || EnemyHealth <= 0) Phase = BoxingPhase.Results;
         }
         public void Dodge() { if (Phase == BoxingPhase.Fighting) { Dodges++; Score += 10; } }

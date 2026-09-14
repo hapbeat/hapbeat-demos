@@ -22,6 +22,7 @@ namespace Hapbeat.Boxing
         private bool focus = true, appPaused;
         private float validTime, leftCooldown, rightCooldown;
         private bool haveHistory, leftContact, rightContact;
+        private bool leftBlockedThisFrame, rightBlockedThisFrame;
         private BoxerPose previous;
         private Vector3 oldEnemyLeft, oldEnemyRight, oldEnemyHead, oldEnemyBody;
         private int resolvedAttack, lastCompleted;
@@ -88,7 +89,7 @@ namespace Hapbeat.Boxing
             bool unavailable = !input.HasOverride && (appPaused || (displayFocusKnown ? !displayFocused : !focus));
             if (!tracking || outside || unavailable || (menu != null && menu.IsOpen))
             {
-                if (!Paused) feedback.StopFeedback();
+                if (!Paused) feedback.StopImpacts();
                 Paused = true;
                 PauseReason = unavailable ? (appPaused ? "APPLICATION PAUSED" : displayFocusKnown ? "HEADSET PAUSED - OPENXR NOT FOCUSED" : "GAME WINDOW NOT FOCUSED") : outside ? "RETURN TO YOUR START POSITION" : !tracking ? "TRACKING LOST - SHOW BOTH HANDS / CONTROLLERS" : "PAUSED";
                 ResetHistory();
@@ -107,14 +108,9 @@ namespace Hapbeat.Boxing
             { ResetHistory(); feedback.StopFeedback(); return; }
             Round.Tick(dt, false);
             Opponent.Tick(dt, pose.head, Round.Phase == BoxingPhase.Fighting);
-            if (Round.Phase != previousPhase)
-            {
-                if (Round.Phase == BoxingPhase.Results) { feedback.StopFeedback(); menu.Open(); }
-                if (Round.Phase == BoxingPhase.Fighting || Round.Phase == BoxingPhase.Results) feedback.Ring();
-                previousPhase = Round.Phase;
-            }
             if (haveHistory && Round.Phase == BoxingPhase.Fighting)
             {
+                leftBlockedThisFrame = rightBlockedThisFrame = false;
                 leftCooldown = Mathf.Max(0, leftCooldown - dt); rightCooldown = Mathf.Max(0, rightCooldown - dt);
                 ResolveEnemy(pose, dt);
                 ResolvePlayer(pose.left, previous.left, pose.leftClosed, ImpactZone.LeftGlove, ref leftContact, ref leftCooldown, dt);
@@ -124,6 +120,12 @@ namespace Hapbeat.Boxing
                     if (resolvedAttack != Opponent.AttackId) Round.Dodge();
                     lastCompleted = Opponent.CompletedAttacks;
                 }
+            }
+            if (Round.Phase != previousPhase)
+            {
+                if (Round.Phase == BoxingPhase.Results) { feedback.StopFeedback(); menu.Open(); }
+                if (Round.Phase == BoxingPhase.Fighting || Round.Phase == BoxingPhase.Results) feedback.Ring();
+                previousPhase = Round.Phase;
             }
             SaveHistory(pose);
             if (presentation != null) presentation.Render(this, pose, true);
@@ -148,25 +150,45 @@ namespace Hapbeat.Boxing
             resolvedAttack = Opponent.AttackId;
             float speed = BoxingCollision.RelativeSpeed(from, to, targetFrom, targetTo, dt);
             // A guard contact stops the trajectory, not just the scoring for this attack.
-            if (zone != ImpactZone.Head) Opponent.Block(Vector3.Lerp(from, to, earliest));
-            if (speed >= tuning.minimumImpactSpeed) Report(new BoxingImpact(zone, speed, false, Vector3.Lerp(from, to, earliest), tuning));
+            if (zone != ImpactZone.Head)
+            {
+                Opponent.Block(Vector3.Lerp(from, to, earliest));
+                leftBlockedThisFrame = zone == ImpactZone.LeftGlove; rightBlockedThisFrame = zone == ImpactZone.RightGlove;
+            }
+            if (speed >= tuning.minimumImpactSpeed) Report(new BoxingImpact(zone, speed, false, Vector3.Lerp(from, to, earliest), tuning,
+                zone == ImpactZone.Head ? ImpactSurface.Body : ImpactSurface.Glove));
         }
         private void ResolvePlayer(Vector3 to, Vector3 from, bool closed, ImpactZone side, ref bool contact, ref float cooldown, float dt)
         {
-            bool head = BoxingCollision.Sweep(from, to, tuning.gloveRadius, oldEnemyHead, Opponent.Head, tuning.enemyHeadRadius, out _);
-            bool body = BoxingCollision.Sweep(from, to, tuning.gloveRadius, oldEnemyBody, Opponent.Body, tuning.enemyBodyRadius, out _);
-            bool overlap = Vector3.Distance(to, Opponent.Head) <= tuning.gloveRadius + tuning.enemyHeadRadius + 0.03f ||
-                Vector3.Distance(to, Opponent.Body) <= tuning.gloveRadius + tuning.enemyBodyRadius + 0.03f;
+            if (Round.Phase != BoxingPhase.Fighting) return;
+            float earliest = float.PositiveInfinity;
+            Vector3 targetFrom = default, targetTo = default;
+            var surface = ImpactSurface.Body;
+            void Candidate(Vector3 a, Vector3 b, float radius, ImpactSurface material)
+            {
+                if (BoxingCollision.Sweep(from, to, tuning.gloveRadius, a, b, radius, out float t) && t < earliest)
+                { earliest = t; targetFrom = a; targetTo = b; surface = material; }
+            }
+            // Earliest surface wins; a glove interception cannot also damage the body behind it.
+            Candidate(oldEnemyLeft, Opponent.Left, tuning.gloveRadius, ImpactSurface.Glove);
+            Candidate(oldEnemyRight, Opponent.Right, tuning.gloveRadius, ImpactSurface.Glove);
+            Candidate(oldEnemyHead, Opponent.Head, tuning.enemyHeadRadius, ImpactSurface.Body);
+            Candidate(oldEnemyBody, Opponent.Body, tuning.enemyBodyRadius, ImpactSurface.Body);
+            bool hit = !float.IsPositiveInfinity(earliest);
+            bool overlap = TouchingEnemy(to);
             // Hysteresis releases an existing contact; it must never create an early one.
-            bool wasContact = contact; contact = head || body || (wasContact && overlap);
-            if ((!head && !body) || wasContact || cooldown > 0 || !closed) return;
-            float speed = BoxingCollision.RelativeSpeed(from, to, head ? oldEnemyHead : oldEnemyBody, head ? Opponent.Head : Opponent.Body, dt);
+            bool wasContact = contact; contact = hit || (wasContact && overlap);
+            bool alreadyResolved = side == ImpactZone.LeftGlove ? leftBlockedThisFrame : rightBlockedThisFrame;
+            if (!hit || wasContact || cooldown > 0 || !closed || alreadyResolved) return;
+            float speed = BoxingCollision.RelativeSpeed(from, to, targetFrom, targetTo, dt);
             if (speed < tuning.minimumImpactSpeed) return;
-            cooldown = tuning.hitCooldown; Opponent.React(tuning.Gain(speed));
-            Report(new BoxingImpact(side, speed, true, to, tuning));
+            cooldown = tuning.hitCooldown;
+            if (surface == ImpactSurface.Body) Opponent.React(tuning.Gain(speed));
+            Report(new BoxingImpact(side, speed, true, Vector3.Lerp(from, to, earliest), tuning, surface));
         }
         private bool TouchingEnemy(Vector3 position) => Vector3.Distance(position, Opponent.Head) <= tuning.gloveRadius + tuning.enemyHeadRadius + 0.03f ||
-            Vector3.Distance(position, Opponent.Body) <= tuning.gloveRadius + tuning.enemyBodyRadius + 0.03f;
+            Vector3.Distance(position, Opponent.Body) <= tuning.gloveRadius + tuning.enemyBodyRadius + 0.03f ||
+            Vector3.Distance(position, Opponent.Left) <= tuning.gloveRadius * 2 + 0.03f || Vector3.Distance(position, Opponent.Right) <= tuning.gloveRadius * 2 + 0.03f;
         private void Report(BoxingImpact impact)
         {
             if (Round.Phase != BoxingPhase.Fighting) return;

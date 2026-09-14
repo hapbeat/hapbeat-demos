@@ -12,6 +12,8 @@ namespace Hapbeat.Boxing
         public Vector3 Root { get; private set; }
         public bool Striking { get; private set; }
         public bool Telegraphing { get; private set; }
+        public bool Guarding { get; private set; }
+        public float GuardWeight { get; private set; }
         public int AttackId { get; private set; }
         public bool AttackLeft { get; private set; }
         public int CompletedAttacks { get; private set; }
@@ -20,12 +22,15 @@ namespace Hapbeat.Boxing
         private bool attacking, blocked;
         private Vector3 aim, strikeStart, blockedAt;
         private float height = 1.65f;
+        private float guardWait, guardTime;
+        private System.Random random;
         private readonly BoxingTuning tuning;
         public BoxingOpponent(BoxingTuning tuning) { this.tuning = tuning; Reset(1.65f); }
         public void Reset(float playerHeight)
         {
             height = Mathf.Clamp(playerHeight, 1.25f, 1.95f); clock = attackTime = reaction = 0;
             pattern = AttackId = CompletedAttacks = 0; wait = 0.7f; attacking = Striking = Telegraphing = blocked = false;
+            random = new System.Random(1701); guardWait = tuning.guardInterval; guardTime = 0; Guarding = false; GuardWeight = 0;
             SetRestPose();
         }
         public void React(float gain) => reaction = Mathf.Max(reaction, 0.10f + gain * 0.15f);
@@ -41,10 +46,20 @@ namespace Hapbeat.Boxing
         {
             if (dt <= 0) return;
             clock += dt; reaction = Mathf.Max(0, reaction - dt);
-            SetRestPose(); Striking = Telegraphing = false;
+            SetRestPose(); Striking = Telegraphing = Guarding = false; GuardWeight = 0;
             if (!fighting) return;
             if (!attacking)
             {
+                guardWait -= dt;
+                if (guardTime > 0 || guardWait <= 0)
+                {
+                    guardTime += dt; Guarding = true;
+                    GuardWeight = Mathf.SmoothStep(0, 1, Mathf.Clamp01(Mathf.Min(guardTime, tuning.guardSeconds - guardTime) / 0.18f));
+                    Left = Vector3.Lerp(Left, Head + new Vector3(-0.105f, -0.025f, -0.25f), GuardWeight);
+                    Right = Vector3.Lerp(Right, Head + new Vector3(0.105f, -0.025f, -0.25f), GuardWeight);
+                    if (guardTime >= tuning.guardSeconds) { guardTime = 0; guardWait = tuning.guardInterval * (0.65f + (float)random.NextDouble()); Guarding = false; }
+                    return;
+                }
                 wait -= dt;
                 if (wait > 0) return;
                 attacking = true; blocked = false; attackTime = 0; AttackId++; AttackLeft = pattern % 3 != 1;

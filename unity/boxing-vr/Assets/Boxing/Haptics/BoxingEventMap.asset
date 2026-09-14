@@ -13,88 +13,172 @@ MonoBehaviour:
   m_Name: BoxingEventMap
   m_EditorClassIdentifier: Hapbeat.Runtime::Hapbeat.HapbeatEventMap
   entries:
-  - _id: 6335a0f886bd4d529d53aa386de7d72a
+  - _id: c0a29013f4a04ca197fa29ec8b62b160
     mode: 1
-    displayName: left_glove soft
+    displayName: left_glove_glove_soft
     category: boxing
-    eventName: left_glove_soft
-    streamClip: {fileID: 8300000, guid: 74449f93cc0ece542974ed4c23e7e872, type: 3}
+    eventName: left_glove_glove_soft
+    streamClip: {fileID: 8300000, guid: d394c1b5d36d84a4b993309015ac45dd, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
-  - _id: f2b473f67bed4b83bc99e7c5cefa5efc
+  - _id: 19c8236eae2843789ee9944c7007de2a
     mode: 1
-    displayName: left_glove hard
+    displayName: left_glove_glove_hard
     category: boxing
-    eventName: left_glove_hard
-    streamClip: {fileID: 8300000, guid: 3d69383a97a9fd64b925df7cd2996979, type: 3}
+    eventName: left_glove_glove_hard
+    streamClip: {fileID: 8300000, guid: 71d0229aa5516b0459819a63d6b3d590, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
-  - _id: af22a53769234ae4970803b68ab4e52d
+  - _id: 96b09d0b2bd346ec9056bc4d19151b0e
     mode: 1
-    displayName: right_glove soft
+    displayName: left_glove_body_soft
     category: boxing
-    eventName: right_glove_soft
-    streamClip: {fileID: 8300000, guid: 74449f93cc0ece542974ed4c23e7e872, type: 3}
+    eventName: left_glove_body_soft
+    streamClip: {fileID: 8300000, guid: 8abcba4087e60924a8b4f03191057bcb, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: b58055da51844526b99c1af8b8ec3bea
+    mode: 1
+    displayName: left_glove_body_hard
+    category: boxing
+    eventName: left_glove_body_hard
+    streamClip: {fileID: 8300000, guid: 7f48dd53507603240b6c07eff9b29942, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_l_wrist'
+    delayOffsetSeconds: 0
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: 4e4ce02ff05d4ec7bd53887369f794c0
+    mode: 1
+    displayName: right_glove_glove_soft
+    category: boxing
+    eventName: right_glove_glove_soft
+    streamClip: {fileID: 8300000, guid: d394c1b5d36d84a4b993309015ac45dd, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
-  - _id: 0e66f3b6c5884347bf2d52a3a8f060a0
+  - _id: 71caf057d9494dad8f76f40299ce38d7
     mode: 1
-    displayName: right_glove hard
+    displayName: right_glove_glove_hard
     category: boxing
-    eventName: right_glove_hard
-    streamClip: {fileID: 8300000, guid: 3d69383a97a9fd64b925df7cd2996979, type: 3}
+    eventName: right_glove_glove_hard
+    streamClip: {fileID: 8300000, guid: 71d0229aa5516b0459819a63d6b3d590, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
-  - _id: d9832a6df9dc42688620c06f0b08d46a
+  - _id: ee2d82c2a31a4edd8ca44112c54ac9d0
     mode: 1
-    displayName: head soft
+    displayName: right_glove_body_soft
     category: boxing
-    eventName: head_soft
-    streamClip: {fileID: 8300000, guid: 74449f93cc0ece542974ed4c23e7e872, type: 3}
+    eventName: right_glove_body_soft
+    streamClip: {fileID: 8300000, guid: 8abcba4087e60924a8b4f03191057bcb, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: 0231b231a0b3487aa856e74501f38597
+    mode: 1
+    displayName: right_glove_body_hard
+    category: boxing
+    eventName: right_glove_body_hard
+    streamClip: {fileID: 8300000, guid: 7f48dd53507603240b6c07eff9b29942, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_r_wrist'
+    delayOffsetSeconds: 0
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: 62bd235b803843c9bd76e24c28d04493
+    mode: 1
+    displayName: head_glove_soft
+    category: boxing
+    eventName: head_glove_soft
+    streamClip: {fileID: 8300000, guid: d394c1b5d36d84a4b993309015ac45dd, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
-  - _id: fd9ffa4320614e25b65781a46e003dce
+  - _id: edae6900db7447fcb479c170251ffb71
     mode: 1
-    displayName: head hard
+    displayName: head_glove_hard
     category: boxing
-    eventName: head_hard
-    streamClip: {fileID: 8300000, guid: 3d69383a97a9fd64b925df7cd2996979, type: 3}
+    eventName: head_glove_hard
+    streamClip: {fileID: 8300000, guid: 71d0229aa5516b0459819a63d6b3d590, type: 3}
     loop: 0
     bindings: []
     gain: 0.8
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes:
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: 8095d40919d14488ab8ab16eb4824593
+    mode: 1
+    displayName: head_body_soft
+    category: boxing
+    eventName: head_body_soft
+    streamClip: {fileID: 8300000, guid: 8abcba4087e60924a8b4f03191057bcb, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: 
+    manifestOverride: {fileID: 0}
+    _cachedManifestIntensity: -1
+  - _id: b0a58146009745c4957e8134916e0b4f
+    mode: 1
+    displayName: head_body_hard
+    category: boxing
+    eventName: head_body_hard
+    streamClip: {fileID: 8300000, guid: 7f48dd53507603240b6c07eff9b29942, type: 3}
+    loop: 0
+    bindings: []
+    gain: 0.8
+    target: '*/pos_neck'
+    delayOffsetSeconds: 0
+    notes: 
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: -1
   revertPlayModeChanges: 0

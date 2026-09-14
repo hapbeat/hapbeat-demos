@@ -124,9 +124,6 @@ namespace Hapbeat.Boxing.Editor
             var flashCanvas = Canvas("Impact feedback", Vector3.zero, Vector3.zero, new Vector2(600, 600), 0.001f);
             flashCanvas.SetParent(camera.transform, false); flashCanvas.localPosition = new Vector3(0, 0, 0.55f);
             view.impactText = Text("Impact", flashCanvas, new Vector2(0, -150), new Vector2(620, 50), 18, "");
-            var border = new GameObject("Damage tint", typeof(RectTransform), typeof(Image)); border.transform.SetParent(flashCanvas, false);
-            view.impactBorder = border.GetComponent<Image>(); view.impactBorder.color = Color.clear; view.impactBorder.raycastTarget = false;
-            border.GetComponent<RectTransform>().sizeDelta = new Vector2(600, 600); border.transform.SetAsFirstSibling();
             var burst = new GameObject("Contact burst").transform;
             for (int i = 0; i < 8; i++)
             {
@@ -147,6 +144,8 @@ namespace Hapbeat.Boxing.Editor
             var dr = dwell.GetComponent<RectTransform>(); dr.anchoredPosition = new Vector2(0, -255); dr.sizeDelta = new Vector2(600, 6);
             menu.dwellBar = dwell.GetComponent<Image>(); menu.dwellBar.color = Color.cyan; menu.dwellBar.type = Image.Type.Filled; menu.dwellBar.fillMethod = Image.FillMethod.Horizontal;
             BuildHaptics(game);
+            BoxingContent.ConfigureModels(game);
+            BoxingContent.ConfigureImpactVisuals(game.presentation);
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             ConfigureSwitch(); AssetDatabase.SaveAssets(); Validate();
@@ -258,49 +257,7 @@ namespace Hapbeat.Boxing.Editor
             var sdk = new GameObject("Hapbeat SDK"); sdk.AddComponent<HapbeatManager>(); feedback.sdkRoot = sdk;
             var config = ScriptableObject.CreateInstance<HapbeatConfig>(); config.appName = "Boxing <g>"; config.enableLogging = false;
             AssetDatabase.CreateAsset(config, "Assets/Resources/HapbeatConfig.asset");
-            MakeWave(Root + "/Haptics/Soft.wav", false, false);
-            MakeWave(Root + "/Haptics/Hard.wav", true, false);
-            MakeWave(Root + "/Haptics/Bell.wav", false, true);
-            AssetDatabase.Refresh();
-            foreach (string path in new[] { Root + "/Haptics/Soft.wav", Root + "/Haptics/Hard.wav", Root + "/Haptics/Bell.wav" })
-            {
-                var importer = (AudioImporter)AssetImporter.GetAtPath(path); var sample = importer.defaultSampleSettings;
-                sample.loadType = AudioClipLoadType.DecompressOnLoad; sample.compressionFormat = AudioCompressionFormat.PCM; sample.sampleRateSetting = AudioSampleRateSetting.PreserveSampleRate;
-                importer.defaultSampleSettings = sample; importer.SaveAndReimport();
-            }
-            var soft = AssetDatabase.LoadAssetAtPath<AudioClip>(Root + "/Haptics/Soft.wav"); var hard = AssetDatabase.LoadAssetAtPath<AudioClip>(Root + "/Haptics/Hard.wav");
-            var map = ScriptableObject.CreateInstance<HapbeatEventMap>();
-            AssetDatabase.CreateAsset(map, Root + "/Haptics/BoxingEventMap.asset");
-            for (int i = 0; i < 6; i++)
-            {
-                string zone = i / 2 == 0 ? "left_glove" : i / 2 == 1 ? "right_glove" : "head";
-                var entry = new HapbeatEventEntry { displayName = zone + (i % 2 == 0 ? " soft" : " hard"), category = "boxing", eventName = zone + (i % 2 == 0 ? "_soft" : "_hard"),
-                    mode = HapticMode.StreamClip, streamClip = i % 2 == 0 ? soft : hard, gain = 0.8f, target = i / 2 == 0 ? "*/pos_l_wrist" : i / 2 == 1 ? "*/pos_r_wrist" : "*/pos_neck" };
-                map.entries.Add(entry);
-                var go = new GameObject("Haptic " + entry.displayName); go.transform.SetParent(feedback.transform, false);
-                var trigger = go.AddComponent<HapbeatUnityEventTrigger>(); trigger.EditorSetupEntry(map, entry.id); feedback.impactTriggers[i] = trigger;
-            }
-            EditorUtility.SetDirty(map);
-            feedback.audioSource = game.gameObject.AddComponent<AudioSource>(); feedback.audioSource.playOnAwake = false;
-            feedback.softSound = soft; feedback.hardSound = hard; feedback.bell = AssetDatabase.LoadAssetAtPath<AudioClip>(Root + "/Haptics/Bell.wav");
-        }
-        private static void MakeWave(string path, bool hard, bool bell)
-        {
-            const int rate = 16000; int count = (int)(rate * (bell ? 0.7f : hard ? 0.14f : 0.085f));
-            using (var writer = new BinaryWriter(File.Create(path)))
-            {
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); writer.Write(36 + count * 2); writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
-                writer.Write(16); writer.Write((short)1); writer.Write((short)1); writer.Write(rate); writer.Write(rate * 2); writer.Write((short)2); writer.Write((short)16);
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("data")); writer.Write(count * 2);
-                var rng = new System.Random(41);
-                for (int i = 0; i < count; i++)
-                {
-                    double t = (double)i / rate, envelope = Math.Min(1, t / 0.004) * Math.Exp(-t / (bell ? 0.16 : hard ? 0.035 : 0.022));
-                    double signal = bell ? Math.Sin(2 * Math.PI * 630 * t) + 0.35 * Math.Sin(2 * Math.PI * 1043 * t) :
-                        Math.Sin(2 * Math.PI * (hard ? 90 : 140) * t) + (hard ? 0.28 : 0.08) * (rng.NextDouble() * 2 - 1);
-                    writer.Write((short)(Math.Clamp(signal * envelope * 0.66, -1, 1) * 32767));
-                }
-            }
+            BoxingContent.ConfigureFeedback(game);
         }
         private static void ConfigureSwitch()
         {
@@ -331,7 +288,9 @@ namespace Hapbeat.Boxing.Editor
                 if (GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transform.gameObject) != 0) throw new InvalidOperationException("Missing script: " + transform.name);
             foreach (var trigger in game.feedback.impactTriggers)
                 if (trigger == null || trigger.ResolveEntry() == null || trigger.ResolveEntry().streamClip == null) throw new InvalidOperationException("Unwired haptic trigger");
-            Debug.Log("BOXING_SCENE_VALID: XR rig, menu, opponent, six haptic bindings, no missing scripts");
+            if (game.feedback.impactTriggers.Length != 12 || game.feedback.contactSounds.Length != 4 || game.feedback.contactSounds.Any(c => c == null) || game.feedback.bell == null || game.feedback.bellSource == null)
+                throw new InvalidOperationException("Incomplete surface feedback assets");
+            Debug.Log("BOXING_SCENE_VALID: XR rig, menu, opponent, twelve surface haptic bindings, no missing scripts");
         }
         private static void ValidateLayerSettings(string path, string property)
         {

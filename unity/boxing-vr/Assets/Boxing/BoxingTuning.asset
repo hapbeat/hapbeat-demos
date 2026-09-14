@@ -13,12 +13,15 @@ MonoBehaviour:
   m_Name: BoxingTuning
   m_EditorClassIdentifier: Hapbeat.Boxing::Hapbeat.Boxing.BoxingTuning
   roundSeconds: 90
+  maximumHealth: 100
   enemyInterval: 1.6
   telegraphSeconds: 0.42
   strikeSeconds: 0.22
   recoverSeconds: 0.55
+  guardInterval: 2.5
+  guardSeconds: 1.2
   playRadius: 1
-  gloveRadius: 0.115
+  gloveRadius: 0.09
   headRadius: 0.14
   enemyHeadRadius: 0.17
   enemyBodyRadius: 0.25

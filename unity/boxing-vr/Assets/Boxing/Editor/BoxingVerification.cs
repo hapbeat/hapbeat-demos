@@ -19,7 +19,7 @@ namespace Hapbeat.Boxing.Editor
         private static int errors;
         private static int progressBucket = -1;
         private static BoxingGame game;
-        private static int softImpacts, hardImpacts, zones;
+        private static int softImpacts, hardImpacts, zones, surfaces;
         private static float minGain = float.PositiveInfinity, maxGain;
         static BoxingVerification()
         {
@@ -71,6 +71,7 @@ namespace Hapbeat.Boxing.Editor
                 game.feedback.Reported += impact => {
                     if (impact.hard) hardImpacts++; else softImpacts++;
                     zones |= 1 << (int)impact.zone;
+                    surfaces |= 1 << ((int)impact.surface + (impact.attack ? 2 : 0));
                     minGain = Mathf.Min(minGain, impact.gain); maxGain = Mathf.Max(maxGain, impact.gain);
                 };
                 var driver = game.gameObject.AddComponent<BoxingSmokeDriver>();
@@ -91,9 +92,9 @@ namespace Hapbeat.Boxing.Editor
             if (bucket != progressBucket) { progressBucket = bucket; Debug.Log($"BOXING_SMOKE_PROGRESS t={elapsed:0} phase={game.Round.Phase} left={game.Round.TimeLeft:0.0} paused={game.Paused} reason={game.PauseReason}"); }
             if (game.Round.Phase == BoxingPhase.Results)
             {
-                string summary = $"hits={game.Round.Hits} blocks={game.Round.Blocks} headHits={game.Round.Taken} dodges={game.Round.Dodges} soft={softImpacts} hard={hardImpacts} zones={zones} gain={minGain:0.00}..{maxGain:0.00} sends={game.feedback.Sends} errors={errors}";
+                string summary = $"hits={game.Round.Hits} blocks={game.Round.Blocks} enemyBlocks={game.Round.EnemyBlocks} headHits={game.Round.Taken} dodges={game.Round.Dodges} soft={softImpacts} hard={hardImpacts} zones={zones} surfaces={surfaces} rings={game.feedback.Rings} gain={minGain:0.00}..{maxGain:0.00} sends={game.feedback.Sends} errors={errors}";
                 Finish(game.Round.Hits >= 3 && game.Round.Blocks >= 2 && game.Round.Taken >= 2 && game.Round.Dodges >= 1 &&
-                    softImpacts > 0 && hardImpacts > 0 && zones == 7 && maxGain > minGain + 0.2f && game.feedback.Sends == 0 && errors == 0, summary);
+                    softImpacts > 0 && hardImpacts > 0 && zones == 7 && surfaces == 15 && game.feedback.Rings == 2 && maxGain > minGain + 0.2f && game.feedback.Sends == 0 && errors == 0, summary);
             }
         }
         internal static void DriveInput()

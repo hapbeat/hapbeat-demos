@@ -37,13 +37,15 @@ Meta公式: [Link開発設定](https://developers.meta.com/horizon/documentation
 - メニュー表示、Questのシステムメニュー・フォーカス喪失、追跡喪失、開始点から1m以上離れた時は対戦時間・敵・触覚を停止します。システムメニューから戻った時は `RESUME` で明示的に再開します。
 - `Assets/Boxing/BoxingTuning.asset` でラウンド時間、攻撃間隔、予備動作、判定サイズ、速度→ゲインのカーブ・閾値を変更できます。
 - `IMPACT: WeakHard` は2.5m/sを境に波形を変更し、その中でも相対速度に応じてゲインを変えます。`Continuous` は同じ波形のゲインだけを連続変更します。既定は0.25m/s未満を無視し、6m/sで最大ゲインです。質量や力の測定ではなく、接触する2物体の相対速度の大きさを使います。
-- `Assets/Boxing/Haptics/BoxingEventMap.asset` の6エントリーで、各部位の弱打・強打の波形、絶対ゲイン、送信先を編集できます。接触検知と波形選択は分離されています。
+- `Assets/Boxing/Haptics/BoxingEventMap.asset` の12エントリー（左右手首／頭 × グローブ接触／身体接触 × 弱／強）で波形、絶対ゲイン、送信先を編集できます。攻撃側・防御側とも接触材質で音と触覚を選びます。頭への命中も身体接触に含みます。
 
 ## Hapbeat
 
 既定の送信先はGloveBallと同じ `*/pos_l_wrist`、`*/pos_r_wrist`、`*/pos_neck` です。デバイスのposition設定を合わせ、PC（Air Link時）またはQuest（APK時）と同じ到達可能なLANに接続してください。1台で試す場合はEventMapのtargetをそのデバイスのpositionに合わせます。
 
-Unity SDKのStreamClipを使うため、事前のKit転送は不要です。左右・頭それぞれの弱打／強打に独立したトリガーがあります。`GainMultiplier` に接触時の速度応答を渡し、EventMap側のゲインと掛け合わせます。自動検証はSDK GameObjectをAwake前に無効化し、PC音声も実機送信も行いません。通常のEditor Playは音声・触覚ONです。
+Unity SDKのStreamClipを使うため、事前のKit転送は不要です。グローブ同士は短い155Hzの触覚、身体への命中は長めの75Hzの触覚です。`GainMultiplier` に接触時の速度応答を渡し、EventMap側のゲインと掛け合わせます。自動検証はSDK GameObjectをAwake前に無効化し、PC音声も実機送信も行いません。通常のEditor Playは音声・触覚ONです。
+
+相手はパンチとは独立に、待機中にガードを上げ下げします。`BoxingTuning.guardInterval` と `guardSeconds` で間隔／保持時間を調整できます。手前のグローブに当たった攻撃はガードされ、身体にはダメージが入りません。身体へ届いた攻撃のみHPを減らします。接触表示はワールド空間の小さなリングで、カメラ前の半透明パネルはありません。開始・終了にはCC0実録ベルを編集した4連打のゴングを専用音源で鳴らします。
 
 ## Demo Switch
 
@@ -81,4 +83,4 @@ Editorのみの `INPUT: Desktop` はQ/Eでパンチ、Spaceでガード、A/Dで
 
 ## ソースとライセンス
 
-XR設定は既存Hapbeat VR Templateを基にしています。SDKはworkspace内の `repos-sdk/hapbeat-unity-sdk` を参照します。別環境では同じworkspace構造を用意するか `Packages/manifest.json` のSDK参照を変更してください。描画・音・触覚素材は自作で、第三者の非CC0キャラクターやUnityサンプルartを含めていません。[素材情報](THIRD_PARTY_NOTICES.md)を参照してください。
+XR設定は既存Hapbeat VR Templateを基にしています。SDKはworkspace内の `repos-sdk/hapbeat-unity-sdk` を参照します。別環境では同じworkspace構造を用意するか `Packages/manifest.json` のSDK参照を変更してください。モデルと触覚は自作、打撃音とゴングはCC0素材です。[素材情報](THIRD_PARTY_NOTICES.md)を参照してください。
