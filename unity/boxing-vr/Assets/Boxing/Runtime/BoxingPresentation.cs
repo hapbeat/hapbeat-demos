@@ -11,6 +11,9 @@ namespace Hapbeat.Boxing
         public Text timerText, scoreText, cueText, statusText, impactText;
         public Image impactBorder;
         public Transform hitBurst;
+        public Image PlayerHealthBar { get; private set; }
+        public Image EnemyHealthBar { get; private set; }
+        private Text playerHealthText, enemyHealthText;
         private float flashTime;
         private string lastImpact = "";
         public void Flash(BoxingImpact impact)
@@ -52,10 +55,9 @@ namespace Hapbeat.Boxing
             timerText.text = game.Round.Phase == BoxingPhase.Countdown ? Mathf.CeilToInt(game.Round.Countdown).ToString() :
                 game.Round.Phase == BoxingPhase.Ready ? game.tuning.roundSeconds.ToString("0") + " SECOND ROUND" : Mathf.CeilToInt(game.Round.TimeLeft).ToString("00") + "s";
             scoreText.text = "SCORE " + game.Round.Score + "     HIT " + game.Round.Hits + "     BLOCK " + game.Round.Blocks + "     DODGE " + game.Round.Dodges;
-            cueText.text = game.Paused ? game.PauseReason : game.Round.Phase == BoxingPhase.Countdown ? "GLOVES UP" : game.Round.Phase == BoxingPhase.Results ? "ROUND COMPLETE" : enemy.Cue;
-            cueText.color = enemy.Telegraphing ? new Color(1, 0.63f, 0.2f) : Color.white;
+            RenderHealth(game.Round);
             statusText.text = game.input.mode + "  |  " + (game.feedback.CanSend ? "HAPBEAT " + (Hapbeat.HapbeatManager.Instance != null ? Hapbeat.HapbeatManager.Instance.AliveDeviceCount : 0) + " DEVICE(S)" : "HAPTICS OFF") +
-                "  |  " + game.tuning.impactMode;
+                "  |  " + (game.Round.Phase == BoxingPhase.Results ? (game.Round.PlayerHealth <= 0 ? "KO - OPPONENT WINS" : game.Round.EnemyHealth <= 0 ? "KO - YOU WIN" : "ROUND COMPLETE") : game.Paused ? game.PauseReason : game.tuning.impactMode.ToString());
             flashTime = Mathf.Max(0, flashTime - Time.unscaledDeltaTime);
             impactText.text = flashTime > 0 ? lastImpact : "";
             if (hitBurst != null)
@@ -64,6 +66,36 @@ namespace Hapbeat.Boxing
                 hitBurst.localScale = Vector3.one * (0.06f + (0.28f - flashTime) * 1.4f);
             }
             if (impactBorder != null) { var c = impactBorder.color; c.a = Mathf.Min(c.a, flashTime * 0.6f); impactBorder.color = c; }
+        }
+        public void RenderHealth(BoxingRound round)
+        {
+            cueText.enabled = false;
+            if (PlayerHealthBar == null)
+            {
+                PlayerHealthBar = CreateHealthBar("YOU", -285, new Color(0.15f, 0.85f, 1), out playerHealthText);
+                EnemyHealthBar = CreateHealthBar("OPPONENT", 285, new Color(1, 0.25f, 0.15f), out enemyHealthText);
+            }
+            PlayerHealthBar.rectTransform.anchorMax = new Vector2(round.PlayerHealth / round.MaximumHealth, 1);
+            EnemyHealthBar.rectTransform.anchorMax = new Vector2(round.EnemyHealth / round.MaximumHealth, 1);
+            playerHealthText.text = "YOU  " + Mathf.CeilToInt(round.PlayerHealth) + " / " + Mathf.CeilToInt(round.MaximumHealth);
+            enemyHealthText.text = "OPPONENT  " + Mathf.CeilToInt(round.EnemyHealth) + " / " + Mathf.CeilToInt(round.MaximumHealth);
+        }
+        private Image CreateHealthBar(string name, float x, Color color, out Text label)
+        {
+            var root = new GameObject(name + " HP", typeof(RectTransform)).GetComponent<RectTransform>();
+            root.SetParent(cueText.transform, false); root.anchoredPosition = new Vector2(x, 0); root.sizeDelta = new Vector2(520, 45);
+            label = new GameObject("Label", typeof(RectTransform), typeof(Text)).GetComponent<Text>();
+            label.transform.SetParent(root, false); label.font = cueText.font; label.fontSize = 20;
+            label.alignment = TextAnchor.MiddleCenter; label.color = Color.white; label.raycastTarget = false;
+            label.rectTransform.sizeDelta = new Vector2(520, 24); label.rectTransform.anchoredPosition = new Vector2(0, 12);
+            var background = new GameObject("Track", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+            background.transform.SetParent(root, false); background.color = new Color(0.08f, 0.1f, 0.14f); background.raycastTarget = false;
+            background.rectTransform.sizeDelta = new Vector2(520, 16); background.rectTransform.anchoredPosition = new Vector2(0, -12);
+            var fill = new GameObject("Health", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+            fill.transform.SetParent(background.transform, false); fill.color = color; fill.raycastTarget = false;
+            fill.rectTransform.anchorMin = Vector2.zero; fill.rectTransform.anchorMax = Vector2.one;
+            fill.rectTransform.offsetMin = fill.rectTransform.offsetMax = Vector2.zero;
+            return fill;
         }
         public static void Segment(Transform segment, Vector3 a, Vector3 b, float radius)
         {

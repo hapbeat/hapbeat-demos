@@ -13,6 +13,7 @@ namespace Hapbeat.Boxing
     {
         [Header("Round")]
         [Min(10)] public float roundSeconds = 90;
+        [Min(1)] public float maximumHealth = 100;
         [Min(0.1f)] public float enemyInterval = 1.6f;
         [Min(0.1f)] public float telegraphSeconds = 0.42f;
         [Min(0.08f)] public float strikeSeconds = 0.22f;
@@ -90,8 +91,13 @@ namespace Hapbeat.Boxing
         public int Taken { get; private set; }
         public int Dodges { get; private set; }
         public int Score { get; private set; }
-        public void Start(float duration)
+        public float MaximumHealth { get; private set; } = 100;
+        public float PlayerHealth { get; private set; } = 100;
+        public float EnemyHealth { get; private set; } = 100;
+        public void Start(float duration, float maximumHealth = 100)
         {
+            MaximumHealth = Mathf.Max(1, maximumHealth);
+            PlayerHealth = EnemyHealth = MaximumHealth;
             TimeLeft = duration; Countdown = 3; Hits = Blocks = Taken = Dodges = Score = 0; Phase = BoxingPhase.Countdown;
         }
         public void Tick(float dt, bool paused)
@@ -111,9 +117,11 @@ namespace Hapbeat.Boxing
         public void Report(BoxingImpact impact)
         {
             if (Phase != BoxingPhase.Fighting) return;
-            if (impact.attack) { Hits++; Score += Mathf.RoundToInt(20 + 80 * Mathf.Clamp01(impact.gain)); }
-            else if (impact.zone == ImpactZone.Head) Taken++;
+            float damage = impact.hard ? 20 : 10;
+            if (impact.attack) { Hits++; Score += Mathf.RoundToInt(20 + 80 * Mathf.Clamp01(impact.gain)); EnemyHealth = Mathf.Max(0, EnemyHealth - damage); }
+            else if (impact.zone == ImpactZone.Head) { Taken++; PlayerHealth = Mathf.Max(0, PlayerHealth - damage); }
             else { Blocks++; Score += 15; }
+            if (PlayerHealth <= 0 || EnemyHealth <= 0) Phase = BoxingPhase.Results;
         }
         public void Dodge() { if (Phase == BoxingPhase.Fighting) { Dodges++; Score += 10; } }
     }

@@ -62,7 +62,7 @@ namespace Hapbeat.Boxing
         public void StartRound()
         {
             if (input.HasTracking && !input.HasOverride) input.Recenter();
-            Round.Start(tuning.roundSeconds); Opponent.Reset(input.Current.head.y > 0.5f ? input.Current.head.y : 1.65f);
+            Round.Start(tuning.roundSeconds, tuning.maximumHealth); Opponent.Reset(input.Current.head.y > 0.5f ? input.Current.head.y : 1.65f);
             resolvedAttack = lastCompleted = 0; ResetHistory(); feedback.StopFeedback(); menu.Close();
         }
         private void Update() => Simulate(Time.unscaledDeltaTime, input.Current);
@@ -147,6 +147,8 @@ namespace Hapbeat.Boxing
             if (float.IsPositiveInfinity(earliest)) return;
             resolvedAttack = Opponent.AttackId;
             float speed = BoxingCollision.RelativeSpeed(from, to, targetFrom, targetTo, dt);
+            // A guard contact stops the trajectory, not just the scoring for this attack.
+            if (zone != ImpactZone.Head) Opponent.Block(Vector3.Lerp(from, to, earliest));
             if (speed >= tuning.minimumImpactSpeed) Report(new BoxingImpact(zone, speed, false, Vector3.Lerp(from, to, earliest), tuning));
         }
         private void ResolvePlayer(Vector3 to, Vector3 from, bool closed, ImpactZone side, ref bool contact, ref float cooldown, float dt)
@@ -167,6 +169,7 @@ namespace Hapbeat.Boxing
             Vector3.Distance(position, Opponent.Body) <= tuning.gloveRadius + tuning.enemyBodyRadius + 0.03f;
         private void Report(BoxingImpact impact)
         {
+            if (Round.Phase != BoxingPhase.Fighting) return;
             Round.Report(impact); feedback.Impact(impact);
             if (presentation != null) presentation.Flash(impact);
         }

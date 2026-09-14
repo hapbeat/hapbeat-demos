@@ -83,6 +83,22 @@ namespace Hapbeat.Boxing.Tests
             }
             Assert.That(left, Is.GreaterThan(5)); Assert.That(right, Is.GreaterThan(5));
         }
+        [Test] public void HealthDamageGuardKnockoutAndRestart()
+        {
+            var round = new BoxingRound(); round.Start(90); round.Tick(3, false);
+            round.Report(new BoxingImpact(ImpactZone.LeftGlove, 1, false, Vector3.zero, tuning));
+            Assert.That(round.PlayerHealth, Is.EqualTo(100)); Assert.That(round.Blocks, Is.EqualTo(1));
+            round.Report(new BoxingImpact(ImpactZone.Head, 1, false, Vector3.zero, tuning));
+            Assert.That(round.PlayerHealth, Is.EqualTo(90)); Assert.That(round.EnemyHealth, Is.EqualTo(100));
+            for (int i = 0; i < 5; i++) round.Report(new BoxingImpact(ImpactZone.LeftGlove, 4, true, Vector3.zero, tuning));
+            Assert.That(round.EnemyHealth, Is.Zero); Assert.That(round.Phase, Is.EqualTo(BoxingPhase.Results));
+            round.Report(new BoxingImpact(ImpactZone.Head, 4, false, Vector3.zero, tuning));
+            Assert.That(round.PlayerHealth, Is.EqualTo(90), "No damage after KO.");
+            round.Start(90); Assert.That(round.PlayerHealth, Is.EqualTo(100)); Assert.That(round.EnemyHealth, Is.EqualTo(100));
+            round.Tick(3, false);
+            for (int i = 0; i < 5; i++) round.Report(new BoxingImpact(ImpactZone.Head, 4, false, Vector3.zero, tuning));
+            Assert.That(round.PlayerHealth, Is.Zero); Assert.That(round.Phase, Is.EqualTo(BoxingPhase.Results));
+        }
     }
 
     public sealed class BoxingSceneTests
@@ -95,7 +111,7 @@ namespace Hapbeat.Boxing.Tests
             game = Object.FindAnyObjectByType<BoxingGame>();
             originalTuning = game.tuning; game.tuning = Object.Instantiate(originalTuning);
             game.feedback.forceSilent = true; game.feedback.sdkRoot.SetActive(false);
-            game.Initialize(); game.Round.Start(90);
+            game.Initialize(); game.Round.Start(90, 10000); // Long collision tests must not stop early at KO.
         }
         [TearDown] public void Cleanup()
         {
@@ -150,6 +166,41 @@ namespace Hapbeat.Boxing.Tests
             Assert.That(game.Round.Blocks, Is.GreaterThan(10));
             Assert.That(game.Round.Blocks + game.Round.Taken, Is.LessThanOrEqualTo(game.Opponent.AttackId));
             Assert.That(game.Round.Taken, Is.LessThan(game.Round.Blocks));
+        }
+        [Test] public void GuardContactStopsEnemyStrikeAndRetractsInsteadOfPassingThrough()
+        {
+            var pose = Pose(true);
+            for (int i = 0; i < 900 && game.Round.Blocks == 0; i++) game.Simulate(1f / 90, pose);
+            Assert.That(game.Round.Blocks, Is.EqualTo(1));
+            Assert.That(game.Opponent.Striking, Is.False, "A counted block must stop the visible strike.");
+            bool left = game.Opponent.AttackLeft;
+            Vector3 contact = left ? game.Opponent.Left : game.Opponent.Right;
+            game.Simulate(1f / 90, pose);
+            Assert.That((left ? game.Opponent.Left : game.Opponent.Right).z, Is.GreaterThanOrEqualTo(contact.z));
+            Assert.That(game.Round.Taken, Is.Zero);
+        }
+        [Test] public void HealthBarsReplaceCueAndReflectBothHealthValues()
+        {
+            game.Round.Start(90); game.Round.Tick(3, false);
+            game.Round.Report(new BoxingImpact(ImpactZone.Head, 1, false, Vector3.zero, game.tuning));
+            game.Round.Report(new BoxingImpact(ImpactZone.LeftGlove, 4, true, Vector3.zero, game.tuning));
+            game.presentation.RenderHealth(game.Round);
+            Assert.That(game.presentation.cueText.enabled, Is.False);
+            Assert.That(game.presentation.PlayerHealthBar.rectTransform.anchorMax.x, Is.EqualTo(0.9f).Within(0.001f));
+            Assert.That(game.presentation.EnemyHealthBar.rectTransform.anchorMax.x, Is.EqualTo(0.8f).Within(0.001f));
+        }
+        [Test] public void SceneAndNewInputUseCorrectedControllerPitch()
+        {
+            Assert.That(game.input.controllerRotation, Is.EqualTo(new Vector3(75, 0, 0)));
+        }
+        [Test] public void KnockoutDoesNotEmitAnotherImpactInTheSameFrame()
+        {
+            game.Round.Start(90, 10); game.Round.Tick(3, false);
+            var report = typeof(BoxingGame).GetMethod("Report", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var impact = new BoxingImpact(ImpactZone.LeftGlove, 1, true, Vector3.zero, game.tuning);
+            report.Invoke(game, new object[] { impact }); report.Invoke(game, new object[] { impact });
+            Assert.That(game.Round.Phase, Is.EqualTo(BoxingPhase.Results));
+            Assert.That(game.feedback.Reports, Is.EqualTo(1));
         }
         [Test] public void MenuFreezesTimeAndOpponentThenRearms()
         {

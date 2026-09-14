@@ -101,7 +101,8 @@ namespace Hapbeat.Boxing
         }
         private void Refresh()
         {
-            title.text = game.Round.Phase == BoxingPhase.Results ? "ROUND COMPLETE\n" + game.Round.Score + " POINTS" : "HAPBEAT\nBOXING";
+            title.text = game.Round.Phase == BoxingPhase.Results ?
+                (game.Round.PlayerHealth <= 0 ? "KO - OPPONENT WINS" : game.Round.EnemyHealth <= 0 ? "KO - YOU WIN" : "ROUND COMPLETE") + "\n" + game.Round.Score + " POINTS" : "HAPBEAT\nBOXING";
             string[] labels = {game.Round.Phase == BoxingPhase.Ready || game.Round.Phase == BoxingPhase.Results ? "START " + game.tuning.roundSeconds.ToString("0") + "s ROUND" : "RESUME", "RESTART ROUND",
                 "INPUT: " + input.mode, "IMPACT: " + game.tuning.impactMode, "RECENTER", "HAPTICS: " + (game.feedback.hapticsEnabled ? "ON" : "OFF"), "SOUND: " + (game.feedback.soundEnabled ? "ON" : "OFF")};
             for (int i = 0; i < rows.Length; i++)

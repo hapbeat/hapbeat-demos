@@ -44,6 +44,34 @@ namespace Hapbeat.Boxing.Tests
         }
 
         [Test]
+        public void AlreadyTrackedHeadIsRecognizedWhenActionsStartAndRestart()
+        {
+            InputSystem.RegisterLayout<XRSimulatedHMD>();
+            var head = InputSystem.AddDevice<XRSimulatedHMD>();
+            var state = new XRSimulatedHMDState {
+                isTracked = true, trackingState = 3,
+                centerEyePosition = new Vector3(0.3f, 1.65f, 0.1f),
+                centerEyeRotation = Quaternion.identity, deviceRotation = Quaternion.identity
+            };
+            // Air Link can already be tracking before the scene enables its actions.
+            InputSystem.QueueStateEvent(head, state);
+            InputSystem.Update();
+            for (int restart = 0; restart < 2; restart++)
+            {
+                using var controls = new BoxingXrControls();
+                InputSystem.Update();
+                Assert.That(controls.Read().headTracked, Is.True,
+                    "Existing tracked state must be read without requiring headset removal/retracking.");
+                state.isTracked = false;
+                InputSystem.QueueStateEvent(head, state); InputSystem.Update();
+                Assert.That(controls.Read().headTracked, Is.False);
+                state.isTracked = true;
+                InputSystem.QueueStateEvent(head, state); InputSystem.Update();
+                Assert.That(controls.Read().headTracked, Is.True);
+            }
+        }
+
+        [Test]
         public void NativeRightStickMovesMenuWithoutLeftStick()
         {
             InputSystem.RegisterLayout<OculusTouchControllerProfile.OculusTouchController>();

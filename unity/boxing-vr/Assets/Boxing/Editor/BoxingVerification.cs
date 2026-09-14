@@ -15,7 +15,7 @@ namespace Hapbeat.Boxing.Editor
     {
         private const string Active = "Boxing.Smoke.Active";
         private static double started;
-        private static bool initialized, finished;
+        private static bool initialized, finished, capturedHud;
         private static int errors;
         private static int progressBucket = -1;
         private static BoxingGame game;
@@ -65,6 +65,8 @@ namespace Hapbeat.Boxing.Editor
                 game.input.mode = BoxingInputMode.Desktop;
                 game.input.SetTestPose(Pose(0, false));
                 game.StartRound();
+                // This full-duration coverage run exercises every impact zone, not KO timing.
+                game.Round.Start(game.tuning.roundSeconds, 10000);
                 started = EditorApplication.timeSinceStartup; initialized = true;
                 game.feedback.Reported += impact => {
                     if (impact.hard) hardImpacts++; else softImpacts++;
@@ -76,6 +78,12 @@ namespace Hapbeat.Boxing.Editor
                 driver.Sample = DriveInput;
             }
             float elapsed = (float)(EditorApplication.timeSinceStartup - started);
+            if (!capturedHud && elapsed > 5)
+            {
+                Directory.CreateDirectory("Logs");
+                Render(game.input.headCamera, "Logs/boxing-smoke-hud.png");
+                capturedHud = true;
+            }
             if (elapsed > 12 && game.Round.Phase == BoxingPhase.Countdown)
             { Finish(false, $"countdown stalled frame={Time.frameCount} editorPaused={EditorApplication.isPaused} reason={game.PauseReason}"); return; }
             if (elapsed > 125) { Finish(false, $"timeout phase={game.Round.Phase} paused={game.Paused} reason={game.PauseReason} time={game.Round.TimeLeft} valid={game.input.Current.valid}"); return; }

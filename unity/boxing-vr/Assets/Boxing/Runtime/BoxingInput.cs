@@ -21,7 +21,7 @@ namespace Hapbeat.Boxing
         public event System.Action Recentered;
         public BoxingInputMode mode = BoxingInputMode.Controllers;
         public Vector3 controllerOffset = new Vector3(0, -0.015f, 0.08f);
-        public Vector3 controllerRotation = new Vector3(-15, 0, 0);
+        public Vector3 controllerRotation = new Vector3(75, 0, 0);
         public bool HasTracking { get; private set; }
         public bool MenuPressed { get; private set; }
         public bool ConfirmPressed { get; private set; }

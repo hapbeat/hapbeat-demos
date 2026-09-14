@@ -59,6 +59,9 @@ namespace Hapbeat.Boxing
                 position = map.AddAction(name + " Position", InputActionType.Value, device + "/" + prefix + "Position");
                 rotation = map.AddAction(name + " Rotation", InputActionType.Value, device + "/" + prefix + "Rotation");
                 tracked = map.AddAction(name + " Tracked", InputActionType.Button, device + "/isTracked");
+                // Tracking is persistent state, not a press edge. Air Link may already
+                // be tracking when this map starts (or is re-enabled with the scene).
+                tracked.wantsInitialStateCheck = true;
                 state = map.AddAction(name + " State", InputActionType.Value, device + "/trackingState");
             }
             public bool Read(out Pose pose)

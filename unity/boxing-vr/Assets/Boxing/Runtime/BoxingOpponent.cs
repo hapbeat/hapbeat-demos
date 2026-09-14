@@ -14,33 +14,40 @@ namespace Hapbeat.Boxing
         public bool Telegraphing { get; private set; }
         public int AttackId { get; private set; }
         public bool AttackLeft { get; private set; }
-        public string Cue { get; private set; } = "READY";
         public int CompletedAttacks { get; private set; }
         private float clock, attackTime, wait, reaction;
         private int pattern;
-        private bool attacking;
-        private Vector3 aim, strikeStart;
+        private bool attacking, blocked;
+        private Vector3 aim, strikeStart, blockedAt;
         private float height = 1.65f;
         private readonly BoxingTuning tuning;
         public BoxingOpponent(BoxingTuning tuning) { this.tuning = tuning; Reset(1.65f); }
         public void Reset(float playerHeight)
         {
             height = Mathf.Clamp(playerHeight, 1.25f, 1.95f); clock = attackTime = reaction = 0;
-            pattern = AttackId = CompletedAttacks = 0; wait = 0.7f; attacking = Striking = Telegraphing = false;
+            pattern = AttackId = CompletedAttacks = 0; wait = 0.7f; attacking = Striking = Telegraphing = blocked = false;
             SetRestPose();
         }
         public void React(float gain) => reaction = Mathf.Max(reaction, 0.10f + gain * 0.15f);
+        public void Block(Vector3 contact)
+        {
+            if (!Striking) return;
+            blocked = true; blockedAt = contact;
+            attackTime = tuning.telegraphSeconds + tuning.strikeSeconds;
+            Striking = Telegraphing = false;
+            if (AttackLeft) Left = contact; else Right = contact;
+        }
         public void Tick(float dt, Vector3 playerHead, bool fighting)
         {
             if (dt <= 0) return;
             clock += dt; reaction = Mathf.Max(0, reaction - dt);
             SetRestPose(); Striking = Telegraphing = false;
-            if (!fighting) { Cue = "READY"; return; }
+            if (!fighting) return;
             if (!attacking)
             {
                 wait -= dt;
-                if (wait > 0) { Cue = "MOVE / BREATHE"; return; }
-                attacking = true; attackTime = 0; AttackId++; AttackLeft = pattern % 3 != 1;
+                if (wait > 0) return;
+                attacking = true; blocked = false; attackTime = 0; AttackId++; AttackLeft = pattern % 3 != 1;
                 aim = playerHead; strikeStart = AttackLeft ? Left : Right;
             }
             attackTime += dt;
@@ -50,7 +57,7 @@ namespace Hapbeat.Boxing
             bool hook = pattern % 6 >= 4;
             if (attackTime < pre)
             {
-                Telegraphing = true; Cue = hook ? "HOOK" : AttackLeft ? "JAB" : "CROSS";
+                Telegraphing = true;
                 fist = rest + new Vector3(AttackLeft ? -0.05f : 0.05f, 0.03f, 0.12f) * Mathf.Sin(attackTime / pre * Mathf.PI * 0.5f);
                 strikeStart = fist;
             }
@@ -63,8 +70,7 @@ namespace Hapbeat.Boxing
             else
             {
                 float t = Mathf.Clamp01((attackTime - pre - strike) / recover);
-                fist = Vector3.Lerp(aim + Vector3.back * 0.12f, rest, t * t * (3 - 2 * t));
-                Cue = "YOUR TURN";
+                fist = Vector3.Lerp(blocked ? blockedAt : aim + Vector3.back * 0.12f, rest, t * t * (3 - 2 * t));
                 if (t >= 1) { attacking = false; pattern++; CompletedAttacks++; wait = pattern % 3 == 1 ? 0.18f : tuning.enemyInterval; }
             }
             if (AttackLeft) Left = fist; else Right = fist;
