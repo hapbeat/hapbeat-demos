@@ -14,12 +14,15 @@ namespace Hapbeat.Boxing
         public Image dwellBar;
         public bool IsOpen { get; private set; }
         public int Selection { get; private set; }
-        public bool UsesGaze => input.mode == BoxingInputMode.Hands || (input.mode == BoxingInputMode.Controllers && !input.HasTracking);
+        public bool UsesGaze => input.mode == BoxingInputMode.Hands;
         private bool navigationReady = true;
         private float gazeTime, openTime;
         private int gazeSelection = -1;
         private bool gazeLatched;
-        private void Start() => Open();
+        private void OnEnable() { if (input != null) input.Recentered += RepositionAfterRecenter; }
+        private void OnDisable() { if (input != null) input.Recentered -= RepositionAfterRecenter; }
+        private void RepositionAfterRecenter() { if (IsOpen) Open(); }
+        private void Start() { input.Recentered -= RepositionAfterRecenter; input.Recentered += RepositionAfterRecenter; Open(); }
         public void Open()
         {
             IsOpen = true; Selection = 0; openTime = Time.unscaledTime;
@@ -108,7 +111,7 @@ namespace Hapbeat.Boxing
             }
             hint.text = (UsesGaze ? "LOOK AT AN OPTION FOR 1.5s\nHANDS: OPEN BOTH FOR 1.2s TO PAUSE" :
                 input.mode == BoxingInputMode.Desktop ? "ARROWS: SELECT   ENTER: CONFIRM\nESC: PAUSE   Q / E: PUNCH   SPACE: GUARD" :
-                "STICK: SELECT   A / X: CONFIRM\nMENU / B / Y: PAUSE") + "\nCLEAR YOUR PLAY AREA - DO NOT HIT REAL OBJECTS";
+                "EITHER STICK: SELECT   A / X: CONFIRM\nMENU / B / Y: PAUSE") + "\nCLEAR YOUR PLAY AREA - DO NOT HIT REAL OBJECTS";
         }
     }
 }

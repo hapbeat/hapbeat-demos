@@ -107,6 +107,37 @@ namespace Hapbeat.Boxing.Tests
             right = new Vector3(guard ? 0.12f : 0.45f, guard ? 1.65f : 1.1f, 0.3f),
             headRotation = Quaternion.identity, leftRotation = Quaternion.identity, rightRotation = Quaternion.identity, leftClosed = true, rightClosed = true };
         private void Advance(float seconds, BoxerPose pose) { for (int i = 0; i < seconds * 90; i++) game.Simulate(1f / 90, pose); }
+        private void FocusEvent(string method, bool value) => typeof(BoxingGame).GetMethod(method, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(game, new object[] { value });
+        [Test] public void FocusedHeadsetContinuesWhenEditorWindowLosesFocus()
+        {
+            FocusEvent("DisplayFocus", true);
+            FocusEvent("FocusChanged", false);
+            game.StartRound(); Advance(4, Pose());
+            Assert.That(game.Paused, Is.False, game.PauseReason);
+            Assert.That(game.Round.Phase, Is.EqualTo(BoxingPhase.Fighting));
+        }
+        [Test] public void ActualHeadsetFocusLossStillStopsAndRequiresResume()
+        {
+            FocusEvent("DisplayFocus", true);
+            game.StartRound(); Advance(4, Pose());
+            FocusEvent("DisplayFocus", false);
+            float time = game.Round.TimeLeft; Advance(1, Pose());
+            Assert.That(game.Paused, Is.True); Assert.That(game.Round.TimeLeft, Is.EqualTo(time));
+            FocusEvent("DisplayFocus", true);
+            Advance(1, Pose()); Assert.That(game.menu.IsOpen, Is.True);
+            game.menu.Close(); Advance(1, Pose()); Assert.That(game.Paused, Is.False);
+        }
+        [Test] public void ApplicationPauseStillStopsFocusedHeadset()
+        {
+            FocusEvent("DisplayFocus", true); game.StartRound(); Advance(4, Pose());
+            FocusEvent("OnApplicationPause", true); game.menu.Close(); Advance(1, Pose());
+            Assert.That(game.Paused, Is.True); Assert.That(game.PauseReason, Is.EqualTo("APPLICATION PAUSED"));
+        }
+        [Test] public void WithoutHeadsetWindowFocusStillPauses()
+        {
+            FocusEvent("FocusChanged", false); game.StartRound(); Advance(1, Pose());
+            Assert.That(game.Paused, Is.True); Assert.That(game.PauseReason, Is.EqualTo("GAME WINDOW NOT FOCUSED"));
+        }
         [Test] public void UnguardedHeadGetsHitAcrossACompleteRoundWithoutLiveSending()
         {
             Advance(95, Pose());
@@ -197,6 +228,11 @@ namespace Hapbeat.Boxing.Tests
             game.input.mode = BoxingInputMode.Controllers; game.input.SetTestPose(Pose());
             Assert.That(game.menu.UsesGaze, Is.False);
             game.input.mode = BoxingInputMode.Hands; Assert.That(game.menu.UsesGaze, Is.True);
+        }
+        [Test] public void LostControllerTrackingDoesNotEnableGazeMenu()
+        {
+            game.input.mode = BoxingInputMode.Controllers; var missing = Pose(); missing.valid = false; game.input.SetTestPose(missing);
+            Assert.That(game.menu.UsesGaze, Is.False);
         }
         [Test] public void GlovesBehindHeadCannotRetroactivelyBlock()
         {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR;
+using UnityEngine.XR.OpenXR;
 
 namespace Hapbeat.Boxing
 {
@@ -26,7 +27,7 @@ namespace Hapbeat.Boxing
         private int resolvedAttack, lastCompleted;
         private BoxingPhase previousPhase;
         private XRDisplaySubsystem display;
-        private bool displayFocused = true;
+        private bool displayFocused = true, displayFocusKnown;
         private readonly List<XRDisplaySubsystem> displays = new List<XRDisplaySubsystem>();
 
         public void Initialize() { if (Opponent == null) Opponent = new BoxingOpponent(tuning); previousPhase = Round.Phase; }
@@ -49,12 +50,18 @@ namespace Hapbeat.Boxing
         public void PauseForExternalTransition() { if (!menu.IsOpen) menu.Open(); ResetHistory(); feedback.StopFeedback(); }
         private void BeforeSwitch(string _) => PauseForExternalTransition();
         private void LaunchContext() => PauseForExternalTransition();
-        private void FocusChanged(bool value) { focus = value; if (!value) PauseForExternalTransition(); }
-        private void DisplayFocus(bool value) { displayFocused = value; if (!value) PauseForExternalTransition(); }
+        private void FocusChanged(bool value) { focus = value; if (!value && !displayFocusKnown) PauseForExternalTransition(); }
+        private void DisplayFocus(bool value)
+        {
+            bool lost = !value && (!displayFocusKnown || displayFocused);
+            displayFocusKnown = true; displayFocused = value;
+            if (lost) PauseForExternalTransition();
+        }
         private void OnApplicationPause(bool value) { appPaused = value; if (value) PauseForExternalTransition(); }
         public void ResetHistory() { haveHistory = false; validTime = 0; leftContact = rightContact = false; leftCooldown = rightCooldown = 0; }
         public void StartRound()
         {
+            if (input.HasTracking && !input.HasOverride) input.Recenter();
             Round.Start(tuning.roundSeconds); Opponent.Reset(input.Current.head.y > 0.5f ? input.Current.head.y : 1.65f);
             resolvedAttack = lastCompleted = 0; ResetHistory(); feedback.StopFeedback(); menu.Close();
         }
@@ -62,19 +69,28 @@ namespace Hapbeat.Boxing
         public void Simulate(float dt, BoxerPose pose)
         {
             bool tracking = pose.valid && dt > 0 && dt <= 0.1f;
-            bool outside = new Vector2(pose.head.x, pose.head.z).magnitude > tuning.playRadius;
+            Vector3 fromStart = pose.head - input.StartPosition;
+            bool outside = new Vector2(fromStart.x, fromStart.z).magnitude > tuning.playRadius;
+            if (display != null && !display.running)
+            {
+                display.displayFocusChanged -= DisplayFocus;
+                display = null; displayFocusKnown = false;
+            }
             if (display == null)
             {
                 SubsystemManager.GetSubsystems(displays);
                 display = displays.Find(d => d.running);
                 if (display != null) display.displayFocusChanged += DisplayFocus;
             }
-            bool unavailable = !input.HasOverride && (!focus || appPaused || !displayFocused);
+            // A focused headset does not require the PC mirror/Game window to have focus.
+            // Poll OpenXR as well as receiving events: startup focus may precede subscription.
+            if (display != null) DisplayFocus(OpenXRUtility.IsSessionFocused);
+            bool unavailable = !input.HasOverride && (appPaused || (displayFocusKnown ? !displayFocused : !focus));
             if (!tracking || outside || unavailable || (menu != null && menu.IsOpen))
             {
                 if (!Paused) feedback.StopFeedback();
                 Paused = true;
-                PauseReason = unavailable ? "HEADSET PAUSED" : outside ? "RETURN TO YOUR START POSITION" : !tracking ? "TRACKING LOST - SHOW BOTH HANDS / CONTROLLERS" : "PAUSED";
+                PauseReason = unavailable ? (appPaused ? "APPLICATION PAUSED" : displayFocusKnown ? "HEADSET PAUSED - OPENXR NOT FOCUSED" : "GAME WINDOW NOT FOCUSED") : outside ? "RETURN TO YOUR START POSITION" : !tracking ? "TRACKING LOST - SHOW BOTH HANDS / CONTROLLERS" : "PAUSED";
                 ResetHistory();
                 if (presentation != null) presentation.Render(this, pose, false);
                 return;

@@ -85,7 +85,7 @@ namespace Hapbeat.Boxing.Editor
             cameraObject.AddComponent<AudioListener>();
             origin.Camera = camera; origin.CameraFloorOffsetObject = offset;
             origin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
-            var input = rig.AddComponent<BoxingInput>(); input.origin = origin; input.headCamera = camera;
+            var input = rig.AddComponent<BoxingInput>(); input.origin = origin; input.headCamera = camera; input.startPoint = floorMark;
             SetupHeadDriver(input);
             var host = new GameObject("Boxing Match");
             var game = host.AddComponent<BoxingGame>();
@@ -325,6 +325,7 @@ namespace Hapbeat.Boxing.Editor
             var game = UnityEngine.Object.FindAnyObjectByType<BoxingGame>();
             if (game == null || game.input == null || game.tuning == null || game.feedback == null || game.menu == null) throw new InvalidOperationException("Incomplete boxing scene");
             if (game.input.headDriver == null || game.input.headDriver.GetComponent<Camera>() != game.input.headCamera) throw new InvalidOperationException("Head tracked pose driver missing");
+            if (game.input.startPoint == null) throw new InvalidOperationException("Scene start position marker missing");
             foreach (var root in scene.GetRootGameObjects())
             foreach (var transform in root.GetComponentsInChildren<Transform>(true))
                 if (GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transform.gameObject) != 0) throw new InvalidOperationException("Missing script: " + transform.name);

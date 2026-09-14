@@ -18,7 +18,7 @@ Unity XRI 3.3.1の標準シミュレーターPrefab・入力設定を使用し�
 2. Meta Horizon LinkでQuestをAir Link接続します。WindowsのOpenXR runtimeはMeta Horizon Linkを選択してください。
 3. `Hapbeat Boxing > Editor Input > Air Link` を選び、Unityのactive build targetをWindowsにしてPlayを押します。起動時メニューの `START 90s ROUND` を選択します。
 
-左右Touchコントローラーが既定です。A/Xで決定、左スティックで選択、Menu/B/Yでメニューを開閉します。Handsモード、またはコントローラー未追跡時は選択肢を1.5秒見つめても操作できます。追跡中のコントローラー選択を視線で上書きしません。起動時のHMD位置・向きをリング上の開始位置に合わせます。必要ならメニューから `RECENTER` を選択します。
+左右Touchコントローラーが既定です。A/Xで決定、左右どちらのスティックでも上下で選択、Menu/B/Yでメニューを開閉します。Controllersモードでは起動待ち・追跡喪失中も視線で選択や入力モードを変更しません。明示的にHandsモードを選んだ場合だけ、選択肢を1.5秒見つめて操作できます。起動時のHMD位置・向きをリング上の開始位置に合わせます。必要ならメニューから `RECENTER` を選択します。
 
 周囲の物を片付け、現実の物体や人を殴らない範囲で試してください。コントローラーのストラップを使い、強く振り切らず弱いパンチから確認します。速度応答は力の測定ではなくゲーム用の演出です。
 
@@ -28,6 +28,8 @@ Meta公式: [Link開発設定](https://developers.meta.com/horizon/documentation
 
 ## 操作と調整
 
+- 開始位置・正面はシーンの `Arena - original procedural assets / Start position` で調整できます。PositionのX/ZとRotationのYを使い、既定の `(0, 0.003, 0)`・Y回転`0`は相手に正対します。高さはHMDの追跡値を維持します。`XR Origin (Boxing)` のBoxingInputにあるStart Pointが参照先です。Main Cameraを直接回転しても追跡値で上書きされます。初回追跡時・ラウンド開始時・RECENTER時にこの開始位置へ合わせます。
+- Air Link中はPCのGameビューではなくOpenXRセッションのフォーカスを使って停止判定します。`HEADSET PAUSED - OPENXR NOT FOCUSED` はQuestのシステム画面等でVR側のフォーカスがない状態、`APPLICATION PAUSED` はアプリ中断、`GAME WINDOW NOT FOCUSED` はネイティブXRがないDesktop／Simulator側のウィンドウ非アクティブを表します。実際の追跡喪失・安全範囲逸脱による停止は維持します。
 - プレイヤーの判定は左右グローブと頭。プレイヤーの腕は描画・判定しません。相手には見た目用の腕・脚があります。
 - 相手はジャブ、クロス、フックを繰り返し、小さく前後左右へ動きます。狙いは予備動作開始時に固定し、パンチ中は頭を追尾しません。
 - メニュー表示、Questのシステムメニュー・フォーカス喪失、追跡喪失、開始点から1m以上離れた時は対戦時間・敵・触覚を停止します。システムメニューから戻った時は `RESUME` で明示的に再開します。
@@ -65,7 +67,7 @@ Unity Editorを閉じて、PowerShellから実行します。Unityの場所が�
 
 `Logs/` にテスト結果・実行ログ・画像が出ます。Smokeは実際のPlay Modeで90秒ラウンド、パンチ、ガード、回避、被弾、メニュー停止を再生し、3部位・弱打／強打・ゲイン変化・触覚送信ゼロ・エラーゼロを検証します。`Builds/Windows/HapbeatBoxing.exe`、`Builds/HapbeatBoxing.apk` が生成先です。
 
-InputTestsはUnity公式InputTestFixtureを使うPlay Modeの入力テストです。SimulatorSmokeは標準Prefabへキーボードイベントを渡し、頭・左右の個別移動、ボタン、追跡喪失／復帰を実際のゲーム入力で確認します。全自動検証は無音・実機送信なしです。ビルドでは詳細レポートからEditorシミュレーター資産の混入も検査します。
+InputTestsはUnity公式InputTestFixtureを使うPlay Modeの入力テストです。XRIシミュレーターに加え、OpenXRのOculus Touch／Touch Plusレイアウトを検査します。実シーンで起動時の追跡待ちにHandsへ自動切替されないこと、左右スティック選択、Aで開始、グローブ追従、カウントダウン進行を確認します。InputTestsはEditor InputをSimulatorにしてネイティブXRを無効にした状態で実行し、実機確認時はAir Linkへ戻してください。SimulatorSmokeは標準Prefabへキーボードイベントを渡し、頭・左右の個別移動、ボタン、追跡喪失／復帰を実際のゲーム入力で確認します。全自動検証は無音・実機送信なしです。ビルドでは詳細レポートからEditorシミュレーター資産の混入も検査します。
 
 各コマンドは終了コードだけでなく起動・インポートログも検査します。Unityは設定ファイルの構文エラー後もテストやScene検証を続ける場合があるため、`BOXING_SCENE_VALID` 単独では成功と扱いません。任意の起動ログは `./tools/assert-unity-log.ps1 -LogPath ./Logs/AirLinkEditor.log` で確認できます。Unityのシリアライズ済みファイルを一括で末尾空白除去しないでください。空のレイヤー名は明示的な空文字列として保持します。
 

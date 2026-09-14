@@ -9927,6 +9927,7 @@ MonoBehaviour:
   origin: {fileID: 1868911739}
   headCamera: {fileID: 928376168}
   headDriver: {fileID: 928376171}
+  startPoint: {fileID: 721458686}
   mode: 0
   controllerOffset: {x: 0, y: -0.015, z: 0.08}
   controllerRotation: {x: -15, y: 0, z: 0}

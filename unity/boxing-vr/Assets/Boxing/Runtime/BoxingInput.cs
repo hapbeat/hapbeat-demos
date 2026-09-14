@@ -14,6 +14,11 @@ namespace Hapbeat.Boxing
         public XROrigin origin;
         public Camera headCamera;
         public TrackedPoseDriver headDriver;
+        [Tooltip("Scene start marker: X/Z position and Y rotation define where the player starts and faces. Head height remains tracked.")]
+        public Transform startPoint;
+        public Vector3 StartPosition => startPoint != null ? new Vector3(startPoint.position.x, 0, startPoint.position.z) : Vector3.zero;
+        public float StartYaw => startPoint != null ? startPoint.eulerAngles.y : 0;
+        public event System.Action Recentered;
         public BoxingInputMode mode = BoxingInputMode.Controllers;
         public Vector3 controllerOffset = new Vector3(0, -0.015f, 0.08f);
         public Vector3 controllerRotation = new Vector3(-15, 0, 0);
@@ -44,10 +49,12 @@ namespace Hapbeat.Boxing
         public void Recenter()
         {
             if (headCamera == null || origin == null) return;
-            origin.RotateAroundCameraUsingOriginUp(-headCamera.transform.eulerAngles.y);
+            if (mode == BoxingInputMode.Desktop) { desktopYaw = desktopPitch = 0; return; }
+            origin.RotateAroundCameraUsingOriginUp(Mathf.DeltaAngle(headCamera.transform.eulerAngles.y, StartYaw));
             var p = headCamera.transform.position;
-            origin.transform.position -= new Vector3(p.x, 0, p.z);
+            origin.transform.position += StartPosition - new Vector3(p.x, 0, p.z);
             aligned = true;
+            Recentered?.Invoke();
         }
         private void Update()
         {
@@ -139,7 +146,8 @@ namespace Hapbeat.Boxing
             }
             float lean = k == null ? 0 : (k.dKey.isPressed ? 0.35f : 0) - (k.aKey.isPressed ? 0.35f : 0);
             float height = k != null && k.sKey.isPressed ? 1.2f : 1.65f;
-            frame.head = new Vector3(lean, height, 0); frame.headRotation = Quaternion.Euler(desktopPitch, desktopYaw, 0);
+            var startRotation = Quaternion.Euler(0, StartYaw, 0);
+            frame.head = StartPosition + startRotation * new Vector3(lean, height, 0); frame.headRotation = Quaternion.Euler(desktopPitch, StartYaw + desktopYaw, 0);
             headCamera.transform.SetPositionAndRotation(frame.head, frame.headRotation);
             if (k != null && k.qKey.wasPressedThisFrame) leftPunch = 1;
             if (k != null && k.eKey.wasPressedThisFrame) rightPunch = 1;
@@ -147,9 +155,9 @@ namespace Hapbeat.Boxing
             rightPunch = Mathf.Max(0, rightPunch - Time.unscaledDeltaTime * 3.5f);
             float l = Mathf.Sin(leftPunch * Mathf.PI) * 0.62f, r = Mathf.Sin(rightPunch * Mathf.PI) * 0.62f;
             bool guard = k != null && k.spaceKey.isPressed;
-            frame.left = frame.head + new Vector3(guard ? -0.12f : -0.23f, guard ? -0.03f : -0.25f, 0.32f + l);
-            frame.right = frame.head + new Vector3(guard ? 0.12f : 0.23f, guard ? -0.03f : -0.25f, 0.32f + r);
-            frame.leftRotation = frame.rightRotation = Quaternion.identity;
+            frame.left = frame.head + startRotation * new Vector3(guard ? -0.12f : -0.23f, guard ? -0.03f : -0.25f, 0.32f + l);
+            frame.right = frame.head + startRotation * new Vector3(guard ? 0.12f : 0.23f, guard ? -0.03f : -0.25f, 0.32f + r);
+            frame.leftRotation = frame.rightRotation = startRotation;
             frame.leftClosed = frame.rightClosed = frame.valid = true;
         }
     }

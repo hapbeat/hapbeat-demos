@@ -17,7 +17,7 @@ namespace Hapbeat.Boxing
 
         private readonly InputActionMap map = new InputActionMap("Boxing XR");
         private readonly TrackedPose head, left, right;
-        private readonly InputAction menu, confirm, navigate;
+        private readonly InputAction menu, confirm, leftNavigate, rightNavigate;
 
         public BoxingXrControls()
         {
@@ -31,7 +31,8 @@ namespace Hapbeat.Boxing
             confirm = map.AddAction("Confirm", InputActionType.Button);
             confirm.AddBinding("<XRController>{LeftHand}/primaryButton");
             confirm.AddBinding("<XRController>{RightHand}/primaryButton");
-            navigate = map.AddAction("Navigate", InputActionType.Value, "<XRController>{LeftHand}/primary2DAxis");
+            leftNavigate = map.AddAction("Left Navigate", InputActionType.Value, "<XRController>{LeftHand}/primary2DAxis");
+            rightNavigate = map.AddAction("Right Navigate", InputActionType.Value, "<XRController>{RightHand}/primary2DAxis");
             map.Enable();
         }
 
@@ -42,7 +43,9 @@ namespace Hapbeat.Boxing
             frame.leftTracked = left.Read(out frame.left);
             frame.rightTracked = right.Read(out frame.right);
             frame.menu = menu.IsPressed(); frame.confirm = confirm.IsPressed();
-            frame.navigate = navigate.ReadValue<Vector2>().y;
+            float leftY = leftNavigate.ReadValue<Vector2>().y, rightY = rightNavigate.ReadValue<Vector2>().y;
+            // Compare vertical intent so a horizontal stick cannot suppress the other hand.
+            frame.navigate = Mathf.Abs(leftY) >= Mathf.Abs(rightY) ? leftY : rightY;
             return frame;
         }
 
