@@ -52,6 +52,8 @@ Unity Editorを閉じて、PowerShellから実行します。Unityの場所が�
 
 `Logs/` にテスト結果・実行ログ・画像が出ます。Smokeは実際のPlay Modeで90秒ラウンド、パンチ、ガード、回避、被弾、メニュー停止を再生し、3部位・弱打／強打・ゲイン変化・触覚送信ゼロ・エラーゼロを検証します。`Builds/Windows/HapbeatBoxing.exe`、`Builds/HapbeatBoxing.apk` が生成先です。
 
+各コマンドは終了コードだけでなく起動・インポートログも検査します。Unityは設定ファイルの構文エラー後もテストやScene検証を続ける場合があるため、`BOXING_SCENE_VALID` 単独では成功と扱いません。任意の起動ログは `./tools/assert-unity-log.ps1 -LogPath ./Logs/AirLinkEditor.log` で確認できます。Unityのシリアライズ済みファイルを一括で末尾空白除去しないでください。空のレイヤー名は明示的な空文字列として保持します。
+
 3本のAPKを `Builds/DemoSwitch/` に用意した場合は、USBデバッグを許可したQuestに `./tools/install-demo-switch.ps1` で一括更新できます。既存アプリのデータは消去せず、署名が異なる場合も自動アンインストールしません。インストール後にQuestでいずれかのデモを起動してからMCUを操作します。
 
 Editorのみの `INPUT: Desktop` はQ/Eでパンチ、Spaceでガード、A/Dで左右へ回避、Sでダッキング、右マウスドラッグで視線、Enterでメニュー決定、Escapeでメニューです。HMD実機での手追跡品質や実際の触覚の強さはこのモードでは検証できません。

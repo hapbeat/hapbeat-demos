@@ -319,6 +319,8 @@ namespace Hapbeat.Boxing.Editor
 
         public static void Validate()
         {
+            ValidateLayerSettings("ProjectSettings/TagManager.asset", "layers");
+            ValidateLayerSettings("Assets/XRI/Settings/Resources/InteractionLayerSettings.asset", "m_LayerNames");
             var scene = EditorSceneManager.OpenScene(ScenePath);
             var game = UnityEngine.Object.FindAnyObjectByType<BoxingGame>();
             if (game == null || game.input == null || game.tuning == null || game.feedback == null || game.menu == null) throw new InvalidOperationException("Incomplete boxing scene");
@@ -329,6 +331,15 @@ namespace Hapbeat.Boxing.Editor
             foreach (var trigger in game.feedback.impactTriggers)
                 if (trigger == null || trigger.ResolveEntry() == null || trigger.ResolveEntry().streamClip == null) throw new InvalidOperationException("Unwired haptic trigger");
             Debug.Log("BOXING_SCENE_VALID: XR rig, menu, opponent, six haptic bindings, no missing scripts");
+        }
+        private static void ValidateLayerSettings(string path, string property)
+        {
+            if (path.StartsWith("Assets/")) AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            if (assets.Length == 0) throw new InvalidOperationException("Cannot parse layer settings: " + path);
+            var table = new SerializedObject(assets[0]).FindProperty(property);
+            if (table == null || table.arraySize != 32 || table.GetArrayElementAtIndex(0).stringValue != "Default")
+                throw new InvalidOperationException("Invalid layer table: " + path);
         }
         public static void BuildWindows()
         {

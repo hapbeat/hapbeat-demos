@@ -8,6 +8,19 @@ namespace Hapbeat.Boxing.Tests
 {
     public sealed class BoxingRulesTests
     {
+        [TestCase("ProjectSettings/TagManager.asset", "layers")]
+        [TestCase("Assets/XRI/Settings/Resources/InteractionLayerSettings.asset", "m_LayerNames")]
+        public void SerializedLayerTablesLoadWithAll32Slots(string path, string property)
+        {
+            if (path.StartsWith("Assets/")) AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            Assert.That(assets, Is.Not.Empty, "Unity must parse the actual serialized settings, not use a fallback.");
+            var table = new SerializedObject(assets[0]).FindProperty(property);
+            Assert.That(table, Is.Not.Null);
+            Assert.That(table.arraySize, Is.EqualTo(32));
+            Assert.That(table.GetArrayElementAtIndex(0).stringValue, Is.EqualTo("Default"));
+            Assert.That(table.GetArrayElementAtIndex(31).stringValue, Is.Empty);
+        }
         private BoxingTuning tuning;
         [SetUp] public void Setup() => tuning = ScriptableObject.CreateInstance<BoxingTuning>();
         [TearDown] public void Cleanup() => Object.DestroyImmediate(tuning);

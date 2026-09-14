@@ -30,4 +30,10 @@ $process = Start-Process -FilePath $UnityExe -ArgumentList $arguments -WindowSty
 Write-Output "Unity $Task PID=$($process.Id)"
 $process.WaitForExit()
 Write-Output "Unity $Task exit=$($process.ExitCode) log=$logs/$Task.log"
+if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+& (Join-Path $PSScriptRoot 'assert-unity-log.ps1') -LogPath (Join-Path $logs ($Task + '.log'))
+if ($Task -eq 'Tests') {
+    [xml]$results = Get-Content -LiteralPath (Join-Path $logs 'tests.xml') -Raw
+    if ($results.'test-run'.result -ne 'Passed' -or [int]$results.'test-run'.total -eq 0) { throw 'Unity tests did not pass.' }
+}
 exit $process.ExitCode
