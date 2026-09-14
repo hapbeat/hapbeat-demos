@@ -131,6 +131,7 @@ namespace GloveBallDemo.Editor
             }
             InstallVisuals();
             InstallImpacts();
+            BallImpactKit.RegisterManifest();
             AssetDatabase.SaveAssets();
             Debug.Log("[BallVariants] Installed 5 visuals and 15 independent impact events. Scenes untouched.");
         }
@@ -219,7 +220,7 @@ namespace GloveBallDemo.Editor
                         {
                             var template = existing.entries.Find(e => e.eventName == surfaces[side]);
                             if (template == null || template.streamClip == null) throw new InvalidOperationException("Missing impact template");
-                            var clipPath = $"{Art}/{Names[kind]}Impact.wav";
+                            var clipPath = BallImpactKit.ClipPath(Names[kind]);
                             if (AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath) == null)
                             {
                                 if (!AssetDatabase.CopyAsset(AssetDatabase.GetAssetPath(template.streamClip), clipPath))
@@ -230,7 +231,7 @@ namespace GloveBallDemo.Editor
                                 displayName = Names[kind] + " / " + surfaces[side],
                                 streamClip = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath),
                                 target = template.target, gain = template.gain, loop = false,
-                                notes = "Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct events."
+                                notes = "Kit clip shared by this ball's L/R/body events. Replace WAV in place, preserving its meta GUID."
                             };
                             entry.SetCachedManifestIntensity(1f);
                             map.entries.Add(entry);

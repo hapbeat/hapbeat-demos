@@ -91,7 +91,7 @@ namespace GloveBallDemo.Editor
 
             foreach (var file in Directory.GetFiles(DemoAssetPaths.KitStreamClipsDir, "*.wav"))
             {
-                if (clips.ContainsKey(Path.GetFileNameWithoutExtension(file)))
+                if (clips.ContainsKey(Path.GetFileNameWithoutExtension(file)) || BallImpactKit.IsBallClip(Path.GetFileName(file)))
                 {
                     continue;
                 }
@@ -170,7 +170,8 @@ namespace GloveBallDemo.Editor
             json.AppendLine("  }");
             json.AppendLine("}");
 
-            File.WriteAllText(DemoAssetPaths.KitManifest, json.ToString());
+            File.WriteAllText(DemoAssetPaths.KitManifest, BallImpactKit.PreserveManifestEntries(json.ToString()));
+            BallImpactKit.RegisterManifest();
             AssetDatabase.ImportAsset(DemoAssetPaths.KitManifest, ImportAssetOptions.ForceSynchronousImport);
         }
 

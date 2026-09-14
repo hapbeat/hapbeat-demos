@@ -10,7 +10,7 @@
       "clip": "grab.wav",
       "description": "Left Grab",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -18,7 +18,7 @@
       "clip": "grab.wav",
       "description": "Right Grab",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -26,7 +26,7 @@
       "clip": "release.wav",
       "description": "Left Release",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -34,7 +34,7 @@
       "clip": "release.wav",
       "description": "Right Release",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -42,7 +42,7 @@
       "clip": "arm_collide.wav",
       "description": "Left Arm Collide",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -50,7 +50,7 @@
       "clip": "arm_collide.wav",
       "description": "Right Arm Collide",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -58,7 +58,7 @@
       "clip": "body_collide.wav",
       "description": "Body Collide",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -66,7 +66,7 @@
       "clip": "charge_loop.wav",
       "description": "Left Charge Loop",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": true
       }
     },
@@ -74,7 +74,7 @@
       "clip": "charge_loop.wav",
       "description": "Right Charge Loop",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": true
       }
     },
@@ -82,7 +82,7 @@
       "clip": "target_hit.wav",
       "description": "Target Hit",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -90,7 +90,7 @@
       "clip": "launcher_hit.wav",
       "description": "Launcher Hit",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -98,7 +98,7 @@
       "clip": "launcher_stunned.wav",
       "description": "Launcher Stunned",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -106,7 +106,7 @@
       "clip": "incoming_warn.wav",
       "description": "Incoming Warning",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -114,7 +114,7 @@
       "clip": "wave_start.wav",
       "description": "Wave Start",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -122,7 +122,7 @@
       "clip": "wave_clear.wav",
       "description": "Wave Clear",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
         "loop": false
       }
     },
@@ -130,7 +130,127 @@
       "clip": "game_over.wav",
       "description": "Game Over",
       "parameters": {
-        "intensity": 1.0,
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.bowling_l_arm_collide": {
+      "clip": "bowling_impact.wav",
+      "description": "bowling / l_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.bowling_r_arm_collide": {
+      "clip": "bowling_impact.wav",
+      "description": "bowling / r_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.bowling_body_collide": {
+      "clip": "bowling_impact.wav",
+      "description": "bowling / body_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.volleyball_l_arm_collide": {
+      "clip": "volleyball_impact.wav",
+      "description": "volleyball / l_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.volleyball_r_arm_collide": {
+      "clip": "volleyball_impact.wav",
+      "description": "volleyball / r_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.volleyball_body_collide": {
+      "clip": "volleyball_impact.wav",
+      "description": "volleyball / body_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.foam_l_arm_collide": {
+      "clip": "foam_impact.wav",
+      "description": "foam / l_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.foam_r_arm_collide": {
+      "clip": "foam_impact.wav",
+      "description": "foam / r_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.foam_body_collide": {
+      "clip": "foam_impact.wav",
+      "description": "foam / body_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.basketball_l_arm_collide": {
+      "clip": "basketball_impact.wav",
+      "description": "basketball / l_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.basketball_r_arm_collide": {
+      "clip": "basketball_impact.wav",
+      "description": "basketball / r_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.basketball_body_collide": {
+      "clip": "basketball_impact.wav",
+      "description": "basketball / body_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.perforated_l_arm_collide": {
+      "clip": "perforated_impact.wav",
+      "description": "perforated / l_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.perforated_r_arm_collide": {
+      "clip": "perforated_impact.wav",
+      "description": "perforated / r_arm_collide",
+      "parameters": {
+        "intensity": 1,
+        "loop": false
+      }
+    },
+    "gloveball-kit.perforated_body_collide": {
+      "clip": "perforated_impact.wav",
+      "description": "perforated / body_collide",
+      "parameters": {
+        "intensity": 1,
         "loop": false
       }
     }
