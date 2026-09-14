@@ -8,7 +8,6 @@ public static class LocalMcpConnection
     [MenuItem("Hapbeat/Development/Connect Local MCP")]
     public static async void Connect()
     {
-        EditorUtility.audioMasterMute = true;
         EditorPrefs.SetBool("MCPForUnity.TelemetryDisabled", true);
         EditorPrefs.SetBool("MCPForUnity.AutoStartOnLoad", false);
         var config = EditorConfigurationCache.Instance;

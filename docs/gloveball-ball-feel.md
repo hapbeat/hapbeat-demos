@@ -36,3 +36,5 @@ All five source pages state CC0. Public high-quality previews were decoded to mo
 5. [Drop (plastic ball) — lori.mortimer](https://freesound.org/people/lori.mortimer/sounds/723791/): processed pickleball dropped in a bathtub.
 
 Final timbre/volume should be auditioned in the HMD. The agent's verification is muted and never sends live haptics.
+
+If a previous editor-authoring run left the Game view muted, select `Hapbeat > Development > Restore Game Audio`. MCP connection and ball asset setup now preserve audio settings. This is an Editor setting, not an APK setting.

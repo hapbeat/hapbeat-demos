@@ -13,7 +13,6 @@ namespace GloveBallDemo.Editor
         [MenuItem("Hapbeat/Development/Install Ball Feel Assets")]
         public static void Install()
         {
-            EditorUtility.audioMasterMute = true;
             AssetDatabase.Refresh();
             const string path = "Assets/Resources/BallFeelSettings.asset";
             var settings = AssetDatabase.LoadAssetAtPath<BallFeelSettings>(path);
