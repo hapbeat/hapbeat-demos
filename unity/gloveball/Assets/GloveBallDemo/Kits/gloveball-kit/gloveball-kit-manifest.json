@@ -136,73 +136,73 @@
     },
     "gloveball-kit.bowling_l_arm_collide": {
       "clip": "bowling_impact.wav",
-      "description": "bowling / l_arm_collide",
+      "description": "bowling / l_arm_collide (damage)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.5,
         "loop": false
       }
     },
     "gloveball-kit.bowling_r_arm_collide": {
       "clip": "bowling_impact.wav",
-      "description": "bowling / r_arm_collide",
+      "description": "bowling / r_arm_collide (damage)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.5,
         "loop": false
       }
     },
     "gloveball-kit.bowling_body_collide": {
       "clip": "bowling_impact.wav",
-      "description": "bowling / body_collide",
+      "description": "bowling / body_collide (damage)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.5,
         "loop": false
       }
     },
     "gloveball-kit.volleyball_l_arm_collide": {
       "clip": "volleyball_impact.wav",
-      "description": "volleyball / l_arm_collide",
+      "description": "volleyball / l_arm_collide (grab_heavy)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.8,
         "loop": false
       }
     },
     "gloveball-kit.volleyball_r_arm_collide": {
       "clip": "volleyball_impact.wav",
-      "description": "volleyball / r_arm_collide",
+      "description": "volleyball / r_arm_collide (grab_heavy)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.8,
         "loop": false
       }
     },
     "gloveball-kit.volleyball_body_collide": {
       "clip": "volleyball_impact.wav",
-      "description": "volleyball / body_collide",
+      "description": "volleyball / body_collide (grab_heavy)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.8,
         "loop": false
       }
     },
     "gloveball-kit.foam_l_arm_collide": {
       "clip": "foam_impact.wav",
-      "description": "foam / l_arm_collide",
+      "description": "foam / l_arm_collide (footstep_1)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.25,
         "loop": false
       }
     },
     "gloveball-kit.foam_r_arm_collide": {
       "clip": "foam_impact.wav",
-      "description": "foam / r_arm_collide",
+      "description": "foam / r_arm_collide (footstep_1)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.25,
         "loop": false
       }
     },
     "gloveball-kit.foam_body_collide": {
       "clip": "foam_impact.wav",
-      "description": "foam / body_collide",
+      "description": "foam / body_collide (footstep_1)",
       "parameters": {
-        "intensity": 1,
+        "intensity": 0.25,
         "loop": false
       }
     },
@@ -232,7 +232,7 @@
     },
     "gloveball-kit.perforated_l_arm_collide": {
       "clip": "perforated_impact.wav",
-      "description": "perforated / l_arm_collide",
+      "description": "perforated / l_arm_collide (z4_slider_tick)",
       "parameters": {
         "intensity": 1,
         "loop": false
@@ -240,7 +240,7 @@
     },
     "gloveball-kit.perforated_r_arm_collide": {
       "clip": "perforated_impact.wav",
-      "description": "perforated / r_arm_collide",
+      "description": "perforated / r_arm_collide (z4_slider_tick)",
       "parameters": {
         "intensity": 1,
         "loop": false
@@ -248,7 +248,7 @@
     },
     "gloveball-kit.perforated_body_collide": {
       "clip": "perforated_impact.wav",
-      "description": "perforated / body_collide",
+      "description": "perforated / body_collide (z4_slider_tick)",
       "parameters": {
         "intensity": 1,
         "loop": false

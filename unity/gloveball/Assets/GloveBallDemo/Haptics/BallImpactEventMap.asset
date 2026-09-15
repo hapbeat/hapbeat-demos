@@ -24,10 +24,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip damage; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.5
   - _id: 7219c650743a43059b48fb40ae610578
     mode: 1
     displayName: Bowling / r_arm_collide
@@ -39,10 +38,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip damage; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.5
   - _id: e3423cd7d2b14be7be186d806030d8b1
     mode: 1
     displayName: Bowling / body_collide
@@ -54,10 +52,9 @@ MonoBehaviour:
     gain: 1
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip damage; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.5
   - _id: 705f8038e6674c3d8437147352a06089
     mode: 1
     displayName: Volleyball / l_arm_collide
@@ -69,10 +66,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip grab_heavy; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.8
   - _id: 0303204a50704402a938dba26c69211a
     mode: 1
     displayName: Volleyball / r_arm_collide
@@ -84,10 +80,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip grab_heavy; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.8
   - _id: a96029e805d649a0bfa815b4b5a0fc2e
     mode: 1
     displayName: Volleyball / body_collide
@@ -99,10 +94,9 @@ MonoBehaviour:
     gain: 1
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip grab_heavy; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.8
   - _id: 424a6e5cffff43e88b7b9c238749f828
     mode: 1
     displayName: Foam / l_arm_collide
@@ -114,10 +108,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip footstep_1; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.25
   - _id: 497261563f11445eaa15085175617bbb
     mode: 1
     displayName: Foam / r_arm_collide
@@ -129,10 +122,9 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip footstep_1; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.25
   - _id: 8b9056722d824748b5000c4884c54a49
     mode: 1
     displayName: Foam / body_collide
@@ -144,10 +136,9 @@ MonoBehaviour:
     gain: 1
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip footstep_1; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
-    _cachedManifestIntensity: 1
+    _cachedManifestIntensity: 0.25
   - _id: 764a4e647e9e4c9cbaa0afbbe4067049
     mode: 1
     displayName: Basketball / l_arm_collide
@@ -204,8 +195,7 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_l_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip z4_slider_tick; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: 1
   - _id: 11bfecceb1aa4834a37a886d30017ccf
@@ -219,8 +209,7 @@ MonoBehaviour:
     gain: 0.7
     target: '*/pos_r_wrist'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip z4_slider_tick; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: 1
   - _id: 31dd55b00be04debb823070e89a1c84d
@@ -234,8 +223,7 @@ MonoBehaviour:
     gain: 1
     target: '*/pos_neck'
     delayOffsetSeconds: 0
-    notes: Placeholder. Replace streamClip to tune this ball; L/R/body remain distinct
-      events.
+    notes: Kit haptic clip z4_slider_tick; shared by this ball's L/R/body events.
     manifestOverride: {fileID: 0}
     _cachedManifestIntensity: 1
   revertPlayModeChanges: 0

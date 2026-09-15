@@ -31,8 +31,8 @@ Foam appearance: `Assets/GloveBallDemo/Art/Balls/Foam_0.mat`, with procedural po
 
 The five haptic WAVs live in `Assets/GloveBallDemo/Kits/gloveball-kit/stream-clips/`:
 `bowling_impact.wav`, `volleyball_impact.wav`, `foam_impact.wav`, `basketball_impact.wav`, `perforated_impact.wav`.
-These are placeholder waveforms; this Kit migration does not change their sound or haptic shape.
-`gloveball-kit-manifest.json` registers 15 `stream_events` (each kind × left arm/right arm/body), with intensity 1.0 so the existing EventMap gains remain authoritative.
+`gloveball-kit-manifest.json` registers 15 `stream_events` (each kind × left arm/right arm/body). Manifest intensity multiplies the existing EventMap gain.
+User-provided haptics (2026-09-15): bowling = `damage [0.000–0.087s].wav` at 0.5; volleyball = `grab_heavy.wav` at 0.8; foam = `footstep_1.wav` at 0.25; perforated = `z4_slider_tick.wav` at 1.0. The supplied WAV data is copied unchanged, with strength applied only in the manifest (and its EventMap runtime cache). Basketball retains its placeholder at 1.0. These user-provided haptics are separate from the CC0 audible effects listed below.
 
 To change one ball's haptics, overwrite its WAV **without deleting/replacing the `.meta` file**. Its three EventMap references then remain valid. If adding a differently named asset, update its manifest clip entries and the three EventMap references. Keep L/R/body targets separate.
 
