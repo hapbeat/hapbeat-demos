@@ -8,6 +8,8 @@ namespace Hapbeat.DemoSwitch
         public static event Action<string> BeforeSwitch;
         public static event Action LaunchContextDetected;
 
+        public static bool ReturnToHub() => SwitchTo(DemoSwitchSettings.HubDemoId);
+
         public static bool SwitchTo(string demoId)
         {
             if (DemoSwitchRuntime.Instance == null)

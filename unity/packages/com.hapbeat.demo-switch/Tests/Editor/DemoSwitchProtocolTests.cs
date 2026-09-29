@@ -7,6 +7,33 @@ namespace Hapbeat.DemoSwitch.Tests
         private const string Secret = "correct horse battery staple";
 
         [Test]
+        public void ControlCanonicalAndAuthBindActionAndScene()
+        {
+            var command=new DemoSwitchCommand("m5-main",43,"volley","","scene","block");
+            Assert.That(DemoSwitchProtocol.ComputeAuth(command,Secret),Is.EqualTo("861ece8d1d310cb1dc9be46ec660ca4f9a8ed5b2ccf1a7a96252cef691b39ae2"));
+            var signed=new DemoSwitchCommand("m5-main",43,"volley",DemoSwitchProtocol.ComputeAuth(command,Secret),"scene","receive");
+            Assert.That(DemoSwitchProtocol.Authenticate(signed,Secret),Is.False);
+        }
+
+        [TestCase("scene","block",true)]
+        [TestCase("scene","../block",false)]
+        [TestCase("scene","",false)]
+        [TestCase("menu_open","",true)]
+        [TestCase("menu_close","",true)]
+        [TestCase("recenter","",true)]
+        [TestCase("restart","",true)]
+        [TestCase("toggle","",false)]
+        [TestCase("menu_open","block",false)]
+        public void ControlParserEnforcesActionAndLogicalScene(string action,string scene,bool valid)
+        {
+            string json="{\"version\":1,\"type\":\"CONTROL\",\"controller_id\":\"m5-main\",\"seq\":43,\"demo_id\":\"volley\",\"action\":\""+action+"\",\"scene_id\":\""+scene+"\"}";
+            Assert.That(DemoSwitchProtocol.ParseCommand(json).Success,Is.EqualTo(valid));
+            Assert.That(DemoSwitchProtocol.ParseCommand(json.Replace(",\"scene_id\":\""+scene+"\"","")).Success,Is.False);
+            Assert.That(DemoSwitchProtocol.ParseCommand(json.Replace("CONTROL","SWITCH")).Success,Is.False);
+            Assert.That(DemoSwitchProtocol.ParseCommand(json.Replace("\"type\":\"CONTROL\"","\"type\":{}")).Success,Is.False);
+        }
+
+        [Test]
         public void ParserAcceptsVersionOneSwitchCommand()
         {
             const string json = "{\"version\":1,\"type\":\"SWITCH\",\"controller_id\":\"m5-main\",\"seq\":42,\"demo_id\":\"gloveball\"}";

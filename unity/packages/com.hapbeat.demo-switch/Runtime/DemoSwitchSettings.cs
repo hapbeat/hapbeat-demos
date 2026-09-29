@@ -27,6 +27,12 @@ namespace Hapbeat.DemoSwitch
     public sealed class DemoSwitchSettings : ScriptableObject
     {
         public const string ResourceName = "HapbeatDemoSwitchSettings";
+        public const string HubDemoId = "demo_hub";
+
+        [Header("Shared hub")]
+        [Tooltip("Common return destination. Updating this package adds hub return without changing game scenes.")]
+        [SerializeField] private DemoSwitchTarget _hub = new DemoSwitchTarget(
+            HubDemoId, "jp.hapbeat.demohub", "com.unity3d.player.UnityPlayerGameActivity");
 
         [Header("Receiver")]
         [SerializeField] private bool _receiverEnabled;
@@ -52,6 +58,14 @@ namespace Hapbeat.DemoSwitch
         {
             target = null;
             if (!DemoSwitchProtocol.IsIdentifier(demoId)) return false;
+
+            // Resolve only the trusted local destination, never a package/activity from the network.
+            if (demoId == HubDemoId && _hub != null && _hub.DemoId == HubDemoId)
+            {
+                target = _hub;
+                return !string.IsNullOrWhiteSpace(target.PackageName) &&
+                       !string.IsNullOrWhiteSpace(target.ActivityName);
+            }
 
             foreach (var candidate in _targets)
             {

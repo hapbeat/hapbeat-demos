@@ -28,6 +28,17 @@ DerivedDataCache/
 *.opendb
 *.sdf
 
+# Each demo project is its own Git repository (DEC-071 / DEC-076), checked out
+# in place under this folder for the workspace layout.
+unity/boxing-vr/
+unity/fps/
+unity/gloveball/
+unity/handdemo/
+unreal/safety-mill-vr/
+unreal/trex-encounter/
+web/neonslice-hapbeat/
+private-assets/
+
 # Unity generated (unity/* projects)
 [Ll]ibrary/
 [Tt]emp/
@@ -48,6 +59,7 @@ ExportedObj/
 *.pdb
 *.mdb
 *.apk
+*.apk.idsig
 *.aab
 *.unitypackage
 *.app
@@ -67,6 +79,7 @@ unity/*/Assets/Resources/PerformanceTestRunSettings.json
 Thumbs.db
 *.blend1
 *.blend2
+__pycache__/
 
 # Internal dev notes / agent metadata (use the workspace repo instead — DEC-038)
 dev-notes/

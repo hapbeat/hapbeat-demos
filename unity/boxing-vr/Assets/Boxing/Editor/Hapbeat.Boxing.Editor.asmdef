@@ -1,5 +1,0 @@
-{
-  "name": "Hapbeat.Boxing.Editor",
-  "references": ["Hapbeat.Boxing", "Hapbeat.Runtime", "Hapbeat.DemoSwitch", "Unity.InputSystem", "Unity.XR.CoreUtils", "Unity.XR.Management", "Unity.XR.Management.Editor", "Unity.XR.OpenXR", "Unity.XR.OpenXR.Editor", "Unity.XR.Hands", "Unity.XR.Interaction.Toolkit", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime", "Unity.ugui"],
-  "includePlatforms": ["Editor"]
-}

@@ -6,6 +6,34 @@ namespace Hapbeat.DemoSwitch.Tests
     public sealed class DemoSwitchPolicyTests
     {
         [Test]
+        public void HubIsAvailableWithoutAnAppSpecificTargetEntry()
+        {
+            var settings = UnityEngine.ScriptableObject.CreateInstance<DemoSwitchSettings>();
+            try
+            {
+                Assert.That(settings.TryResolveTarget("demo_hub", out var hub), Is.True);
+                Assert.That(hub.PackageName, Is.EqualTo("jp.hapbeat.demohub"));
+                Assert.That(hub.ActivityName, Is.EqualTo("com.unity3d.player.UnityPlayerGameActivity"));
+                Assert.That(settings.TryResolveTarget("jp.hapbeat.demohub", out _), Is.False);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [Test]
+        public void ExistingSerializedSettingsGainHubWithoutLosingTargets()
+        {
+            var settings = UnityEngine.ScriptableObject.CreateInstance<DemoSwitchSettings>();
+            try
+            {
+                UnityEngine.JsonUtility.FromJsonOverwrite("{\"_currentDemoId\":\"handdemo\",\"_targets\":[{\"_demoId\":\"gloveball\",\"_packageName\":\"jp.hapbeat.gloveballdemo\",\"_activityName\":\"Activity\"}]}", settings);
+                Assert.That(settings.CurrentDemoId, Is.EqualTo("handdemo"));
+                Assert.That(settings.TryResolveTarget("demo_hub", out _), Is.True);
+                Assert.That(settings.TryResolveTarget("gloveball", out _), Is.True);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [Test]
         public void AllowlistResolvesOnlyLogicalDemoIdsConfiguredLocally()
         {
             var settings = UnityEngine.ScriptableObject.CreateInstance<DemoSwitchSettings>();

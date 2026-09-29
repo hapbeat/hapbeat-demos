@@ -25,10 +25,20 @@ Hapbeat と Quest を**同じ Wi-Fi** に接続してから起動する。
 Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 触覚 Kit (vr-shooter-kit) はそちらを参照。
 
-## 3. Unity デモのソーススナップショット
+## 3. デモのソースコード
 
-- [GloveBall](unity/gloveball/README.md) — Meta の Ultimate Glove Ball アリーナ資産を使った、Quest 向け 1 人プレイデモ
-- [Boxing](unity/boxing-vr/README.md) — Quest Air Link / standalone向け90秒スパーリング。左右グローブと頭の判定、相対速度による触覚、コントローラー／手追跡入力。
+各デモのソースは、1 プロジェクト 1 リポジトリで管理している。公開準備が済んだものから順次 public にする。
+
+| デモ | エンジン | リポジトリ |
+|---|---|---|
+| Boxing（Quest 向け 90 秒スパーリング） | Unity | `hapbeat-demo-boxing-vr`（公開準備中） |
+| GloveBall / Volley（Ultimate Glove Ball アリーナ資産を使った 1 人プレイデモ） | Unity | `hapbeat-demo-gloveball`（公開準備中） |
+| T-Rex Encounter | Unreal | `hapbeat-demo-trex-encounter`（公開準備中） |
+| Safety Mill VR（フライス盤の安全教育） | Unreal | `hapbeat-demo-safety-mill-vr`（公開準備中） |
+
+ライセンス上ソース形式で再配布できない第三者アセット（Unity XR Hands のサンプルモデル、Meta の手モデル等）は、各リポジトリに含めない。代替モデルや入手手順は各リポジトリの README に記載する。
+
+このリポジトリには、デモ共通の [Demo Switch package](unity/packages/com.hapbeat.demo-switch/README.md)、APK を切り替える [Demo Hub](unity/demo-hub/README.md)、補助スクリプト（`tools/`）と、ビルド済みアプリの Releases を置く。
 
 ## 4. 独立 APK の切替
 

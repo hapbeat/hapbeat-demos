@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Net;
 using System.Text;
 using UnityEngine;
@@ -16,6 +17,7 @@ namespace Hapbeat.DemoSwitch
         private bool _listenerStarted;
         private DemoSwitchLaunchContext? _pendingLaunchContext;
         private float _nextDropLogTime;
+        private bool _controlBusy;
 
         public static DemoSwitchRuntime Instance { get; private set; }
 
@@ -43,6 +45,7 @@ namespace Hapbeat.DemoSwitch
 
         public bool SwitchLocal(string demoId)
         {
+            if (_controlBusy) return false;
             if (!_settings.TryResolveTarget(demoId, out var target))
             {
                 Debug.LogError("[Demo Switch] Demo ID is not in the local allowlist: " + demoId);
@@ -107,6 +110,16 @@ namespace Hapbeat.DemoSwitch
                 SendFailure(datagram.Source, command, "unsigned_disabled", "Unsigned command mode is disabled.");
                 return;
             }
+            if (_controlBusy)
+            {
+                SendFailure(datagram.Source, command, "not_allowed", "An operation is in progress.");
+                return;
+            }
+            if (command.IsControl)
+            {
+                HandleControl(command, datagram.Source);
+                return;
+            }
             if (!_settings.TryResolveTarget(command.DemoId, out var target))
             {
                 SendFailure(datagram.Source, command, "not_allowed", "demo_id is not in the local allowlist.");
@@ -149,6 +162,50 @@ namespace Hapbeat.DemoSwitch
             {
                 Debug.LogWarning("[Demo Switch] HERE send failed: " + exception.Message);
             }
+        }
+
+        private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
+        {
+            IDemoAppControls adapter = null;
+            foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+            {
+                if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
+                if (adapter != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }
+                adapter = candidate;
+            }
+            if (command.DemoId != _settings.CurrentDemoId || adapter == null
+                || !adapter.CanExecuteControl(command.Action,command.SceneId))
+            { SendFailure(source,command,"not_allowed","Current demo or action is not supported."); return; }
+            if (!_sequenceGuard.TryAccept(command.ControllerId,command.Sequence))
+            { SendFailure(source,command,"replay","seq was already accepted or is older."); return; }
+            _controlBusy = true;
+            SendStatus(source,new DemoSwitchStatus("ACK",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
+            StartCoroutine(ExecuteControl(adapter,command,source));
+        }
+
+        private IEnumerator ExecuteControl(IDemoAppControls adapter, DemoSwitchCommand command, IPEndPoint source)
+        {
+            IEnumerator operation = null;
+            string error = null;
+            try { operation = adapter.ExecuteControl(command.Action,command.SceneId); }
+            catch (Exception exception) { error = exception.GetType().Name; }
+            bool complete = false;
+            while (error == null && !complete)
+            {
+                object next = null;
+                try { complete = operation == null || !operation.MoveNext(); if (!complete) next = operation.Current; }
+                catch (Exception exception) { error = exception.GetType().Name; }
+                if (!complete && error == null) yield return next;
+                if (!_foreground) { error = "Application left foreground."; break; }
+            }
+            try { (operation as IDisposable)?.Dispose(); }
+            catch (Exception exception) { error = exception.GetType().Name; }
+            // Give newly loaded scene components a frame to initialize before READY.
+            yield return null;
+            _controlBusy = false;
+            if (!_foreground) yield break;
+            if (error != null) SendFailure(source,command,"launch_failed",error);
+            else SendStatus(source,new DemoSwitchStatus("READY",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
         }
 
         private void SendFailure(IPEndPoint endpoint, DemoSwitchCommand command, string code, string message) =>
@@ -262,7 +319,8 @@ namespace Hapbeat.DemoSwitch
         private void OnApplicationPause(bool paused)
         {
             _foreground = !paused;
-            if (paused) StopListener(); else StartForegroundReceiver();
+            if (paused) { StopAllCoroutines(); _controlBusy = false; StopListener(); }
+            else StartForegroundReceiver();
         }
 
         private void OnDestroy()

@@ -1,5 +1,0 @@
-{
-  "name": "Hapbeat.Boxing.InputTests",
-  "references": ["Hapbeat.Boxing", "Hapbeat.Runtime", "Unity.InputSystem", "Unity.InputSystem.TestFramework", "Unity.XR.Interaction.Toolkit", "Unity.XR.OpenXR", "Unity.ugui", "Unity.XR.CoreUtils"],
-  "optionalUnityReferences": ["TestAssemblies"]
-}

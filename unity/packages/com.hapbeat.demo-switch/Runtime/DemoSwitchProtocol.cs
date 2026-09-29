@@ -11,18 +11,23 @@ namespace Hapbeat.DemoSwitch
 {
     internal sealed class DemoSwitchCommand
     {
-        public DemoSwitchCommand(string controllerId, long sequence, string demoId, string auth)
+        public DemoSwitchCommand(string controllerId, long sequence, string demoId, string auth, string action = null, string sceneId = "")
         {
             ControllerId = controllerId;
             Sequence = sequence;
             DemoId = demoId;
             Auth = auth ?? string.Empty;
+            Action = action;
+            SceneId = sceneId;
         }
 
         public string ControllerId { get; }
         public long Sequence { get; }
         public string DemoId { get; }
         public string Auth { get; }
+        public string Action { get; }
+        public string SceneId { get; }
+        public bool IsControl => Action != null;
     }
 
     internal sealed class DemoSwitchStatus
@@ -139,6 +144,7 @@ namespace Hapbeat.DemoSwitch
         public const int MaxPayloadBytes = 1024;
         public const long MaxSequence = 9007199254740991L;
         private static readonly string[] CommandFields = { "version", "type", "controller_id", "seq", "demo_id", "auth" };
+        private static readonly string[] ControlFields = { "version", "type", "controller_id", "seq", "demo_id", "auth", "action", "scene_id" };
         private static readonly string[] StatusFields = { "version", "type", "controller_id", "seq", "demo_id", "current_demo_id", "code", "message", "auth" };
         private static readonly string[] DiscoverFields = { "version", "type", "controller_id", "nonce", "auth" };
         private static readonly string[] HereFields = { "version", "type", "controller_id", "nonce", "current_demo_id", "auth" };
@@ -161,13 +167,14 @@ namespace Hapbeat.DemoSwitch
             try
             {
                 var value = ParseStrictObject(json);
-                if (value.Properties().Any(p => !CommandFields.Contains(p.Name, StringComparer.Ordinal)))
+                bool control = TryString(value,"type",out var messageType) && messageType == "CONTROL";
+                if (value.Properties().Any(p => !(control ? ControlFields : CommandFields).Contains(p.Name, StringComparer.Ordinal)))
                     return Error("invalid_payload", "Command contains an unknown or duplicate field.");
 
                 if (!TryInteger(value, "version", out var version) || version != 1)
                     return Error("unsupported_version", "Only protocol version 1 is supported.");
-                if (!TryString(value, "type", out var type) || type != "SWITCH")
-                    return Error("invalid_payload", "type must be SWITCH.");
+                if (!TryString(value, "type", out var type) || (type != "SWITCH" && type != "CONTROL"))
+                    return Error("invalid_payload", "type must be SWITCH or CONTROL.");
                 if (!TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId))
                     return Error("invalid_payload", "controller_id is invalid.");
                 if (!TryInteger(value, "seq", out var sequence) || sequence < 1 || sequence > MaxSequence)
@@ -183,7 +190,11 @@ namespace Hapbeat.DemoSwitch
                     if (!IsLowerHexMac(auth)) return Error("invalid_payload", "auth must be 64 lowercase hex characters.");
                 }
 
-                return new CommandParseResult(new DemoSwitchCommand(controllerId, sequence, demoId, auth), null, null);
+                string action = null, sceneId = "";
+                if (control && (!TryString(value,"action",out action) || !TryString(value,"scene_id",out sceneId)
+                    || !IsControlAction(action) || (action == "scene" ? !IsIdentifier(sceneId) : sceneId != "")))
+                    return Error("invalid_payload", "Invalid control action or scene_id.");
+                return new CommandParseResult(new DemoSwitchCommand(controllerId, sequence, demoId, auth, action, sceneId), null, null);
             }
             catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
             {
@@ -361,11 +372,14 @@ namespace Hapbeat.DemoSwitch
             return json;
         }
 
+        public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
+            || action == "recenter" || action == "restart" || action == "scene";
+
         public static string Canonicalize(DemoSwitchCommand command) =>
             "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
-            Field("version", "1") + Field("type", "SWITCH") +
+            Field("version", "1") + Field("type", command.IsControl ? "CONTROL" : "SWITCH") +
             Field("controller_id", command.ControllerId) + Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) +
-            Field("demo_id", command.DemoId);
+            Field("demo_id", command.DemoId) + (command.IsControl ? Field("action",command.Action) + Field("scene_id",command.SceneId) : "");
 
         public static string Canonicalize(DemoSwitchStatus status) =>
             "HAPBEAT-DEMO-SWITCH/1\nSTATUS\n" +
