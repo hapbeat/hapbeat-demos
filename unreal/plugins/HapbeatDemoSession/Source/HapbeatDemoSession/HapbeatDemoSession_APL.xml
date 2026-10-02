@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Demo Session (repos-core/hapbeat-contracts/specs/demo-session.md): session ticket Intent extra,
+     launching the next runtime and the descriptor in the APK assets. -->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- The descriptor goes to the root of the APK assets, where the Hub reads it through
+       createPackageContext(pkg).getAssets(). Source: <project>/Config/HapbeatDemoSession/. -->
+  <prebuildCopies>
+    <copyFile src="$S(ProjectDir)/Config/HapbeatDemoSession/hapbeat-demo-session.json" dst="$S(BuildDir)/assets/hapbeat-demo-session.json" />
+  </prebuildCopies>
+
+  <!-- No <queries> element: the next runtime is started by an explicit Intent (setClassName) built from
+       the ticket. Whether Android 11+ package visibility still requires one for that launch has not been
+       confirmed on a Quest; add <queries><package android:name="..."/></queries> only if the device needs it. -->
+
+  <gameActivityClassAdditions>
+    <insert>
+    private static final String HAPBEAT_SESSION_TICKET_EXTRA = "com.hapbeat.demo_session.ticket";
+
+    /** Returns the session ticket extra of the launching Intent once (it is removed), or null. */
+    public String AndroidThunkJava_HapbeatSession_TakeTicket()
+    {
+        Intent intent = getIntent();
+        if (intent == null || !intent.hasExtra(HAPBEAT_SESSION_TICKET_EXTRA))
+        {
+            return null;
+        }
+        String ticket = null;
+        try
+        {
+            ticket = intent.getStringExtra(HAPBEAT_SESSION_TICKET_EXTRA);
+        }
+        catch (Exception e)
+        {
+            Log.debug("HapbeatDemoSession: ticket extra unreadable: " + e);
+        }
+        intent.removeExtra(HAPBEAT_SESSION_TICKET_EXTRA);
+        setIntent(intent);
+        return ticket;
+    }
+
+    /** assets/hapbeat-demo-session.json as UTF-8 (at most 16384 bytes), or null. */
+    public String AndroidThunkJava_HapbeatSession_ReadDescriptor()
+    {
+        try (java.io.InputStream input = getAssets().open("hapbeat-demo-session.json"))
+        {
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = input.read(buffer)) > 0)
+            {
+                output.write(buffer, 0, count);
+                if (output.size() > 16384)
+                {
+                    return null;
+                }
+            }
+            return new String(output.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        catch (Exception e)
+        {
+            Log.debug("HapbeatDemoSession: descriptor unreadable: " + e);
+            return null;
+        }
+    }
+
+    /** Starts the next runtime with an explicit Intent and NEW_TASK | CLEAR_TASK. True when the request was accepted. */
+    public boolean AndroidThunkJava_HapbeatSession_Launch(String packageName, String activityName, String ticket)
+    {
+        try
+        {
+            Intent intent = new Intent();
+            intent.setClassName(packageName, activityName);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            intent.putExtra(HAPBEAT_SESSION_TICKET_EXTRA, ticket);
+            startActivity(intent);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.debug("HapbeatDemoSession: launch failed: " + e);
+            return false;
+        }
+    }
+
+    public void AndroidThunkJava_HapbeatSession_FinishTask()
+    {
+        runOnUiThread(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                finishAndRemoveTask();
+            }
+        });
+    }
+    </insert>
+  </gameActivityClassAdditions>
+</root>
