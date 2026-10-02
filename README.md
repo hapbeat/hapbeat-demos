@@ -40,6 +40,8 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 
 このリポジトリには、デモ共通の [Demo Switch package](unity/packages/com.hapbeat.demo-switch/README.md)、APK を切り替える [Demo Hub](unity/demo-hub/README.md)、補助スクリプト（`tools/`）と、ビルド済みアプリの Releases を置く。
 
+Quest の画面を PC に映すには `tools/quest-mirror.cmd` をダブルクリックする（同じ LAN 内の Wi-Fi adb + [scrcpy](https://github.com/Genymobile/scrcpy)。インターネット不要、表示のみ・音声なし）。Quest を再起動した直後だけ USB ケーブルを一度挿す必要がある。
+
 ## 4. 独立 APK の切替
 
 [`com.hapbeat.demo-switch`](unity/packages/com.hapbeat.demo-switch/README.md) は、前面の Unity APK が UDP 7710 の `DISCOVER` に `HERE` を unicast 応答して Quest の IPv4 を自動検出可能にし、logical demo ID を受けて端末内 allowlist に登録した次の APK を起動する共通 package。M5 controller は独立した `hapbeat-demo-switch-controller-firmware` repo で管理し、[Demo Switch controller tool](https://devtools.hapbeat.com/tools/demo-switch-controller/) から書き込みと設定を行う。触覚 UDP 7700 とは独立しており、この controller は触覚・音声を送信しない。
