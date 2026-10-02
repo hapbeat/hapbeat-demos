@@ -5,3 +5,4 @@ using System.Runtime.CompilerServices;
 // Demo EditMode tests inject Demo Session tickets through the internal test entry points.
 [assembly: InternalsVisibleTo("GloveBallDemo.Tests.Editor")]
 [assembly: InternalsVisibleTo("Hapbeat.Boxing.Tests")]
+[assembly: InternalsVisibleTo("HandDemo.Tests.Editor")]
