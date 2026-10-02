@@ -3,7 +3,10 @@
   "rootNamespace": "Hapbeat.DemoSwitch",
   "references": [
     "Unity.Newtonsoft.Json",
-    "Unity.XR.CoreUtils"
+    "Unity.XR.CoreUtils",
+    "Unity.InputSystem",
+    "Unity.XR.Hands",
+    "UnityEngine.UI"
   ],
   "autoReferenced": true,
   "noEngineReferences": false

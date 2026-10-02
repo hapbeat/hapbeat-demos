@@ -1,6 +1,6 @@
 # Hapbeat Demo Switch
 
-Foreground demo applications use this package to receive controller commands on UDP 7710 and launch only locally allowlisted applications. It is independent of the Hapbeat SDK and UDP 7700.
+Foreground demo applications use this package to receive controller commands on UDP 7710 and launch only locally allowlisted applications, and to run self-paced Demo Sessions. It is independent of the Hapbeat SDK and UDP 7700.
 
 ## Install and configure
 
@@ -31,6 +31,19 @@ The package receives authenticated `CONTROL` commands for `menu_open`, `menu_clo
 Firmware d6 provides pages for the three configured apps, menu/reposition, Volley scenes, and reload/hub/discovery tools. A/B/C short press activates the visible entry, A/C hold changes page, B hold retains Wi-Fi, and A+C hold returns to the hub. Volley maps `receive`, `spike`, `block`; other scene catalogs and additional configurable app slots are not yet exposed in the Web tool. Both firmware and APK must be updated; already installed APKs do not acquire controls automatically. The current Volley adapter restores pause/input state before scene changes. No synthetic controller input or privileged OS operation is used.
 
 App-space recenter can reuse `XrStartAlignment` with an explicit scene anchor/XR Origin adapter, preserving floor height. This is not an OS boundary or global Oculus recenter. `XRInputSubsystem.TryRecenter()` is runtime/tracking-origin dependent and can return false; never report success unconditionally. A default scene reload is suitable only for simple apps; app adapters must own reset of additive scenes, persistent managers and pause state. A full Android process restart is a separate operation and not equivalent to reloading a Unity scene.
+
+### Demo Session (0.1.0-d5)
+
+Self-paced sequences built in the Hub follow `hapbeat-contracts/specs/demo-session.md`. Nothing changes for SWITCH, CONTROL menus/scenes or discovery.
+
+- **Descriptor**: ship `Assets/StreamingAssets/hapbeat-demo-session.json` (`demo_id` must equal the settings' Current Demo ID). The Hub lists only installed launcher activities whose APK assets contain a valid descriptor; package and activity always come from PackageManager.
+- **Ticket**: at cold start the bootstrap reads and removes the Intent String extra `com.hapbeat.demo_session.ticket`. It enters session mode only when the ticket passes schema-equivalent validation (16384 UTF-8 bytes max) and `steps[index].demo_id` equals the current demo; otherwise it logs a warning and starts normally. Unknown or invalid option values fall back to the descriptor defaults with a warning. `DemoSession.IsActive`, `CurrentStep`, `GetOption(id)` and `Next` expose the state; it is never persisted.
+- **Scene adapter**: add one `IDemoSessionHost` per scene and call `DemoSession.RegisterHost(this)` from `Start` (unregister on destroy). Registration pushes the haptics state, and in session mode `ApplyOptions`. In session mode the demo stops its automatic restart and calls `DemoSession.ShowCompletion()` when the experience completes.
+- **Completion panel**: shown 0.55 m in front of the user with "体験完了", `n / N`, "もう一度" (only when `retry`) and "次へ：<title>" or "デモを終了". Buttons ignore input for 1.0 s. While shown, `SetGameplayPaused(true)` and `CompletionShown` fire; `Closed` follows. "次へ" launches the next component explicitly (`NEW_TASK | CLEAR_TASK`) with `index + 1` and the current `haptics_ui`; on success the runtime stops 7710, raises `DemoSwitch.BeforeSwitch`, turns host haptics off, pauses audio and calls `finishAndRemoveTask`. A failed launch shows the error on the panel and keeps running. Editor and non-Android players only log.
+- **Haptics button**: when the descriptor declares `supports.haptics_toggle` and `haptics_ui` is true, a fixed-width "触覚 ON" / "触覚 OFF" button follows the user's heading at the lower left (yaw -30°, pitch -35°, 0.45 m). Each step starts with haptics on.
+- **CONTROL**: `haptics_on`, `haptics_off`, `haptics_ui_show` and `haptics_ui_hide` are handled here instead of by `IDemoAppControls`, also without a session, with the usual authentication, sequence, ACK and READY. A demo without `haptics_toggle` returns `FAILED/not_allowed`.
+- **Input**: panels use their own input: XR Hands index-tip poke (arm 2 cm in front, press at the surface) and Input System XR controller pointer ray + trigger. No EventSystem or demo input stack is required.
+- **Font**: Noto Sans CJK JP (SIL OFL 1.1, `Runtime/Resources/HapbeatDemoSession/OFL.txt`) is loaded from `Resources`, so every APK using this package includes it (about 16 MB uncompressed).
 
 ## Controller flow and IP discovery
 

@@ -373,7 +373,10 @@ namespace Hapbeat.DemoSwitch
         }
 
         public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
-            || action == "recenter" || action == "restart" || action == "scene";
+            || action == "recenter" || action == "restart" || action == "scene" || IsHapticsAction(action);
+
+        public static bool IsHapticsAction(string action) => action == "haptics_on" || action == "haptics_off"
+            || action == "haptics_ui_show" || action == "haptics_ui_hide";
 
         public static string Canonicalize(DemoSwitchCommand command) =>
             "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
@@ -422,7 +425,7 @@ namespace Hapbeat.DemoSwitch
         private static bool IsNonce(string value) => value != null && value.Length == 16 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
         private static string Field(string name, string value) => name + "=" + Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value + "\n";
 
-        private static JObject ParseStrictObject(string json)
+        internal static JObject ParseStrictObject(string json)
         {
             RejectJsonComments(json);
             using (var textReader = new System.IO.StringReader(json))

@@ -1,12 +1,15 @@
 {
   "name": "com.hapbeat.demo-switch",
-  "version": "0.1.0-d4",
+  "version": "0.1.0-d5",
   "displayName": "Hapbeat Demo Switch",
-  "description": "Foreground-only UDP control plane for switching between allowlisted demo applications.",
+  "description": "Foreground-only UDP control plane for switching between allowlisted demo applications, and the self-paced Demo Session flow.",
   "unity": "6000.0",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.unity.xr.core-utils": "2.5.3"
+    "com.unity.xr.core-utils": "2.5.3",
+    "com.unity.inputsystem": "1.14.2",
+    "com.unity.xr.hands": "1.7.3",
+    "com.unity.ugui": "2.0.0"
   },
   "author": {
     "name": "Hapbeat"

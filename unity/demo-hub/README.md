@@ -1,6 +1,6 @@
 # Hapbeat Demo Hub
 
-Independent, silent Quest waiting room for exhibitions. No Hapbeat haptic SDK, controller actions, game assets, or demo-specific gameplay is included.
+Independent, silent Quest waiting room for exhibitions, and the planner for self-paced Demo Sessions. No Hapbeat haptic SDK, game assets, or demo-specific gameplay is included.
 
 ## Open and edit
 
@@ -23,9 +23,22 @@ The existing M5 A/B/C assignments and installed demo APKs are not modified by th
 
 Unsigned switching is enabled to match the existing exhibition setup. Use an isolated LAN only; for shared networks configure the same secret in controller and all app settings before building.
 
+## Demo Session (self-paced plan)
+
+The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared package's `DemoSession` API. Version 0.1.0-d2.
+
+- **Catalog**: PackageManager launcher activities (`MAIN`/`LAUNCHER`; the build adds the matching `<queries>` element) whose APK assets contain a valid `hapbeat-demo-session.json`. Package and activity come from PackageManager, never from the descriptor. In the Editor a dummy catalog (Volley, Boxing, T-Rex) is used; tests and tools can set `HubCatalog.Override`.
+- **Top screen**: plan summary, estimated total minutes, the session haptics-button setting, a large "体験を開始" and a small "編集". The head-locked waiting labels stay visible only here; the panel sits low so they remain readable.
+- **Edit screen**: tap a catalog entry to append it; each plan row has ↑ ↓ ×, option chips that cycle values (options whose `when` is not met are hidden but remembered), and a "もう一度あり/なし" chip (new steps default to あり). The footer toggles "触覚ボタン" for the whole session (default hidden), returns with "完了", and saves/loads three presets. The last plan is saved on every change and restored at start (`persistentDataPath/demo-session/`).
+- **Start**: builds a ticket (random 16-hex `session_id`, `finish` = this activity, options = active options only, steps of demos that are not installed are skipped), launches step 1 and closes the hub. A failed launch shows the error and keeps the hub open.
+- **Finish screen**: shown when launched with `index == len(steps)`: "体験は以上です。ヘッドセットを外してください", "最初から（同じプラン）" (same steps, new session ID) and "トップへ".
+- Input is the package panel: fingertip poke (hand tracking) and controller ray + trigger. M5 SWITCH waiting-room behaviour is unchanged.
+
+`Hapbeat Demo Hub > Add Demo Session Controller` adds the controller to the existing scene without regenerating it (already applied to the checked-in scene).
+
 ## Verification and build
 
-With this project's Editor closed, pass `-batchmode -quit -projectPath <this-folder> -executeMethod Hapbeat.DemoHub.Editor.HubValidation.Validate` to Unity for static scene, Japanese font, and allowlist checks. `HubValidation.RenderPreview` renders a silent non-Play preview; do not use `-nographics` for that command. `HubProject.BuildApk` is the batch build entry point (use `-buildTarget Android`). No test starts a demo or transmits haptics.
+With this project's Editor closed, pass `-batchmode -quit -projectPath <this-folder> -executeMethod Hapbeat.DemoHub.Editor.HubValidation.Validate` to Unity for static scene, Japanese font (including every Demo Session UI string), session controller, and allowlist checks. EditMode tests cover the package and the plan editor logic. `HubValidation.RenderPreview` renders a silent non-Play preview; do not use `-nographics` for that command. `HubProject.BuildApk` is the batch build entry point (use `-buildTarget Android`). No test starts a demo or transmits haptics.
 
 Hardware checks: readable Japanese/English in both eyes; follows the HMD after refitting; launches each installed demo via M5; demo height/orientation initializes correctly on repeated visits. Android activity relaunch is handled by the shared switch module; per-demo calibration still requires hardware verification.
 
@@ -35,4 +48,4 @@ Unity scene/glyph/allowlist checks and desktop render passed. Quest ARM64 APK bu
 
 ## Font
 
-Noto Sans CJK JP Regular, from [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk/tree/main/Sans/OTF/Japanese), is distributed under the bundled `Assets/Fonts/OFL.txt` (SIL Open Font License 1.1). No operating-system fonts are required.
+Noto Sans CJK JP Regular, from [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk/tree/main/Sans/OTF/Japanese), is distributed under the bundled OFL text (SIL Open Font License 1.1). Since Demo Session 0.1.0-d5 the font lives in the shared package (`com.hapbeat.demo-switch/Runtime/Resources/HapbeatDemoSession/`) and the hub references it there. No operating-system fonts are required.

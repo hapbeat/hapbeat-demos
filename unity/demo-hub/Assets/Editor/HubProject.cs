@@ -25,6 +25,7 @@ namespace Hapbeat.DemoHub.Editor
     {
         public const string ScenePath = "Assets/Scenes/DemoHub.unity";
         public const string PackageId = "jp.hapbeat.demohub";
+        public const string FontPath = "Packages/com.hapbeat.demo-switch/Runtime/Resources/HapbeatDemoSession/NotoSansCJKjp-Regular.otf";
 
         // Initial authoring only: never replace an existing, hand-edited scene or settings.
         [MenuItem("Hapbeat Demo Hub/Create Initial Scene (Once)")]
@@ -34,7 +35,7 @@ namespace Hapbeat.DemoHub.Editor
             Directory.CreateDirectory("Assets/Scenes");
             Directory.CreateDirectory("Assets/Resources");
             AssetDatabase.Refresh();
-            var font = AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/NotoSansCJKjp-Regular.otf");
+            var font = AssetDatabase.LoadAssetAtPath<Font>(FontPath);
             if (font == null) throw new InvalidOperationException("Install the bundled Japanese font first.");
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var camera = new GameObject("Head", typeof(Camera)).GetComponent<Camera>();
@@ -99,12 +100,34 @@ namespace Hapbeat.DemoHub.Editor
             text.raycastTarget = false;
         }
 
+        // Adds the Demo Session front end to the existing hand-edited scene. Idempotent; nothing else changes.
+        [MenuItem("Hapbeat Demo Hub/Add Demo Session Controller")]
+        public static void AddSessionController()
+        {
+            var scene = EditorSceneManager.OpenScene(ScenePath);
+            if (UnityEngine.Object.FindAnyObjectByType<Hapbeat.DemoHub.DemoHubController>() != null)
+            {
+                Debug.Log("[Hub] Demo Session controller already present.");
+                return;
+            }
+            var waiting = scene.GetRootGameObjects().SelectMany(x => x.GetComponentsInChildren<Canvas>(true))
+                .FirstOrDefault(x => x.name == "Waiting Message");
+            if (waiting == null) throw new InvalidOperationException("Waiting Message canvas not found.");
+            var controller = new GameObject("Demo Session Hub").AddComponent<Hapbeat.DemoHub.DemoHubController>();
+            var so = new SerializedObject(controller);
+            so.FindProperty("_waitingMessage").objectReferenceValue = waiting.gameObject;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+            Debug.Log("[Hub] Added Demo Session controller.");
+        }
+
         [MenuItem("Hapbeat Demo Hub/Configure XR and Player")]
         public static void Configure()
         {
             PlayerSettings.companyName = "Hapbeat";
             PlayerSettings.productName = "Hapbeat Demo Hub";
-            PlayerSettings.bundleVersion = "0.1.0-d1";
+            PlayerSettings.bundleVersion = "0.1.0-d2";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageId);
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -113,7 +136,7 @@ namespace Hapbeat.DemoHub.Editor
             PlayerSettings.Android.forceInternetPermission = true;
             PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.GameActivity;
             PlayerSettings.Android.useCustomKeystore = false;
-            PlayerSettings.Android.bundleVersionCode = 1;
+            PlayerSettings.Android.bundleVersionCode = 2;
             PlayerSettings.runInBackground = false;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);

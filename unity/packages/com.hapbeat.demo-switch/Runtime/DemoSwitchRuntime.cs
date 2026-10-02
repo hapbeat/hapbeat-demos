@@ -41,6 +41,15 @@ namespace Hapbeat.DemoSwitch
             _sequenceGuard = new DemoSwitchSequenceGuard(new PlayerPrefsSequenceStore());
             _launcher = DemoSwitchLaunchAdapter.Create();
             StartForegroundReceiver();
+            DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
+            gameObject.AddComponent<DemoSessionHapticsButton>();
+        }
+
+        /// <summary>Demo Session launched the next runtime: release 7710 and run the usual switch cleanup.</summary>
+        internal void StopForSessionLaunch(string nextDemoId)
+        {
+            StopListener();
+            DemoSwitch.NotifyBeforeSwitch(nextDemoId);
         }
 
         public bool SwitchLocal(string demoId)
@@ -167,7 +176,9 @@ namespace Hapbeat.DemoSwitch
         private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
         {
             IDemoAppControls adapter = null;
-            foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+            // haptics_* belong to the shared Demo Session layer, never to the scene's control adapter.
+            if (DemoSwitchProtocol.IsHapticsAction(command.Action)) adapter = DemoSession.HapticsControls;
+            else foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
             {
                 if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
                 if (adapter != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }

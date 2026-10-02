@@ -1,0 +1,13 @@
+{
+  "name": "Hapbeat.DemoHub.Tests.Editor",
+  "rootNamespace": "Hapbeat.DemoHub.Tests",
+  "references": [
+    "Hapbeat.DemoHub",
+    "Hapbeat.DemoSwitch",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

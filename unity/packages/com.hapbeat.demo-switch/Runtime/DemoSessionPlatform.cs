@@ -1,0 +1,268 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using UnityEngine;
+
+namespace Hapbeat.DemoSwitch
+{
+    /// <summary>Installed demo whose APK carries a valid descriptor, resolved through PackageManager.</summary>
+    public sealed class DemoSessionCatalogEntry
+    {
+        public DemoSessionCatalogEntry(DemoSessionDescriptor descriptor, string packageName, string activityName)
+        {
+            Descriptor = descriptor;
+            PackageName = packageName;
+            ActivityName = activityName;
+        }
+
+        public DemoSessionDescriptor Descriptor { get; }
+        public string PackageName { get; }
+        public string ActivityName { get; }
+    }
+
+    internal interface IDemoSessionPlatform
+    {
+        /// <summary>Reads the ticket extra from the launch Intent and removes it.</summary>
+        bool TryTakeTicketExtra(out string json);
+        bool TryLaunch(string packageName, string activityName, string ticketJson, out string error);
+        void FinishTask();
+        bool TryReadOwnAsset(string name, out string text, out string error);
+        bool TryGetOwnComponent(out DemoSessionComponent component);
+        IReadOnlyList<DemoSessionComponent> ListLauncherActivities();
+        bool TryReadPackageAsset(string packageName, string name, out string text, out string error);
+    }
+
+    internal static class DemoSessionPlatform
+    {
+        public const string UnityActivity = "com.unity3d.player.UnityPlayerGameActivity";
+
+        public static IDemoSessionPlatform Create()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            return new AndroidDemoSessionPlatform();
+#else
+            return new SafeDemoSessionPlatform();
+#endif
+        }
+    }
+
+    /// <summary>Editor and non-Android players: never start or finish another application.</summary>
+    internal sealed class SafeDemoSessionPlatform : IDemoSessionPlatform
+    {
+        public bool TryTakeTicketExtra(out string json)
+        {
+            json = null;
+            return false;
+        }
+
+        public bool TryLaunch(string packageName, string activityName, string ticketJson, out string error)
+        {
+            error = "Application launch is supported only by an Android player build.";
+            Debug.LogWarning("[Demo Session] " + error + " Target: " + packageName + "/" + activityName);
+            return false;
+        }
+
+        public void FinishTask() => Debug.Log("[Demo Session] Task finish is skipped outside an Android player.");
+
+        public bool TryReadOwnAsset(string name, out string text, out string error)
+        {
+            text = null;
+            var path = Path.Combine(Application.streamingAssetsPath, name);
+            try
+            {
+                if (!File.Exists(path)) { error = "Not found: " + path; return false; }
+                if (new FileInfo(path).Length > DemoSessionTicket.MaxBytes) { error = "Asset exceeds 16384 bytes."; return false; }
+                text = File.ReadAllText(path, new UTF8Encoding(false, true));
+                error = null;
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is DecoderFallbackException)
+            {
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool TryGetOwnComponent(out DemoSessionComponent component)
+        {
+            component = new DemoSessionComponent(Application.identifier, DemoSessionPlatform.UnityActivity);
+            return DemoSessionJson.IsJavaName(Application.identifier);
+        }
+
+        public IReadOnlyList<DemoSessionComponent> ListLauncherActivities() => Array.Empty<DemoSessionComponent>();
+
+        public bool TryReadPackageAsset(string packageName, string name, out string text, out string error)
+        {
+            text = null;
+            error = "Reading another package is supported only by an Android player build.";
+            return false;
+        }
+    }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+    internal sealed class AndroidDemoSessionPlatform : IDemoSessionPlatform
+    {
+        public bool TryTakeTicketExtra(out string json)
+        {
+            json = null;
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var intent = activity.Call<AndroidJavaObject>("getIntent"))
+                {
+                    if (intent == null || !intent.Call<bool>("hasExtra", DemoSession.TicketExtra)) return false;
+                    try { json = intent.Call<string>("getStringExtra", DemoSession.TicketExtra); }
+                    finally { intent.Call("removeExtra", DemoSession.TicketExtra); }
+                    return json != null;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Session] Could not read the session ticket: " + exception.Message);
+                return false;
+            }
+        }
+
+        public bool TryLaunch(string packageName, string activityName, string ticketJson, out string error)
+        {
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var intent = new AndroidJavaObject("android.content.Intent"))
+                {
+                    intent.Call<AndroidJavaObject>("setClassName", packageName, activityName);
+                    // FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK: every runtime cold-starts and reads its ticket.
+                    intent.Call<AndroidJavaObject>("addFlags", 0x10008000);
+                    intent.Call<AndroidJavaObject>("putExtra", DemoSession.TicketExtra, ticketJson);
+                    activity.Call("startActivity", intent);
+                }
+                error = null;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public void FinishTask()
+        {
+            using (var activity = CurrentActivity()) activity.Call("finishAndRemoveTask");
+        }
+
+        public bool TryReadOwnAsset(string name, out string text, out string error)
+        {
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var assets = activity.Call<AndroidJavaObject>("getAssets"))
+                    return TryReadAsset(assets, name, out text, out error);
+            }
+            catch (Exception exception)
+            {
+                text = null;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool TryGetOwnComponent(out DemoSessionComponent component)
+        {
+            component = null;
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var name = activity.Call<AndroidJavaObject>("getComponentName"))
+                    component = new DemoSessionComponent(name.Call<string>("getPackageName"), name.Call<string>("getClassName"));
+                return DemoSessionJson.IsJavaName(component.PackageName) && DemoSessionJson.IsJavaName(component.ActivityName);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Session] Could not resolve this activity: " + exception.Message);
+                return false;
+            }
+        }
+
+        public IReadOnlyList<DemoSessionComponent> ListLauncherActivities()
+        {
+            var result = new List<DemoSessionComponent>();
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var manager = activity.Call<AndroidJavaObject>("getPackageManager"))
+                using (var intent = new AndroidJavaObject("android.content.Intent", "android.intent.action.MAIN"))
+                {
+                    intent.Call<AndroidJavaObject>("addCategory", "android.intent.category.LAUNCHER");
+                    using (var list = manager.Call<AndroidJavaObject>("queryIntentActivities", intent, 0))
+                    {
+                        var count = list.Call<int>("size");
+                        for (var index = 0; index < count; index++)
+                        {
+                            using (var resolve = list.Call<AndroidJavaObject>("get", index))
+                            using (var info = resolve.Get<AndroidJavaObject>("activityInfo"))
+                            {
+                                var package = info.Get<string>("packageName");
+                                var name = info.Get<string>("name");
+                                if (DemoSessionJson.IsJavaName(package) && DemoSessionJson.IsJavaName(name))
+                                    result.Add(new DemoSessionComponent(package, name));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Session] Could not list launcher activities: " + exception.Message);
+            }
+            return result;
+        }
+
+        public bool TryReadPackageAsset(string packageName, string name, out string text, out string error)
+        {
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var context = activity.Call<AndroidJavaObject>("createPackageContext", packageName, 0))
+                using (var assets = context.Call<AndroidJavaObject>("getAssets"))
+                    return TryReadAsset(assets, name, out text, out error);
+            }
+            catch (Exception exception)
+            {
+                text = null;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        private static bool TryReadAsset(AndroidJavaObject assets, string name, out string text, out string error)
+        {
+            text = null;
+            using (var stream = assets.Call<AndroidJavaObject>("open", name))
+            {
+                try
+                {
+                    // AssetInputStream.available() reports the remaining asset length.
+                    if (stream.Call<int>("available") > DemoSessionTicket.MaxBytes) { error = "Asset exceeds 16384 bytes."; return false; }
+                    using (var scanner = new AndroidJavaObject("java.util.Scanner", stream, "UTF-8"))
+                    using (var delimited = scanner.Call<AndroidJavaObject>("useDelimiter", "\\A"))
+                        text = scanner.Call<bool>("hasNext") ? scanner.Call<string>("next") : string.Empty;
+                }
+                finally
+                {
+                    stream.Call("close");
+                }
+            }
+            error = null;
+            return true;
+        }
+
+        private static AndroidJavaObject CurrentActivity()
+        {
+            using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                return unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+        }
+    }
+#endif
+}
