@@ -14,7 +14,7 @@ python tools/tts/generate-voice.py --samples <out-dir> --text "..."
 `voice-lines.json` holds the default voice and the lines (`id` = output file name):
 
 ```json
-{"voice": {"speaker": "まお", "style": "ノーマル", "speed": 1.0},
+{"voice": {"speaker": "まお", "style": "ノーマル", "speed": 1.0, "volume": 0.85},
  "lines": [{"id": "trex_start", "text": "人差し指を上に立てると始まります。"}]}
 ```
 

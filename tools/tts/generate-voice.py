@@ -7,9 +7,9 @@ re-run every time a line is edited. Nothing is played back.
   python tools/tts/generate-voice.py --samples <out-dir> [--text "..."]   # one file per speaker style
 
 voice-lines.json:
-  {"voice": {"speaker": "まお", "style": "ノーマル", "speed": 1.0},
+  {"voice": {"speaker": "まお", "style": "ノーマル", "speed": 1.0, "volume": 0.85},
    "lines": [{"id": "trex_start", "text": "人差し指を上に立てると始まります。"}]}
-A line may override "speaker" / "style" / "speed". Output: <out-dir>/<id>.wav (+ .voice-cache.json).
+A line may override "speaker" / "style" / "speed" / "volume" (volumeScale; < 1 leaves peak headroom). Output: <out-dir>/<id>.wav (+ .voice-cache.json).
 """
 import argparse
 import hashlib
@@ -53,9 +53,10 @@ def resolve_style(all_speakers, speaker, style):
     raise SystemExit(f'Speaker "{speaker}" not found. Installed: {names}')
 
 
-def synthesize(engine, style_id, text, speed):
+def synthesize(engine, style_id, text, speed, volume=1.0):
     query = json.loads(request(engine, '/audio_query', {'speaker': style_id, 'text': text}))
     query['speedScale'] = speed
+    query['volumeScale'] = volume
     return request(engine, '/synthesis', {'speaker': style_id}, query)
 
 
@@ -91,13 +92,14 @@ def generate(args):
         speaker = line.get('speaker', voice.get('speaker'))
         style = line.get('style', voice.get('style', 'ノーマル'))
         speed = float(line.get('speed', voice.get('speed', 1.0)))
+        volume = float(line.get('volume', voice.get('volume', 1.0)))
         style_id, speaker_uuid = resolve_style(installed, speaker, style)
-        key = hashlib.sha256(json.dumps([version, speaker_uuid, style, speed, text], ensure_ascii=False).encode('utf-8')).hexdigest()
+        key = hashlib.sha256(json.dumps([version, speaker_uuid, style, speed, volume, text], ensure_ascii=False).encode('utf-8')).hexdigest()
         target = out / f'{line_id}.wav'
         if cache.get(line_id) == key and target.exists() and not args.force:
             skipped += 1
             continue
-        data = synthesize(args.engine, style_id, text, speed)
+        data = synthesize(args.engine, style_id, text, speed, volume)
         seconds = check_wav(data, line_id)
         target.write_bytes(data)
         cache[line_id] = key
