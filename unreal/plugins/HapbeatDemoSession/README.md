@@ -31,7 +31,15 @@ This folder is the source of truth. Each demo keeps a Git-ignored copy in `Plugi
 
 ## Demo Switch receiver settings
 
-Default (no settings file): **enabled, unsigned, isolated demonstration LAN**. This is the setting the Unity demos ship for exhibitions: `unity/demo-hub/Assets/Resources/HapbeatDemoSwitchSettings.asset` has `_allowUnsignedOnIsolatedLan: 1` with an empty secret, and `unity/demo-hub/README.md` states that unsigned switching matches the existing exhibition setup (isolated LAN only). The receiver logs `DEMO_SWITCH_UNSIGNED` as a warning.
+The receiver is **off unless the project opts in** in its checked-in `Config/DefaultGame.ini`, the counterpart of each Unity demo's `HapbeatDemoSwitchSettings` asset. The exhibition setting (isolated LAN, unsigned, same as the Unity demos) is:
+
+```ini
+[HapbeatDemoSession.DemoSwitch]
+Enabled=True
+AllowUnsignedOnIsolatedLan=True
+```
+
+With an empty secret the receiver logs `DEMO_SWITCH_UNSIGNED` as a warning.
 
 Override per device with `Saved/Config/HapbeatDemoSession.json` (on Quest under the app's `files/UnrealGame/<Project>/<Project>/Saved/`):
 

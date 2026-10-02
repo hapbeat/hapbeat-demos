@@ -9,6 +9,7 @@
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/ConfigCacheIni.h"
 #include "HAL/FileManager.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
@@ -26,9 +27,15 @@ bool FHapbeatDemoSwitchReceiver::Configure(const FString& InDemoId)
     FString File=FPaths::ProjectSavedDir()/TEXT("Config/HapbeatDemoSession.json");
     if(bTest) FParse::Value(FCommandLine::Get(),TEXT("HapbeatDemoSwitchConfig="),File);
     StateFile=FPaths::ProjectSavedDir()/(bTest?TEXT("HapbeatDemoSession/TestSequences.json"):TEXT("HapbeatDemoSession/Sequences.json"));
-    // Default: isolated exhibition LAN, unsigned (as the Unity demos' HapbeatDemoSwitchSettings). A local
-    // file can disable the receiver or set a shared secret.
-    bool Enabled=true,Unsigned=true,Isolated=true;
+    // The project opts in explicitly in its checked-in Config/DefaultGame.ini, as each Unity demo does in its
+    // HapbeatDemoSwitchSettings asset. Without it the receiver stays off. A local file can override both.
+    //   [HapbeatDemoSession.DemoSwitch]
+    //   Enabled=True
+    //   AllowUnsignedOnIsolatedLan=True
+    bool Enabled=false,Unsigned=false;
+    GConfig->GetBool(TEXT("HapbeatDemoSession.DemoSwitch"),TEXT("Enabled"),Enabled,GGameIni);
+    GConfig->GetBool(TEXT("HapbeatDemoSession.DemoSwitch"),TEXT("AllowUnsignedOnIsolatedLan"),Unsigned,GGameIni);
+    bool Isolated=Unsigned;
     if(FPaths::FileExists(File)) {
         FString Text;TSharedPtr<FJsonObject> Config;
         if(IFileManager::Get().FileSize(*File)>8192 || !FFileHelper::LoadFileToString(Text,*File)
