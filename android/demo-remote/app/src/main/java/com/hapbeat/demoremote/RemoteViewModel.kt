@@ -16,6 +16,7 @@ import com.hapbeat.demoremote.data.SavedQuest
 import com.hapbeat.demoremote.data.SettingsStore
 import com.hapbeat.demoremote.mirror.MirrorSession
 import com.hapbeat.demoremote.net.DemoSwitchSocket
+import com.hapbeat.demoremote.net.WifiBinding
 import com.hapbeat.demoremote.protocol.AuthConfig
 import com.hapbeat.demoremote.protocol.DemoSwitchMessage
 import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
@@ -71,6 +72,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val socket = DemoSwitchSocket(viewModelScope) { source, payload ->
         viewModelScope.launch(Dispatchers.Main) { onPayload(source, payload) }
     }
+    private val wifi = WifiBinding(app) {
+        viewModelScope.launch(Dispatchers.Main) { if (foreground) reopenSocket() }
+    }
 
     // ---- observable state ----
     var controllerId by mutableStateOf(settings.controllerId); private set
@@ -108,13 +112,22 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- lifecycle ----------------------------------------------------------------------
 
-    fun onForeground() {
-        foreground = true
+    init {
+        wifi.start()
+    }
+
+    private fun reopenSocket() {
+        socket.close()
         try {
             socket.open()
         } catch (e: java.net.SocketException) {
             setNotice("UDP ソケットを開けません: ${e.message}", true)
         }
+    }
+
+    fun onForeground() {
+        foreground = true
+        reopenSocket()
         quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = null) }
         discoveryLoop?.cancel()
         discoveryLoop = viewModelScope.launch {
@@ -142,6 +155,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         stopMirror()
         socket.close()
         adbConnections.values.forEach { it.close() }
+        wifi.stop()
     }
 
     // ---- authentication / controller ----------------------------------------------------
@@ -250,7 +264,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             onHere(source, here)
         }
         val payload = DemoSwitchProtocol.buildDiscover(controllerId, nonce, config)
-        val broadcast = withContext(Dispatchers.IO) { DemoSwitchSocket.broadcastAddress(getApplication()) }
+        val broadcast = withContext(Dispatchers.IO) { DemoSwitchSocket.broadcastAddress(getApplication(), wifi.network) }
         socket.send(broadcast, payload)
         quests.map { it.ip }.forEach { socket.send(it, payload) }
         delay(DISCOVERY_WINDOW_MS)
