@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "0.1.0",
 	"FriendlyName": "Hapbeat Demo Session",
-	"Description": "Demo Session (session ticket, completion panel, in-view haptics toggle), the Demo Switch UDP 7710 receiver and the per-device Hapbeat address file for Hapbeat Unreal demos.",
+	"Description": "Demo Session (session ticket, completion panel, in-view haptics toggle, shared pause), the Demo Switch UDP 7710 receiver and the per-device Hapbeat address file for Hapbeat Unreal demos.",
 	"Category": "Hapbeat",
 	"CreatedBy": "Hapbeat",
 	"CreatedByURL": "https://hapbeat.com",
@@ -13,6 +13,10 @@
 	"Plugins": [
 		{
 			"Name": "XRBase",
+			"Enabled": true
+		},
+		{
+			"Name": "OpenXR",
 			"Enabled": true
 		},
 		{

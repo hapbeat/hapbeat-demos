@@ -1,4 +1,5 @@
 #include "HapbeatDemoSessionUi.h"
+#include "HapbeatDemoSessionPanelAnchor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
@@ -12,10 +13,10 @@
 
 namespace
 {
-    // Completion panel: 960 x 420 px at 0.045 cm/px (43 x 19 cm), 55 cm ahead of the eye and 12 cm below it.
-    const FVector2D CompletionPixels(960,420);
-    constexpr float CompletionCmPerPixel=.045f;
-    constexpr float CompletionDistance=55.f, CompletionDrop=12.f;
+    // Completion and pause panels: 960 x 420 px at 0.045 cm/px (43 x 19 cm), by default 55 cm ahead of the eye and 12 cm below it.
+    const FVector2D PanelPixels(960,420);
+    constexpr float PanelCmPerPixel=.045f;
+    constexpr float PanelDistance=55.f, PanelDrop=12.f;
     // Haptics button: 280 x 96 px at 0.032 cm/px (9 x 3 cm), 45 cm from the eye, 30 deg left and 35 deg down.
     const FVector2D HapticsPixels(280,96);
     constexpr float HapticsCmPerPixel=.032f;
@@ -41,6 +42,8 @@ namespace
         W->SetBlendMode(EWidgetBlendMode::Opaque);W->SetBackgroundColor(PanelColor);
         W->SetUsingAbsoluteLocation(true);W->SetUsingAbsoluteRotation(true);W->SetUsingAbsoluteScale(true);
         W->SetWorldScale3D(FVector(CmPerPixel));W->SetVisibility(false);
+        // Keeps redrawing while a demo pauses its world under the pause panel.
+        W->SetTickableWhenPaused(true);
     }
     int32 HitButton(TConstArrayView<FBox2D> Buttons,const FVector2D& Pixel)
     {
@@ -101,8 +104,10 @@ AHapbeatDemoSessionUi::AHapbeatDemoSessionUi()
 {
     PrimaryActorTick.bCanEverTick=false; // stepped by UHapbeatDemoSessionSubsystem
     SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
-    Completion=CreateDefaultSubobject<UWidgetComponent>(TEXT("CompletionPanel"));Completion->SetupAttachment(RootComponent);
-    SetupWidget(Completion,CompletionPixels,CompletionCmPerPixel);
+    CompletionPanel=CreateDefaultSubobject<UWidgetComponent>(TEXT("CompletionPanel"));CompletionPanel->SetupAttachment(RootComponent);
+    SetupWidget(CompletionPanel,PanelPixels,PanelCmPerPixel);
+    PausePanel=CreateDefaultSubobject<UWidgetComponent>(TEXT("PausePanel"));PausePanel->SetupAttachment(RootComponent);
+    SetupWidget(PausePanel,PanelPixels,PanelCmPerPixel);
     HapticsButton=CreateDefaultSubobject<UWidgetComponent>(TEXT("HapticsButton"));HapticsButton->SetupAttachment(RootComponent);
     SetupWidget(HapticsButton,HapticsPixels,HapticsCmPerPixel);
     UStaticMesh* Cylinder=ConstructorHelpers::FObjectFinder<UStaticMesh>(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")).Object;
@@ -116,45 +121,84 @@ AHapbeatDemoSessionUi::AHapbeatDemoSessionUi()
     }
 }
 
-FLinearColor AHapbeatDemoSessionUi::ButtonColor(int32 Button,bool bPrimary) const
+FTransform AHapbeatDemoSessionUi::PlacePanel(const FVector& Eye,const FRotator& View,const UHapbeatDemoSessionPanelAnchor* Anchor)
 {
-    if(!IsCompletionAccepting()) return DisabledColor;
-    const bool Hover=CompletionHover==Button;
+    if(!Anchor) {
+        // In front of the user (head yaw only), a little below eye level, facing the eye.
+        const FVector At=Eye+FRotator(0,View.Yaw,0).Vector()*PanelDistance-FVector(0,0,PanelDrop);
+        return FTransform((Eye-At).Rotation(),At);
+    }
+    const FVector At=Anchor->GetComponentLocation();
+    if(!Anchor->bUseRotation) return FTransform(FRotator(0,(Eye-At).Rotation().Yaw,0),At);
+    // The anchor's own facing, but never its back to the user: turned round when the eye is behind it.
+    FQuat Q=Anchor->GetComponentQuat();
+    if(FVector::DotProduct(Q.GetAxisX(),Eye-At)<0) Q=FQuat(FVector::UpVector,PI)*Q;
+    return FTransform(Q,At);
+}
+
+FLinearColor AHapbeatDemoSessionUi::ButtonColor(const FPanel& Panel,int32 Button,bool bPrimary) const
+{
+    if(!Panel.IsAccepting()) return DisabledColor;
+    const bool Hover=Panel.Hover==Button;
     return bPrimary?(Hover?PrimaryHover:PrimaryColor):(Hover?SecondaryHover:SecondaryColor);
+}
+
+TSharedRef<SCanvas> AHapbeatDemoSessionUi::MakePanelCanvas(const FPanel& Panel,const FString& Title,TFunction<FText()> SubLine)
+{
+    // Fixed layout: buttons sit at known pixel rectangles (also the poke / ray targets), and the error line
+    // has its own reserved height, so nothing moves when it appears.
+    return SNew(SCanvas)
+        +SCanvas::Slot().Position(FVector2D(0,22)).Size(FVector2D(PanelPixels.X,74))
+        [SNew(STextBlock).Text(FText::FromString(Title)).Font(Font(52,"Bold")).Justification(ETextJustify::Center).ColorAndOpacity(FLinearColor::White)]
+        +SCanvas::Slot().Position(FVector2D(0,104)).Size(FVector2D(PanelPixels.X,44))
+        [SNew(STextBlock).Text_Lambda(MoveTemp(SubLine)).Font(Font(30)).Justification(ETextJustify::Center).ColorAndOpacity(FLinearColor(.55f,.70f,.68f))]
+        +SCanvas::Slot().Position(FVector2D(40,166)).Size(FVector2D(PanelPixels.X-80,96))
+        [SNew(STextBlock).Text_Lambda([&Panel](){return FText::FromString(Panel.Error);}).Font(Font(26)).Justification(ETextJustify::Center)
+         .AutoWrapText(true).ColorAndOpacity(FLinearColor(1.f,.45f,.38f))];
+}
+
+void AHapbeatDemoSessionUi::AddPanelButton(SCanvas& Canvas,const FPanel& Panel,int32 Index,bool bPrimary,TFunction<FText()> Label,int32 FontSize)
+{
+    const FBox2D R=Panel.Buttons[Index];
+    Canvas.AddSlot().Position(R.Min).Size(R.GetSize())
+        [SNew(SBox).WidthOverride(R.GetSize().X).HeightOverride(R.GetSize().Y)
+         [SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).Padding(FMargin(16,6)).HAlign(HAlign_Center).VAlign(VAlign_Center)
+          .BorderBackgroundColor_Lambda([this,&Panel,Index,bPrimary](){return FSlateColor(ButtonColor(Panel,Index,bPrimary));})
+          [SNew(STextBlock).Text_Lambda(MoveTemp(Label)).Font(Font(FontSize,"Bold")).Justification(ETextJustify::Center)
+           .WrapTextAt(R.GetSize().X-40).ColorAndOpacity(FLinearColor::White)]]];
 }
 
 void AHapbeatDemoSessionUi::BuildCompletionWidget()
 {
-    // Fixed layout: buttons sit at known pixel rectangles (also the poke / ray targets), and the error line
-    // has its own reserved height, so nothing moves when it appears.
     const bool Retry=CompletionView.bRetry;
-    CompletionButtons.Reset();RetryButton=NextButton=INDEX_NONE;
-    if(Retry) {RetryButton=CompletionButtons.Add(FBox2D(FVector2D(40,280),FVector2D(360,392)));}
-    NextButton=CompletionButtons.Add(Retry?FBox2D(FVector2D(400,280),FVector2D(920,392)):FBox2D(FVector2D(220,280),FVector2D(740,392)));
-    auto Button=[this](int32 Index,bool bPrimary,TFunction<FText()> Label) {
-        const FBox2D& R=CompletionButtons[Index];
-        return SNew(SBox).WidthOverride(R.GetSize().X).HeightOverride(R.GetSize().Y)
-            [SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).Padding(FMargin(16,6)).HAlign(HAlign_Center).VAlign(VAlign_Center)
-             .BorderBackgroundColor_Lambda([this,Index,bPrimary](){return FSlateColor(ButtonColor(Index,bPrimary));})
-             [SNew(STextBlock).Text_Lambda(MoveTemp(Label)).Font(Font(28,"Bold")).Justification(ETextJustify::Center)
-              .WrapTextAt(R.GetSize().X-40).ColorAndOpacity(FLinearColor::White)]];
-    };
-    TSharedRef<SCanvas> Canvas=SNew(SCanvas)
-        +SCanvas::Slot().Position(FVector2D(0,22)).Size(FVector2D(CompletionPixels.X,74))
-        [SNew(STextBlock).Text(FText::FromString(TEXT("体験完了"))).Font(Font(52,"Bold")).Justification(ETextJustify::Center).ColorAndOpacity(FLinearColor::White)]
-        +SCanvas::Slot().Position(FVector2D(0,104)).Size(FVector2D(CompletionPixels.X,44))
-        [SNew(STextBlock).Text_Lambda([this](){return FText::FromString(FString::Printf(TEXT("%d / %d"),CompletionView.StepNumber,CompletionView.StepCount));})
-         .Font(Font(30)).Justification(ETextJustify::Center).ColorAndOpacity(FLinearColor(.55f,.70f,.68f))]
-        +SCanvas::Slot().Position(FVector2D(40,166)).Size(FVector2D(CompletionPixels.X-80,96))
-        [SNew(STextBlock).Text_Lambda([this](){return FText::FromString(CompletionError);}).Font(Font(26)).Justification(ETextJustify::Center)
-         .AutoWrapText(true).ColorAndOpacity(FLinearColor(1.f,.45f,.38f))];
-    if(RetryButton!=INDEX_NONE) {
-        const FBox2D R=CompletionButtons[RetryButton];
-        Canvas->AddSlot().Position(R.Min).Size(R.GetSize())[Button(RetryButton,false,[](){return FText::FromString(TEXT("もう一度"));})];
+    Completion.Buttons.Reset();RetryButton=NextButton=INDEX_NONE;
+    if(Retry) {RetryButton=Completion.Buttons.Add(FBox2D(FVector2D(40,280),FVector2D(360,392)));}
+    NextButton=Completion.Buttons.Add(Retry?FBox2D(FVector2D(400,280),FVector2D(920,392)):FBox2D(FVector2D(220,280),FVector2D(740,392)));
+    TSharedRef<SCanvas> Canvas=MakePanelCanvas(Completion,TEXT("体験完了"),
+        [this](){return FText::FromString(FString::Printf(TEXT("%d / %d"),CompletionView.StepNumber,CompletionView.StepCount));});
+    if(RetryButton!=INDEX_NONE) AddPanelButton(*Canvas,Completion,RetryButton,false,[](){return FText::FromString(TEXT("もう一度"));});
+    AddPanelButton(*Canvas,Completion,NextButton,true,[this](){return FText::FromString(CompletionView.NextLabel);});
+    CompletionPanel->SetSlateWidget(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(PanelColor).Padding(0)[Canvas]);
+}
+
+void AHapbeatDemoSessionUi::BuildPauseWidget(bool bHub)
+{
+    // 再開 (primary) / 最初からやり直す / Hub に戻る, the last only when the Hub is installed. Widths follow the
+    // labels so 「最初からやり直す」 stays on one line (26 pt).
+    Pause.Buttons.Reset();ResumeButton=RestartButton=HubButton=INDEX_NONE;
+    if(bHub) {
+        ResumeButton=Pause.Buttons.Add(FBox2D(FVector2D(40,280),FVector2D(240,392)));
+        RestartButton=Pause.Buttons.Add(FBox2D(FVector2D(260,280),FVector2D(600,392)));
+        HubButton=Pause.Buttons.Add(FBox2D(FVector2D(620,280),FVector2D(920,392)));
+    } else {
+        ResumeButton=Pause.Buttons.Add(FBox2D(FVector2D(140,280),FVector2D(420,392)));
+        RestartButton=Pause.Buttons.Add(FBox2D(FVector2D(440,280),FVector2D(820,392)));
     }
-    const FBox2D R=CompletionButtons[NextButton];
-    Canvas->AddSlot().Position(R.Min).Size(R.GetSize())[Button(NextButton,true,[this](){return FText::FromString(CompletionView.NextLabel);})];
-    Completion->SetSlateWidget(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(PanelColor).Padding(0)[Canvas]);
+    TSharedRef<SCanvas> Canvas=MakePanelCanvas(Pause,TEXT("一時停止"),[](){return FText::GetEmpty();});
+    AddPanelButton(*Canvas,Pause,ResumeButton,true,[](){return FText::FromString(TEXT("再開"));},26);
+    AddPanelButton(*Canvas,Pause,RestartButton,false,[](){return FText::FromString(TEXT("最初からやり直す"));},26);
+    if(HubButton!=INDEX_NONE) AddPanelButton(*Canvas,Pause,HubButton,false,[](){return FText::FromString(TEXT("Hub に戻る"));},26);
+    PausePanel->SetSlateWidget(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(PanelColor).Padding(0)[Canvas]);
 }
 
 void AHapbeatDemoSessionUi::BuildHapticsWidget()
@@ -169,19 +213,40 @@ void AHapbeatDemoSessionUi::BuildHapticsWidget()
           .Font(Font(36,"Bold")).Justification(ETextJustify::Center).ColorAndOpacity(FLinearColor::White)]]);
 }
 
-void AHapbeatDemoSessionUi::ShowCompletion(const FHapbeatSessionCompletionView& View,const FVector& Eye,const FRotator& ViewRotation)
+void AHapbeatDemoSessionUi::ShowPanel(UWidgetComponent* Widget,FPanel& Panel,const FTransform& At)
 {
-    CompletionView=View;CompletionError.Empty();CompletionSeconds=0;CompletionHover=INDEX_NONE;
-    BuildCompletionWidget();CompletionPress.Reset();
-    // In front of the user (head yaw only), a little below eye level, facing the eye.
-    const FVector At=Eye+FRotator(0,ViewRotation.Yaw,0).Vector()*CompletionDistance-FVector(0,0,CompletionDrop);
-    Completion->SetWorldLocationAndRotation(At,(Eye-At).Rotation());
-    Completion->SetVisibility(true);bCompletionShown=true;
+    Panel.Error.Empty();Panel.Seconds=0;Panel.Hover=INDEX_NONE;Panel.Press.Reset();
+    // Placed once: the panel stays where it appeared.
+    Widget->SetWorldLocationAndRotation(At.GetLocation(),At.GetRotation());
+    Widget->SetVisibility(true);Panel.bShown=true;
+}
+
+void AHapbeatDemoSessionUi::HidePanel(UWidgetComponent* Widget,FPanel& Panel)
+{
+    Widget->SetVisibility(false);Panel.bShown=false;Panel.Press.Reset();
+}
+
+void AHapbeatDemoSessionUi::ShowCompletion(const FHapbeatSessionCompletionView& View,const FTransform& At)
+{
+    CompletionView=View;
+    BuildCompletionWidget();
+    ShowPanel(CompletionPanel,Completion,At);
 }
 
 void AHapbeatDemoSessionUi::HideCompletion()
 {
-    Completion->SetVisibility(false);bCompletionShown=false;CompletionPress.Reset();
+    HidePanel(CompletionPanel,Completion);
+}
+
+void AHapbeatDemoSessionUi::ShowPause(bool bHub,const FTransform& At)
+{
+    BuildPauseWidget(bHub);
+    ShowPanel(PausePanel,Pause,At);
+}
+
+void AHapbeatDemoSessionUi::HidePause()
+{
+    HidePanel(PausePanel,Pause);
 }
 
 void AHapbeatDemoSessionUi::SetHapticsButton(bool bVisible,bool bOn)
@@ -203,6 +268,14 @@ void AHapbeatDemoSessionUi::PlaceHapticsButton(const FVector& Eye,const FRotator
     HapticsButton->SetWorldLocationAndRotation(HapticsLocation,(Eye-HapticsLocation).Rotation());
 }
 
+int32 AHapbeatDemoSessionUi::StepPanel(UWidgetComponent* Widget,FPanel& Panel,const FHapbeatSessionPointerInput& In,float Dt,float* RayHit)
+{
+    if(!Panel.bShown) return INDEX_NONE;
+    Panel.Seconds+=Dt;
+    const FTransform Plane(Widget->GetComponentQuat(),Widget->GetComponentLocation());
+    return Panel.Press.Update(Plane,PanelCmPerPixel,PanelPixels,Panel.Buttons,In,Panel.IsAccepting(),&Panel.Hover,RayHit);
+}
+
 AHapbeatDemoSessionUi::FEvents AHapbeatDemoSessionUi::Step(const FHapbeatSessionPointerInput& In,const FVector& Eye,const FRotator& View,float Dt)
 {
     FEvents E;
@@ -215,14 +288,14 @@ AHapbeatDemoSessionUi::FEvents AHapbeatDemoSessionUi::Step(const FHapbeatSession
         E.bToggleHaptics=HapticsPress.Update(Plane,HapticsCmPerPixel,HapticsPixels,MakeArrayView(&Face,1),In,true,&Hover,RayHit)==0;
         bHapticsHover=Hover==0;
     }
-    if(bCompletionShown) {
-        CompletionSeconds+=Dt;
-        const FTransform Plane(Completion->GetComponentQuat(),Completion->GetComponentLocation());
-        const int32 Pressed=CompletionPress.Update(Plane,CompletionCmPerPixel,CompletionPixels,CompletionButtons,In,IsCompletionAccepting(),&CompletionHover,RayHit);
-        E.bRetry=Pressed!=INDEX_NONE&&Pressed==RetryButton;
-        E.bNext=Pressed!=INDEX_NONE&&Pressed==NextButton;
-    }
-    const bool UiVisible=bCompletionShown||HapticsButton->IsVisible();
+    const int32 Done=StepPanel(CompletionPanel,Completion,In,Dt,RayHit);
+    E.bRetry=Done!=INDEX_NONE&&Done==RetryButton;
+    E.bNext=Done!=INDEX_NONE&&Done==NextButton;
+    const int32 Chosen=StepPanel(PausePanel,Pause,In,Dt,RayHit);
+    E.bResume=Chosen!=INDEX_NONE&&Chosen==ResumeButton;
+    E.bRestart=Chosen!=INDEX_NONE&&Chosen==RestartButton;
+    E.bHub=Chosen!=INDEX_NONE&&Chosen==HubButton;
+    const bool UiVisible=Completion.bShown||Pause.bShown||HapticsButton->IsVisible();
     for(int32 H=0;H<2;++H) {
         const bool Show=UiVisible&&In.bRay[H];
         Rays[H]->SetVisibility(Show);

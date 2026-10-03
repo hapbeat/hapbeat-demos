@@ -21,7 +21,10 @@ namespace HapbeatDemoSessionPlatform
     bool ReadDeviceAddress(FString& OutJson,FString& OutSource);
     /** Whether another runtime can be started from here (Android only). */
     bool CanLaunch();
+    /** Starts Target (explicit Intent, NEW_TASK | CLEAR_TASK); an empty TicketJson starts it without a ticket. */
     bool Launch(const FHapbeatDemoSessionComponent& Target,const FString& TicketJson);
+    /** Android: whether Package is installed (the manifest declares it in <queries>). False elsewhere. */
+    bool IsInstalled(const FString& Package);
     /** finishAndRemoveTask(). */
     void FinishTask();
 }

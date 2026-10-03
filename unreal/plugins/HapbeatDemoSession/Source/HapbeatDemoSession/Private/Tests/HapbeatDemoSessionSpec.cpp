@@ -8,6 +8,10 @@
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionUi.h"
+#include "HapbeatDemoSessionPanelAnchor.h"
+#include "HapbeatDemoSessionPause.h"
+#include "HeadMountedDisplayTypes.h"
+#include "GameFramework/Actor.h"
 #include "HapbeatDemoSessionDeviceAddress.h"
 #include "HapbeatConfig.h"
 #include "HapbeatSubsystem.h"
@@ -328,7 +332,7 @@ void FHapbeatDemoSessionSpec::Define()
             if(!TestNotNull(TEXT("ui"),Ui)) return;
             FHapbeatSessionCompletionView View;View.StepNumber=1;View.StepCount=2;View.bRetry=true;View.NextLabel=TEXT("次へ：T-Rex");
             const FVector Eye(0,0,160);
-            Ui->ShowCompletion(View,Eye,FRotator::ZeroRotator);
+            Ui->ShowCompletion(View,AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator));
             // Panel 55 cm ahead, 12 cm down, facing the eye; 0.045 cm/px, 960 x 420 px. Retry button pixels 40..360 x 280..392,
             // next 400..920 x 280..392 (layout in HapbeatDemoSessionUi.cpp).
             const FVector Centre=Eye+FVector(55,0,-12);
@@ -346,6 +350,156 @@ void FHapbeatDemoSessionSpec::Define()
             TestTrue(TEXT("next"),Next.bNext);TestFalse(TEXT("only next"),Next.bRetry);
             Ui->HideCompletion();
             TestFalse(TEXT("hidden"),Ui->IsCompletionShown());
+        });
+    });
+    Describe(TEXT("PanelPlacement"),[this]()
+    {
+        const FVector Eye(0,0,160);
+        It(TEXT("puts the panel 55 cm ahead and 12 cm below the eye without an anchor"),[this,Eye]()
+        {
+            const FTransform T=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator(-40,90,0));
+            TestTrue(TEXT("head yaw only"),T.GetLocation().Equals(FVector(0,55,148),.01f));
+            TestTrue(TEXT("faces the eye"),FVector::DotProduct(T.GetRotation().GetAxisX(),(Eye-T.GetLocation()).GetSafeNormal())>.999f);
+        });
+        It(TEXT("uses the anchor's location, turned toward the eye, or its own rotation never facing away"),[this,Eye]()
+        {
+            UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
+            ON_SCOPE_EXIT { World->DestroyWorld(false); };
+            TestNull(TEXT("no anchor yet"),UHapbeatDemoSessionPanelAnchor::Find(World));
+            AActor* Owner=World->SpawnActor<AActor>();
+            if(!TestNotNull(TEXT("owner"),Owner)) return;
+            auto* Anchor=NewObject<UHapbeatDemoSessionPanelAnchor>(Owner);
+            Owner->SetRootComponent(Anchor);Anchor->RegisterComponent();
+            Anchor->SetWorldLocationAndRotation(FVector(100,30,120),FRotator(0,40,0));
+            TestTrue(TEXT("found"),UHapbeatDemoSessionPanelAnchor::Find(World)==Anchor);
+            FTransform T=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator,Anchor);
+            TestTrue(TEXT("at the anchor"),T.GetLocation().Equals(FVector(100,30,120),.01f));
+            const FVector Flat=(Eye-T.GetLocation()).GetSafeNormal2D();
+            TestTrue(TEXT("yaw toward the eye"),FVector::DotProduct(T.GetRotation().GetAxisX(),Flat)>.999f);
+            TestTrue(TEXT("upright"),FMath::IsNearlyZero(T.GetRotation().GetAxisX().Z,1e-4f));
+            Anchor->bUseRotation=true;
+            Anchor->SetWorldRotation(FRotator(0,170,0)); // +X toward the eye (which is at -X)
+            T=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator,Anchor);
+            TestTrue(TEXT("anchor rotation kept"),T.GetRotation().Equals(Anchor->GetComponentQuat(),1e-4f));
+            Anchor->SetWorldRotation(FRotator(0,-10,0)); // +X away from the eye
+            T=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator,Anchor);
+            TestTrue(TEXT("turned round to face the eye"),FVector::DotProduct(T.GetRotation().GetAxisX(),Eye-T.GetLocation())>0);
+            TestTrue(TEXT("still upright"),FMath::IsNearlyZero(T.GetRotation().GetAxisZ().Z-1.f,1e-4f));
+        });
+    });
+    Describe(TEXT("Pause"),[this]()
+    {
+        // Left hand 40 cm in front of the eye (+X), palm toward the eye: wrist below the fingers, thumb side (+Y)
+        // ... built so that -cross(middle - wrist, index - little) points back at the eye.
+        auto Hand=[](float PinchCm,bool bPalmToEye)
+        {
+            FHapbeatPauseInput In;In.Eye=FVector(0,0,160);In.bLeftHand=true;
+            In.LeftHand.Init(FVector(40,0,150),EHandKeypointCount);
+            const float S=bPalmToEye?1.f:-1.f;
+            auto Set=[&](EHandKeypoint K,const FVector& P){In.LeftHand[int32(K)]=P;};
+            Set(EHandKeypoint::Palm,FVector(40,0,150));
+            Set(EHandKeypoint::Wrist,FVector(40,0,142));
+            Set(EHandKeypoint::MiddleProximal,FVector(40,0,155));
+            Set(EHandKeypoint::IndexProximal,FVector(40,-3*S,155));
+            Set(EHandKeypoint::LittleProximal,FVector(40,3*S,154));
+            Set(EHandKeypoint::ThumbTip,FVector(36,-4*S,152));
+            Set(EHandKeypoint::IndexTip,FVector(36,-4*S,152+PinchCm));
+            return In;
+        };
+        It(TEXT("detects the palm-facing pinch only with the palm toward the eye"),[this,Hand]()
+        {
+            const FHapbeatPauseInput Toward=Hand(.5f,true), Away=Hand(.5f,false), Open=Hand(5.f,true);
+            TestTrue(TEXT("palm to the eye, pinched"),FHapbeatPauseDetector::IsPalmPinch(Toward.LeftHand,Toward.Eye,1.5f));
+            TestFalse(TEXT("back of the hand to the eye"),FHapbeatPauseDetector::IsPalmPinch(Away.LeftHand,Away.Eye,1.5f));
+            TestFalse(TEXT("not pinched"),FHapbeatPauseDetector::IsPalmPinch(Open.LeftHand,Open.Eye,1.5f));
+        });
+        It(TEXT("SystemMenu fires on the menu button's rising edge only"),[this,Hand]()
+        {
+            FHapbeatPauseDetector D;
+            FHapbeatPauseInput In=Hand(.5f,true);
+            for(int32 I=0;I<40;++I) TestFalse(TEXT("a held pinch does nothing in A"),D.Update(In,.1f));
+            In.bMenuButton=true;
+            TestTrue(TEXT("press"),D.Update(In,.1f));
+            TestFalse(TEXT("held"),D.Update(In,.1f));
+            In.bMenuButton=false;D.Update(In,.1f);
+            In.bMenuButton=true;
+            TestTrue(TEXT("second press"),D.Update(In,.1f));
+        });
+        It(TEXT("PalmPinchHold fires after 2 s of the gesture and needs a release before the next"),[this,Hand]()
+        {
+            // 0.125 s steps: 16 of them are exactly HoldSeconds.
+            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;
+            const FHapbeatPauseInput Pinch=Hand(.5f,true), Loose=Hand(2.5f,true), Open=Hand(5.f,true), Away=Hand(.5f,false);
+            bool Fired=false;
+            for(int32 I=0;I<15;++I) Fired|=D.Update(I<2?Pinch:Loose,.125f); // starts at <= 1.5 cm, holds up to 3 cm
+            TestFalse(TEXT("not before 2 s"),Fired);
+            TestTrue(TEXT("at 2 s"),D.Update(Pinch,.125f));
+            for(int32 I=0;I<30;++I) TestFalse(TEXT("still held: once only"),D.Update(Pinch,.125f));
+            D.Update(Open,.125f);
+            for(int32 I=0;I<15;++I) D.Update(Pinch,.125f);
+            TestTrue(TEXT("again after a release"),D.Update(Pinch,.125f));
+            D.Update(Open,.125f);
+            for(int32 I=0;I<8;++I) D.Update(Pinch,.125f);
+            D.Update(Away,.125f);
+            for(int32 I=0;I<15;++I) TestFalse(TEXT("turning the palm away restarts the count"),D.Update(Pinch,.125f));
+            FHapbeatPauseInput Button=Open;Button.bMenuButton=true;
+            TestTrue(TEXT("the controller button works in B too"),D.Update(Button,.125f));
+        });
+        It(TEXT("Reset waits for a release"),[this,Hand]()
+        {
+            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;
+            const FHapbeatPauseInput Pinch=Hand(.5f,true), Open=Hand(5.f,true);
+            for(int32 I=0;I<8;++I) D.Update(Pinch,.125f);
+            D.Reset();
+            for(int32 I=0;I<30;++I) TestFalse(TEXT("held through the reset"),D.Update(Pinch,.125f));
+            D.Update(Open,.125f);
+            for(int32 I=0;I<15;++I) D.Update(Pinch,.125f);
+            TestTrue(TEXT("after a release"),D.Update(Pinch,.125f));
+        });
+        It(TEXT("parses the Gesture setting"),[this]()
+        {
+            EHapbeatPauseGesture G=EHapbeatPauseGesture::SystemMenu;
+            TestTrue(TEXT("B"),FHapbeatPauseSettings::ParseGesture(TEXT("palmpinchhold"),G));
+            TestTrue(TEXT("B parsed"),G==EHapbeatPauseGesture::PalmPinchHold);
+            TestFalse(TEXT("unknown"),FHapbeatPauseSettings::ParseGesture(TEXT("Hold"),G));
+            TestTrue(TEXT("unknown leaves it"),G==EHapbeatPauseGesture::PalmPinchHold);
+            TestTrue(TEXT("A"),FHapbeatPauseSettings::ParseGesture(TEXT("SystemMenu"),G));
+            TestTrue(TEXT("A parsed"),G==EHapbeatPauseGesture::SystemMenu);
+        });
+        It(TEXT("pause panel: resume / restart, and Hub only when installed"),[this]()
+        {
+            UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
+            ON_SCOPE_EXIT { World->DestroyWorld(false); };
+            AHapbeatDemoSessionUi* Ui=World->SpawnActor<AHapbeatDemoSessionUi>();
+            if(!TestNotNull(TEXT("ui"),Ui)) return;
+            const FVector Eye(0,0,160);
+            const FTransform At=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator);
+            const FVector Centre=At.GetLocation();const FQuat Q=At.GetRotation();
+            auto Point=[&](float Px,float Py,float Depth){return Centre+Q.RotateVector(FVector(Depth,-(Px-480)*.045f,-(Py-210)*.045f));};
+            auto Press=[&](float Px,float Py)
+            {
+                FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=Point(Px,Py,8);Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
+                In.Finger[1]=Point(Px,Py,0);return Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
+            };
+            auto Wait=[&](){FHapbeatSessionPointerInput None;for(int32 I=0;I<11;++I) Ui->Step(None,Eye,FRotator::ZeroRotator,.1f);};
+            // With the Hub: 再開 40..240, 最初からやり直す 260..600, Hub に戻る 620..920 (y 280..392).
+            Ui->ShowPause(true,At);
+            TestTrue(TEXT("shown"),Ui->IsPauseShown());
+            TestFalse(TEXT("not within 1 s"),Press(140,336).bResume);
+            Wait();
+            TestTrue(TEXT("accepting"),Ui->IsPauseAccepting());
+            TestTrue(TEXT("resume"),Press(140,336).bResume);
+            TestTrue(TEXT("restart"),Press(430,336).bRestart);
+            const auto Hub=Press(770,336);
+            TestTrue(TEXT("hub"),Hub.bHub);TestFalse(TEXT("only hub"),Hub.bResume||Hub.bRestart||Hub.bNext||Hub.bRetry);
+            Ui->HidePause();
+            TestFalse(TEXT("hidden"),Ui->IsPauseShown());
+            // Without the Hub: 再開 140..420, 最初からやり直す 440..820; nothing at the Hub's place.
+            Ui->ShowPause(false,At);Wait();
+            TestTrue(TEXT("resume (no hub)"),Press(280,336).bResume);
+            TestTrue(TEXT("restart (no hub)"),Press(630,336).bRestart);
+            const auto None=Press(880,336);
+            TestFalse(TEXT("no hub button"),None.bHub||None.bResume||None.bRestart);
         });
     });
 }

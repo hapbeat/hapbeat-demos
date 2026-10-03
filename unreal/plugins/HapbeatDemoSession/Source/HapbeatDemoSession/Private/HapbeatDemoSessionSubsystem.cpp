@@ -3,6 +3,7 @@
 #include "HapbeatDemoSessionDeviceAddress.h"
 #include "HapbeatDemoSessionPlatform.h"
 #include "HapbeatDemoSessionUi.h"
+#include "HapbeatDemoSessionPanelAnchor.h"
 #include "HapbeatSubsystem.h"
 #include "AudioDevice.h"
 #include "Camera/PlayerCameraManager.h"
@@ -34,6 +35,12 @@ void UHapbeatDemoSessionSubsystem::Initialize(FSubsystemCollectionBase& Collecti
     const bool bDescriptorRead=HapbeatDemoSessionPlatform::ReadDescriptor(DescriptorJson);
     const bool bTicketPresent=HapbeatDemoSessionPlatform::TakeTicket(TicketJson);
     Load(DescriptorJson,bDescriptorRead,TicketJson,bTicketPresent);
+    // The pause works with or without a descriptor / ticket (a demo started from the Quest library too).
+    PauseSettings=FHapbeatPauseSettings::Load();
+    PauseDetector.Gesture=PauseSettings.Gesture;
+    bHubInstalled=HapbeatDemoSessionPlatform::IsInstalled(HubComponent().Package);
+    if(PauseSettings.bEnabled) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE enabled gesture=%s hub=%d"),
+        PauseSettings.Gesture==EHapbeatPauseGesture::SystemMenu?TEXT("SystemMenu"):TEXT("PalmPinchHold"),bHubInstalled);
     bInitialized=true;
 }
 
@@ -122,8 +129,8 @@ bool UHapbeatDemoSessionSubsystem::ExecuteControl(const FString& Action)
     if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return true;}
     const FControl* Control=Controls.FindByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
     if(!Control||!Control->Handler()) return false;
-    // restart reloads the experience: an open completion panel belongs to the previous run.
-    if(Action==TEXT("restart")) HideCompletion();
+    // restart reloads the experience: an open completion or pause panel belongs to the previous run.
+    if(Action==TEXT("restart")) {HideCompletion();HidePause();}
     return true;
 }
 
@@ -141,9 +148,16 @@ void UHapbeatDemoSessionSubsystem::SetHapticsUiVisible(bool bVisible)
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_HAPTICS_UI visible=%d"),bHapticsUiVisible);
 }
 
+const FHapbeatDemoSessionComponent& UHapbeatDemoSessionSubsystem::HubComponent()
+{
+    static const FHapbeatDemoSessionComponent Hub{TEXT("jp.hapbeat.demohub"),TEXT("com.unity3d.player.UnityPlayerGameActivity")};
+    return Hub;
+}
+
 void UHapbeatDemoSessionSubsystem::ShowCompletion()
 {
     if(!bSessionActive||bCompletionShown||bExiting) return;
+    if(bPauseShown) SetPauseShown(false);
     bCompletionShown=true;
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_COMPLETION_SHOWN step=%d/%d retry=%d next=%s"),Ticket.Index+1,Ticket.Steps.Num(),
         Ticket.Steps[Ticket.Index].bRetry,Ticket.HasNextStep()?*Ticket.Steps[Ticket.Index+1].DemoId:TEXT("finish"));
@@ -157,6 +171,39 @@ void UHapbeatDemoSessionSubsystem::HideCompletion()
     if(Ui.IsValid()) Ui->HideCompletion();
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_COMPLETION_HIDDEN"));
     OnGameplayPausedChanged.Broadcast(false);
+}
+
+void UHapbeatDemoSessionSubsystem::ShowPause()
+{
+    if(!PauseSettings.bEnabled||bPauseShown||bCompletionShown||bExiting) return;
+    SetPauseShown(true);
+}
+
+void UHapbeatDemoSessionSubsystem::HidePause()
+{
+    if(bPauseShown) SetPauseShown(false);
+}
+
+void UHapbeatDemoSessionSubsystem::SetPauseShown(bool bShown)
+{
+    bPauseShown=bShown;
+    if(!bShown&&Ui.IsValid()) Ui->HidePause();
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE %s"),bShown?TEXT("shown"):TEXT("hidden"));
+    OnPauseChanged.Broadcast(bShown);
+    OnGameplayPausedChanged.Broadcast(bShown);
+}
+
+void UHapbeatDemoSessionSubsystem::ReturnToHub()
+{
+    if(!bHubInstalled||bExiting) return;
+    const FHapbeatDemoSessionComponent& Hub=HubComponent();
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RETURN_TO_HUB target=%s/%s"),*Hub.Package,*Hub.Activity);
+    if(!HapbeatDemoSessionPlatform::Launch(Hub,FString())) {
+        UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SESSION_LAUNCH_FAILED %s/%s"),*Hub.Package,*Hub.Activity);
+        if(Ui.IsValid()) Ui->SetPauseError(TEXT("Hub を起動できませんでした。\nスタッフにお知らせください。"));
+        return;
+    }
+    ExitAfterLaunch();
 }
 
 FString UHapbeatDemoSessionSubsystem::MakeNextTicketJson() const
@@ -179,6 +226,11 @@ void UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
         if(Ui.IsValid()) Ui->SetCompletionError(TEXT("次のデモを起動できませんでした。\nスタッフにお知らせください。"));
         return;
     }
+    ExitAfterLaunch();
+}
+
+void UHapbeatDemoSessionSubsystem::ExitAfterLaunch()
+{
     // The next runtime is starting: stop haptics, sound and the 7710 listener, then end this task.
     bExiting=true;
     SetHapticsEnabled(false);
@@ -189,6 +241,24 @@ void UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
     Receiver.Stop();
     HapbeatDemoSessionPlatform::FinishTask();
     FPlatformMisc::RequestExit(false);
+}
+
+FHapbeatPauseInput UHapbeatDemoSessionSubsystem::ReadPauseInput(APlayerController* PC,const FVector& Eye) const
+{
+    FHapbeatPauseInput In;In.Eye=Eye;
+    if(!GEngine||!GEngine->XRSystem.IsValid()) return In;
+    bool bUseFocus=false,bFocus=true;
+    UHeadMountedDisplayFunctionLibrary::GetVRFocusState(bUseFocus,bFocus);
+    if(bUseFocus&&!bFocus) return In;
+    // The controller's ≡ button; in SystemMenu mode also Quest's menu gesture of the tracked left hand, which
+    // the runtime reports as the same button (FHapbeatDemoSessionModule::GetInputKeyOverrides).
+    In.bMenuButton=PC->IsInputKeyDown(EKeys::OculusTouch_Left_Menu_Click);
+    if(PauseDetector.Gesture==EHapbeatPauseGesture::PalmPinchHold) {
+        FXRHandTrackingState S;
+        UHeadMountedDisplayFunctionLibrary::GetHandTrackingState(PC,EXRSpaceType::UnrealWorldSpace,EControllerHand::Left,S);
+        In.SetLeftHand(S);
+    }
+    return In;
 }
 
 FHapbeatSessionPointerInput UHapbeatDemoSessionSubsystem::ReadPointers(APlayerController* PC) const
@@ -236,18 +306,24 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     if(!World||!World->IsGameWorld()||World->bIsTearingDown) return;
     APlayerController* PC=World->GetFirstPlayerController();
     if(!PC||!PC->PlayerCameraManager) return;
-    const bool bHapticsButton=bHasDescriptor&&Descriptor.bHapticsToggle&&bHapticsUiVisible&&!bExiting;
-    if(!bCompletionShown&&!bHapticsButton&&!Ui.IsValid()) return;
-    AHapbeatDemoSessionUi* View=EnsureUi(World);
-    if(!View) return;
     const FVector Eye=PC->PlayerCameraManager->GetCameraLocation();
     const FRotator Rotation=PC->PlayerCameraManager->GetCameraRotation();
+    if(PauseSettings.bEnabled&&!bCompletionShown&&!bExiting&&PauseDetector.Update(ReadPauseInput(PC,Eye),Dt)) {
+        // The same gesture / button closes it again (= 再開).
+        if(bPauseShown) HidePause(); else ShowPause();
+    }
+    const bool bHapticsButton=bHasDescriptor&&Descriptor.bHapticsToggle&&bHapticsUiVisible&&!bExiting;
+    if(!bCompletionShown&&!bPauseShown&&!bHapticsButton&&!Ui.IsValid()) return;
+    AHapbeatDemoSessionUi* View=EnsureUi(World);
+    if(!View) return;
     if(bCompletionShown&&!View->IsCompletionShown()) {
         FHapbeatSessionCompletionView Model;
         Model.StepNumber=Ticket.Index+1;Model.StepCount=Ticket.Steps.Num();Model.bRetry=Ticket.Steps[Ticket.Index].bRetry;
         Model.NextLabel=Ticket.HasNextStep()?FString::Printf(TEXT("次へ：%s"),*Ticket.Steps[Ticket.Index+1].Title):FString(TEXT("デモを終了"));
-        View->ShowCompletion(Model,Eye,Rotation);
+        View->ShowCompletion(Model,AHapbeatDemoSessionUi::PlacePanel(Eye,Rotation,UHapbeatDemoSessionPanelAnchor::Find(World)));
     } else if(!bCompletionShown&&View->IsCompletionShown()) View->HideCompletion();
+    if(bPauseShown&&!View->IsPauseShown()) View->ShowPause(bHubInstalled,AHapbeatDemoSessionUi::PlacePanel(Eye,Rotation));
+    else if(!bPauseShown&&View->IsPauseShown()) View->HidePause();
     View->SetHapticsButton(bHapticsButton,bHapticsEnabled);
     const AHapbeatDemoSessionUi::FEvents E=View->Step(ReadPointers(PC),Eye,Rotation,Dt);
     if(E.bToggleHaptics) SetHapticsEnabled(!bHapticsEnabled);
@@ -256,4 +332,10 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
         HideCompletion();OnRestartRequested.Broadcast();
     }
     if(E.bNext) LaunchNextOrFinish();
+    if(E.bResume||E.bRestart) {
+        PauseDetector.Reset();
+        HidePause();
+        if(E.bRestart) {UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE_RESTART"));OnRestartRequested.Broadcast();}
+    }
+    if(E.bHub) ReturnToHub();
 }

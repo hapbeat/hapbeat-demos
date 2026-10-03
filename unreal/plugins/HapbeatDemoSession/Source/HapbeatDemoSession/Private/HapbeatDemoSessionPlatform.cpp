@@ -102,6 +102,20 @@ bool HapbeatDemoSessionPlatform::Launch(const FHapbeatDemoSessionComponent& Targ
 #endif
 }
 
+bool HapbeatDemoSessionPlatform::IsInstalled(const FString& Package)
+{
+#if PLATFORM_ANDROID
+    JNIEnv* Env=FAndroidApplication::GetJavaEnv();
+    if(!Env) return false;
+    const jmethodID M=Method(Env,"AndroidThunkJava_HapbeatSession_IsInstalled","(Ljava/lang/String;)Z");
+    if(!M) return false;
+    auto Name=FJavaHelper::ToJavaString(Env,Package);
+    return FJavaWrapper::CallBooleanMethod(Env,FJavaWrapper::GameActivityThis,M,*Name);
+#else
+    return false;
+#endif
+}
+
 void HapbeatDemoSessionPlatform::FinishTask()
 {
 #if PLATFORM_ANDROID
