@@ -11,6 +11,8 @@ python tools/tts/generate-voice.py <demo>/.../voice-lines.json <demo>/.../Voice
 python tools/tts/generate-voice.py --samples <out-dir> --text "..."
 ```
 
+**One voice for every demo:** edit `tools/tts/voice.json` (speaker / style / speed / volume) and run `powershell -File tools/tts/generate-all-voices.ps1` (generates the changed lines of every demo and runs the Unreal import commandlets; close those editors first). It overrides each file's own `voice` block; `--ignore-shared` uses the file's block only.
+
 `voice-lines.json` holds the default voice and the lines (`id` = output file name):
 
 ```json

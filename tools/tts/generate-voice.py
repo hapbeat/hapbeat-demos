@@ -137,7 +137,7 @@ def main():
     parser.add_argument('--samples', action='store_true', help='write one sample per installed speaker style')
     parser.add_argument('--text', default='こんにちは。目の前のティラノサウルスに、そっと手を伸ばしてみてください。')
     parser.add_argument('--force', action='store_true', help='regenerate every line')
-    parser.add_argument('--ignore-shared', action='store_true', help='use only the file's own "voice" block')
+    parser.add_argument('--ignore-shared', action='store_true', help='use only the own "voice" block of the lines file')
     args = parser.parse_args()
     if args.samples:
         samples(args)
