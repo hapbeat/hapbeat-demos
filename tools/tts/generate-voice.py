@@ -9,7 +9,8 @@ re-run every time a line is edited. Nothing is played back.
 voice-lines.json:
   {"voice": {"speaker": "まお", "style": "ノーマル", "speed": 1.0, "volume": 0.85},
    "lines": [{"id": "trex_start", "text": "人差し指を上に立てると始まります。"}]}
-A line may override "speaker" / "style" / "speed" / "volume" (volumeScale; < 1 leaves peak headroom). Output: <out-dir>/<id>.wav (+ .voice-cache.json).
+The shared tools/tts/voice.json (same keys) overrides each file's "voice" so one edit re-voices every demo;
+a line may still override "speaker" / "style" / "speed" / "volume" (volumeScale; < 1 leaves peak headroom). Output: <out-dir>/<id>.wav (+ .voice-cache.json).
 """
 import argparse
 import hashlib
@@ -25,6 +26,7 @@ from pathlib import Path
 
 ID_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 CACHE_NAME = '.voice-cache.json'
+SHARED_VOICE = Path(__file__).with_name('voice.json')
 
 
 def request(engine, path, params=None, body=None):
@@ -75,7 +77,9 @@ def check_wav(data, label):
 
 def generate(args):
     spec = json.loads(Path(args.lines).read_text(encoding='utf-8-sig'))
-    voice = spec.get('voice', {})
+    voice = dict(spec.get('voice', {}))
+    if SHARED_VOICE.exists() and not args.ignore_shared:
+        voice.update(json.loads(SHARED_VOICE.read_text(encoding='utf-8-sig')))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cache_path = out / CACHE_NAME
@@ -133,6 +137,7 @@ def main():
     parser.add_argument('--samples', action='store_true', help='write one sample per installed speaker style')
     parser.add_argument('--text', default='こんにちは。目の前のティラノサウルスに、そっと手を伸ばしてみてください。')
     parser.add_argument('--force', action='store_true', help='regenerate every line')
+    parser.add_argument('--ignore-shared', action='store_true', help='use only the file's own "voice" block')
     args = parser.parse_args()
     if args.samples:
         samples(args)
