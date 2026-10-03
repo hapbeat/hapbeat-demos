@@ -15,6 +15,7 @@ like `HapbeatDemoSession`.
   A fourth copy, the opaque inner shell (Skin only, `SetInsideVisible(true)`, off by default), can show the inside of
   the hand through the wrist opening instead of the scene behind it.
   `GetOutlineMaterial()` / `GetSurfaceMaterial()` are the dynamic instances (e.g. tint the outline while grabbing).
+  `SetSortPriorityBase(AHapbeatDemoSessionUi::HandSortPriority)` keeps the hands in front of the Demo Session panels.
 
 ## Per project
 

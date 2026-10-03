@@ -80,6 +80,12 @@ public:
      * 2026-10-03 and the softer see-through wrist was preferred).
      */
     void SetInsideVisible(bool bVisible);
+    /**
+     * Translucent sort priority of the drawn layers: outline at Base, surface (and inner shell) at Base+1. Default 1.
+     * Demos with the Demo Session panels (drawn without depth test) pass AHapbeatDemoSessionUi::HandSortPriority so a
+     * hand in front of a panel stays visible.
+     */
+    void SetSortPriorityBase(int32 Base);
     /** The Custom Depth copy: query bones here (all layers share its pose). */
     UPoseableMeshComponent* GetPoseMesh() const { return Layers.IsEmpty()?nullptr:Layers[0].Get(); }
     UMaterialInstanceDynamic* GetSurfaceMaterial() const { return SurfaceMaterial; }

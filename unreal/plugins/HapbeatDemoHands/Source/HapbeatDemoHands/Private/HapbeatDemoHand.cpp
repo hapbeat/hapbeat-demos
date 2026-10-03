@@ -124,12 +124,18 @@ UHapbeatDemoHand* UHapbeatDemoHand::Create(AActor* Owner,USkeletalMesh* Mesh,UTe
             for(int32 I=0;I<M->GetNumMaterials();++I)M->SetMaterial(I,InMaterials.Depth);
             M->SetRenderInMainPass(false);M->SetRenderInDepthPass(false);M->SetRenderCustomDepth(true);
         }
-        M->SetTranslucentSortPriority(FMath::Min(Layer,2)); // outline (1) before the surface (2); the inner shell is opaque
+        // Outline (1) before the surface (2); the inner shell is opaque. SetSortPriorityBase moves both.
+        M->SetTranslucentSortPriority(FMath::Min(Layer,2));
         M->SetVisibility(false);M->RegisterComponent();
         Hand->Layers.Add(M);
     }
     Hand->ApplyStyle();
     return Hand;
+}
+
+void UHapbeatDemoHand::SetSortPriorityBase(int32 Base)
+{
+    for(int32 Layer=1;Layer<Layers.Num();++Layer)Layers[Layer]->SetTranslucentSortPriority(Base+FMath::Min(Layer,2)-1);
 }
 
 void UHapbeatDemoHand::ApplyStyle()
