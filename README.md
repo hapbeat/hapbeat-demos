@@ -42,6 +42,8 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 
 デモ一式の Quest へのインストールは `tools/install-demos.cmd -Group 1` のように行う。Quest に入れる APK は最新のビルドから `quest-apks/`（git 対象外、アプリ名のファイル名で 1 デモ 1 ファイル）に集めてからそこを入れる（`-CollectOnly` で集めるだけ、`-NoCollect` で集めずに入れる）。`-Group` / `-Player` を付けると、その Quest の全デモの触覚の宛先（`hapbeat-device.json`）も同時に書き込む。2 台目は `-Group 2`。
 
+展示運営用の Android リモコン [Demo Remote](android/demo-remote/README.md)（`android/demo-remote`）は、Demo Switch の切替・アプリ操作、Wi-Fi adb での直接起動、Quest 画面のミラー表示を 1 台のスマホ / タブレットで行う。
+
 Quest の画面を PC に映すには `tools/quest-mirror.cmd` をダブルクリックする（同じ LAN 内の Wi-Fi adb + [scrcpy](https://github.com/Genymobile/scrcpy)。インターネット不要、表示のみ・音声なし。接続中の Quest ごとに「Quest 1 / Quest 2」のウィンドウを並べる）。Quest を再起動した直後は USB を挿した状態で `tools/enable-quest-wifi-adb.cmd`（または quest-mirror.cmd）をダブルクリックすると Wi-Fi adb に切り替わり、ケーブルを抜いてよい。
 
 ## 4. 独立 APK の切替
