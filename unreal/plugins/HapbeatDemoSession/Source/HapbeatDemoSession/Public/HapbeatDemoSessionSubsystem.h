@@ -5,6 +5,7 @@
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchReceiver.h"
 #include "HapbeatDemoSessionPause.h"
+#include "HapbeatDemoSessionHandoff.h"
 #include "HapbeatDemoSessionSubsystem.generated.h"
 
 class AHapbeatDemoSessionUi;
@@ -28,8 +29,12 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
  *
  * Shared pause (demos without a menu of their own, [HapbeatDemoSession.Pause] in DefaultGame.ini): the left menu
  * gesture / controller menu button (FHapbeatPauseDetector) opens a panel in front of the head with 再開 /
- * 最初からやり直す / Hub に戻る, with or without a session. The demo stops its game, navigation voice and haptics
- * on OnPauseChanged.
+ * 最初からやり直す / 次へ (or デモを終了; session only) / Hub に戻る, with or without a session. The demo stops its
+ * game, navigation voice and haptics on OnPauseChanged.
+ *
+ * Starting the next runtime (or the Hub) ends this demo only once it has gone to the background
+ * (FHapbeatLaunchHandoff); a system recenter (FCoreDelegates::VRHeadsetRecenter) puts open panels back in front
+ * of the head.
  *
  * After the Hapbeat SDK subsystem has initialized, the per-device address file (hapbeat-device.json in the app's
  * external files directory) is read once and its axes are set as the SDK's address override (not persisted).
@@ -69,7 +74,7 @@ public:
     /** The shared pause is enabled for this project ([HapbeatDemoSession.Pause] Enabled=True). */
     bool IsPauseEnabled() const {return PauseSettings.bEnabled;}
     EHapbeatPauseGesture GetPauseGesture() const {return PauseDetector.Gesture;}
-    /** Opens the pause panel (only when enabled, and not over the completion panel or while exiting). */
+    /** Opens the pause panel (only when enabled, and not over the completion panel or while leaving). */
     void ShowPause();
     /** Closes the pause panel (再開). */
     void HidePause();
@@ -81,11 +86,15 @@ public:
     void ReturnToHub();
     bool IsHubInstalled() const {return bHubInstalled;}
     /**
-     * Starts steps[index+1] (or the finish runtime) with the next ticket. On success: haptics off, sounds and the
-     * 7710 listener stopped, then this task finishes. On failure the panel shows an error and the demo stays.
+     * Starts steps[index+1] (or the finish runtime) with the next ticket (completion panel, or the pause panel's
+     * 次へ / デモを終了). Once this application has gone to the background: haptics off, sounds and the 7710
+     * listener stopped, then this task finishes, once. When the launch fails, or this application is still in
+     * front after FHapbeatLaunchHandoff::TimeoutSeconds, the open panel shows an error and the demo stays.
      * Off Android nothing is launched (logged only).
      */
     void LaunchNextOrFinish();
+    /** A launch is waiting for this application to go to the background, or this demo is ending. */
+    bool IsLeaving() const {return bExiting||Handoff.IsWaiting();}
 
     bool IsHapticsEnabled() const {return bHapticsEnabled;}
     void SetHapticsEnabled(bool bEnabled);
@@ -123,7 +132,18 @@ private:
     /** One frame of the pause gesture input; nothing while the application has no focus (system menu open). */
     FHapbeatPauseInput ReadPauseInput(APlayerController* PlayerController,const FVector& Eye) const;
     void SetPauseShown(bool bShown);
-    /** After the next runtime (or the Hub) has been started: haptics off, sounds and the 7710 listener stopped, task finished. */
+    /** "次へ：<title>" or "デモを終了" (session mode). */
+    FString NextLabel() const;
+    /** The next runtime (or the Hub) was started: wait for the background (FHapbeatLaunchHandoff). */
+    void StartHandoff();
+    void UpdateHandoff(bool bBackgrounded,float Dt);
+    /** Error line of the panel the launch came from (the pause panel when it is open, else the completion panel). */
+    void ShowLaunchError(const FString& Text);
+    /** FCoreDelegates::ApplicationWillDeactivateDelegate (Android: the activity is pausing; the game thread stops right after). */
+    void OnApplicationDeactivated();
+    /** FCoreDelegates::VRHeadsetRecenter (OpenXR XrEventDataReferenceSpaceChangePending). */
+    void OnRecenter();
+    /** This application is in the background: haptics off, sounds and the 7710 listener stopped, task finished (once). */
     void ExitAfterLaunch();
     AHapbeatDemoSessionUi* EnsureUi(UWorld* World);
     struct FControl
@@ -140,7 +160,13 @@ private:
     TWeakObjectPtr<AHapbeatDemoSessionUi> Ui;
     FHapbeatPauseSettings PauseSettings;
     FHapbeatPauseDetector PauseDetector;
+    FHapbeatLaunchHandoff Handoff;
+    FDelegateHandle DeactivateHandle, RecenterHandle;
+    /** Seconds left in which open panels are put back in front of the head after a recenter (-1: none). */
+    float RecenterSeconds=-1;
     bool bHasDescriptor=false, bSessionActive=false, bCompletionShown=false, bHapticsEnabled=true, bHapticsUiVisible=false;
     bool bPauseShown=false, bHubInstalled=false;
     bool bInitialized=false, bExiting=false;
+    /** The launch started with VR focus (OpenXR): losing it counts as going to the background. */
+    bool bHandoffHadVRFocus=false;
 };

@@ -63,8 +63,8 @@ public:
     struct FEvents
     {
         bool bRetry=false, bNext=false, bToggleHaptics=false;
-        /** Pause panel: 再開 / 最初からやり直す / Hub に戻る. */
-        bool bResume=false, bRestart=false, bHub=false;
+        /** Pause panel: 再開 / 最初からやり直す / 次へ or デモを終了 (bPauseNext) / Hub に戻る. */
+        bool bResume=false, bRestart=false, bPauseNext=false, bHub=false;
     };
     /** Panel buttons ignore input for this long after the panel appears. */
     static constexpr float CompletionInputDelay=1.f;
@@ -80,12 +80,17 @@ public:
     bool IsCompletionAccepting() const {return Completion.IsAccepting();}
     /** Error line of the panel (fixed-height area); empty clears it. */
     void SetCompletionError(const FString& Text) {Completion.Error=Text;}
-    /** bHub: show 「Hub に戻る」 (only when the Hub is installed). */
-    void ShowPause(bool bHub,const FTransform& At);
+    /**
+     * bHub: show 「Hub に戻る」 (only when the Hub is installed). NextLabel: "次へ：<title>" / "デモを終了" in a
+     * session (the completion panel's next button), empty for none.
+     */
+    void ShowPause(bool bHub,const FString& NextLabel,const FTransform& At);
     void HidePause();
     bool IsPauseShown() const {return Pause.bShown;}
     bool IsPauseAccepting() const {return Pause.IsAccepting();}
     void SetPauseError(const FString& Text) {Pause.Error=Text;}
+    /** Moves the open panels to At (a recenter) without restarting their input delay; the haptics button snaps to the view again. */
+    void Reposition(const FTransform& At);
     void SetHapticsButton(bool bVisible,bool bOn);
     FEvents Step(const FHapbeatSessionPointerInput& Input,const FVector& Eye,const FRotator& ViewRotation,float Dt);
 private:
@@ -101,7 +106,7 @@ private:
         bool IsAccepting() const {return bShown&&Seconds>=CompletionInputDelay;}
     };
     void BuildCompletionWidget();
-    void BuildPauseWidget(bool bHub);
+    void BuildPauseWidget(bool bHub,const FString& NextLabel);
     void BuildHapticsWidget();
     /** Title, sub line and the reserved error line; the buttons are added by the caller. */
     TSharedRef<SCanvas> MakePanelCanvas(const FPanel& Panel,const FString& Title,TFunction<FText()> SubLine);
@@ -119,7 +124,8 @@ private:
     FHapbeatSessionPressTracker HapticsPress;
     FHapbeatSessionCompletionView CompletionView;
     int32 RetryButton=INDEX_NONE, NextButton=INDEX_NONE;
-    int32 ResumeButton=INDEX_NONE, RestartButton=INDEX_NONE, HubButton=INDEX_NONE;
+    int32 ResumeButton=INDEX_NONE, RestartButton=INDEX_NONE, PauseNextButton=INDEX_NONE, HubButton=INDEX_NONE;
+    FString PauseNextLabel;
     bool bHapticsBuilt=false;
     bool bHapticsOn=true, bHapticsHover=false, bHapticsPlaced=false;
     float HapticsYaw=0;

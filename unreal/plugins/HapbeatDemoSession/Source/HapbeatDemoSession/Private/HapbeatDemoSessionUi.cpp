@@ -181,23 +181,31 @@ void AHapbeatDemoSessionUi::BuildCompletionWidget()
     CompletionPanel->SetSlateWidget(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(PanelColor).Padding(0)[Canvas]);
 }
 
-void AHapbeatDemoSessionUi::BuildPauseWidget(bool bHub)
+void AHapbeatDemoSessionUi::BuildPauseWidget(bool bHub,const FString& NextLabel)
 {
-    // 再開 (primary) / 最初からやり直す / Hub に戻る, the last only when the Hub is installed. Widths follow the
-    // labels so 「最初からやり直す」 stays on one line (26 pt).
-    Pause.Buttons.Reset();ResumeButton=RestartButton=HubButton=INDEX_NONE;
-    if(bHub) {
-        ResumeButton=Pause.Buttons.Add(FBox2D(FVector2D(40,280),FVector2D(240,392)));
-        RestartButton=Pause.Buttons.Add(FBox2D(FVector2D(260,280),FVector2D(600,392)));
-        HubButton=Pause.Buttons.Add(FBox2D(FVector2D(620,280),FVector2D(920,392)));
+    // 再開 (primary) / 最初からやり直す / 次へ：<title> or デモを終了 (session only) / Hub に戻る (only when the Hub
+    // is installed). Widths follow the labels so 「最初からやり直す」 stays on one line; with all four buttons the
+    // labels are 24 pt and the next label wraps onto a second line.
+    Pause.Buttons.Reset();ResumeButton=RestartButton=PauseNextButton=HubButton=INDEX_NONE;
+    PauseNextLabel=NextLabel;
+    const bool bNext=!NextLabel.IsEmpty();
+    int32 FontSize=26;
+    auto Add=[&](float X0,float X1){return Pause.Buttons.Add(FBox2D(FVector2D(X0,280),FVector2D(X1,392)));};
+    if(bNext&&bHub) {
+        FontSize=24;
+        ResumeButton=Add(40,150);RestartButton=Add(170,420);PauseNextButton=Add(440,730);HubButton=Add(750,920);
+    } else if(bNext) {
+        ResumeButton=Add(40,240);RestartButton=Add(260,600);PauseNextButton=Add(620,920);
+    } else if(bHub) {
+        ResumeButton=Add(40,240);RestartButton=Add(260,600);HubButton=Add(620,920);
     } else {
-        ResumeButton=Pause.Buttons.Add(FBox2D(FVector2D(140,280),FVector2D(420,392)));
-        RestartButton=Pause.Buttons.Add(FBox2D(FVector2D(440,280),FVector2D(820,392)));
+        ResumeButton=Add(140,420);RestartButton=Add(440,820);
     }
     TSharedRef<SCanvas> Canvas=MakePanelCanvas(Pause,TEXT("一時停止"),[](){return FText::GetEmpty();});
-    AddPanelButton(*Canvas,Pause,ResumeButton,true,[](){return FText::FromString(TEXT("再開"));},26);
-    AddPanelButton(*Canvas,Pause,RestartButton,false,[](){return FText::FromString(TEXT("最初からやり直す"));},26);
-    if(HubButton!=INDEX_NONE) AddPanelButton(*Canvas,Pause,HubButton,false,[](){return FText::FromString(TEXT("Hub に戻る"));},26);
+    AddPanelButton(*Canvas,Pause,ResumeButton,true,[](){return FText::FromString(TEXT("再開"));},FontSize);
+    AddPanelButton(*Canvas,Pause,RestartButton,false,[](){return FText::FromString(TEXT("最初からやり直す"));},FontSize);
+    if(PauseNextButton!=INDEX_NONE) AddPanelButton(*Canvas,Pause,PauseNextButton,false,[this](){return FText::FromString(PauseNextLabel);},FontSize);
+    if(HubButton!=INDEX_NONE) AddPanelButton(*Canvas,Pause,HubButton,false,[](){return FText::FromString(TEXT("Hub に戻る"));},FontSize);
     PausePanel->SetSlateWidget(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(PanelColor).Padding(0)[Canvas]);
 }
 
@@ -238,15 +246,28 @@ void AHapbeatDemoSessionUi::HideCompletion()
     HidePanel(CompletionPanel,Completion);
 }
 
-void AHapbeatDemoSessionUi::ShowPause(bool bHub,const FTransform& At)
+void AHapbeatDemoSessionUi::ShowPause(bool bHub,const FString& NextLabel,const FTransform& At)
 {
-    BuildPauseWidget(bHub);
+    BuildPauseWidget(bHub,NextLabel);
     ShowPanel(PausePanel,Pause,At);
 }
 
 void AHapbeatDemoSessionUi::HidePause()
 {
     HidePanel(PausePanel,Pause);
+}
+
+void AHapbeatDemoSessionUi::Reposition(const FTransform& At)
+{
+    // Both panels go to the same place: they are never open at the same time.
+    auto Move=[&At](UWidgetComponent* Widget,FPanel& Panel)
+    {
+        if(!Panel.bShown) return;
+        Widget->SetWorldLocationAndRotation(At.GetLocation(),At.GetRotation());
+        Panel.Press.Reset();
+    };
+    Move(CompletionPanel,Completion);Move(PausePanel,Pause);
+    bHapticsPlaced=false;
 }
 
 void AHapbeatDemoSessionUi::SetHapticsButton(bool bVisible,bool bOn)
@@ -294,6 +315,7 @@ AHapbeatDemoSessionUi::FEvents AHapbeatDemoSessionUi::Step(const FHapbeatSession
     const int32 Chosen=StepPanel(PausePanel,Pause,In,Dt,RayHit);
     E.bResume=Chosen!=INDEX_NONE&&Chosen==ResumeButton;
     E.bRestart=Chosen!=INDEX_NONE&&Chosen==RestartButton;
+    E.bPauseNext=Chosen!=INDEX_NONE&&Chosen==PauseNextButton;
     E.bHub=Chosen!=INDEX_NONE&&Chosen==HubButton;
     const bool UiVisible=Completion.bShown||Pause.bShown||HapticsButton->IsVisible();
     for(int32 H=0;H<2;++H) {

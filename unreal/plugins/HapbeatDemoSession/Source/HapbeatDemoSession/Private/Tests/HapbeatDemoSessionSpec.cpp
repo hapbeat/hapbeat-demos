@@ -10,6 +10,7 @@
 #include "HapbeatDemoSessionUi.h"
 #include "HapbeatDemoSessionPanelAnchor.h"
 #include "HapbeatDemoSessionPause.h"
+#include "HapbeatDemoSessionHandoff.h"
 #include "HeadMountedDisplayTypes.h"
 #include "GameFramework/Actor.h"
 #include "HapbeatDemoSessionDeviceAddress.h"
@@ -483,7 +484,7 @@ void FHapbeatDemoSessionSpec::Define()
             };
             auto Wait=[&](){FHapbeatSessionPointerInput None;for(int32 I=0;I<11;++I) Ui->Step(None,Eye,FRotator::ZeroRotator,.1f);};
             // With the Hub: 再開 40..240, 最初からやり直す 260..600, Hub に戻る 620..920 (y 280..392).
-            Ui->ShowPause(true,At);
+            Ui->ShowPause(true,FString(),At);
             TestTrue(TEXT("shown"),Ui->IsPauseShown());
             TestFalse(TEXT("not within 1 s"),Press(140,336).bResume);
             Wait();
@@ -495,11 +496,84 @@ void FHapbeatDemoSessionSpec::Define()
             Ui->HidePause();
             TestFalse(TEXT("hidden"),Ui->IsPauseShown());
             // Without the Hub: 再開 140..420, 最初からやり直す 440..820; nothing at the Hub's place.
-            Ui->ShowPause(false,At);Wait();
+            Ui->ShowPause(false,FString(),At);Wait();
             TestTrue(TEXT("resume (no hub)"),Press(280,336).bResume);
             TestTrue(TEXT("restart (no hub)"),Press(630,336).bRestart);
             const auto None=Press(880,336);
-            TestFalse(TEXT("no hub button"),None.bHub||None.bResume||None.bRestart);
+            TestFalse(TEXT("no hub button"),None.bHub||None.bResume||None.bRestart||None.bPauseNext);
+            Ui->HidePause();
+            // Session with the Hub: 再開 40..150, 最初からやり直す 170..420, 次へ 440..730, Hub に戻る 750..920.
+            Ui->ShowPause(true,TEXT("次へ：T-Rex"),At);Wait();
+            TestTrue(TEXT("resume (4)"),Press(95,336).bResume);
+            TestTrue(TEXT("restart (4)"),Press(295,336).bRestart);
+            const auto Next=Press(585,336);
+            TestTrue(TEXT("next (4)"),Next.bPauseNext);TestFalse(TEXT("only next"),Next.bNext||Next.bHub||Next.bResume||Next.bRestart);
+            TestTrue(TEXT("hub (4)"),Press(835,336).bHub);
+            Ui->HidePause();
+            // Session without the Hub (last step: デモを終了): 再開 40..240, 最初からやり直す 260..600, デモを終了 620..920.
+            Ui->ShowPause(false,TEXT("デモを終了"),At);Wait();
+            TestTrue(TEXT("resume (3)"),Press(140,336).bResume);
+            TestTrue(TEXT("restart (3)"),Press(430,336).bRestart);
+            const auto Finish=Press(770,336);
+            TestTrue(TEXT("finish (3)"),Finish.bPauseNext);TestFalse(TEXT("no hub (3)"),Finish.bHub);
+        });
+        It(TEXT("a recenter moves the open panel in front of the head without restarting its input delay"),[this]()
+        {
+            UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
+            ON_SCOPE_EXIT { World->DestroyWorld(false); };
+            AHapbeatDemoSessionUi* Ui=World->SpawnActor<AHapbeatDemoSessionUi>();
+            if(!TestNotNull(TEXT("ui"),Ui)) return;
+            const FVector Eye(0,0,160);
+            Ui->ShowPause(false,FString(),AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator));
+            FHapbeatSessionPointerInput None;
+            for(int32 I=0;I<11;++I) Ui->Step(None,Eye,FRotator::ZeroRotator,.1f);
+            TestTrue(TEXT("accepting"),Ui->IsPauseAccepting());
+            // After the recenter the user faces +Y (the panel had ended up behind / beside them).
+            const FTransform At=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator(0,90,0));
+            Ui->Reposition(At);
+            TestTrue(TEXT("still accepting"),Ui->IsPauseAccepting());
+            const FVector Centre=At.GetLocation();const FQuat Q=At.GetRotation();
+            TestTrue(TEXT("in front of the new facing"),Centre.Equals(FVector(0,55,148),.01f));
+            auto Point=[&](float Px,float Py,float Depth){return Centre+Q.RotateVector(FVector(Depth,-(Px-480)*.045f,-(Py-210)*.045f));};
+            FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=Point(280,336,8);Ui->Step(In,Eye,FRotator(0,90,0),.1f);
+            In.Finger[1]=Point(280,336,0);
+            TestTrue(TEXT("pressed at the new place"),Ui->Step(In,Eye,FRotator(0,90,0),.1f).bResume);
+            Ui->HidePause();
+            Ui->Reposition(AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator));
+            TestFalse(TEXT("a closed panel stays closed"),Ui->IsPauseShown());
+        });
+    });
+    Describe(TEXT("Handoff"),[this]()
+    {
+        It(TEXT("ends once after the application goes to the background"),[this]()
+        {
+            using EStep=FHapbeatLaunchHandoff::EStep;
+            FHapbeatLaunchHandoff H;
+            TestTrue(TEXT("idle: nothing"),H.Update(true,.1f)==EStep::None);
+            H.Start();
+            TestTrue(TEXT("waiting"),H.IsWaiting());
+            TestTrue(TEXT("still in front"),H.Update(false,1.f)==EStep::None);
+            TestTrue(TEXT("focus lost: exit"),H.Update(true,.1f)==EStep::Exit);
+            TestTrue(TEXT("done"),H.IsDone());
+            TestTrue(TEXT("not a second time"),H.Update(true,.1f)==EStep::None);
+            H.Start();
+            TestFalse(TEXT("no restart after exit"),H.IsWaiting());
+            TestTrue(TEXT("still nothing"),H.Update(true,10.f)==EStep::None);
+        });
+        It(TEXT("fails after 5 s in front and does not end the demo"),[this]()
+        {
+            using EStep=FHapbeatLaunchHandoff::EStep;
+            FHapbeatLaunchHandoff H;
+            H.Start();
+            int32 Exits=0,Fails=0;
+            for(int32 I=0;I<49;++I) {const EStep S=H.Update(false,.1f);Exits+=S==EStep::Exit;Fails+=S==EStep::Failed;}
+            TestEqual(TEXT("nothing within 4.9 s"),Exits+Fails,0);
+            TestTrue(TEXT("failed at 5 s"),H.Update(false,.15f)==EStep::Failed);
+            TestFalse(TEXT("no longer waiting"),H.IsWaiting());TestFalse(TEXT("not done"),H.IsDone());
+            TestTrue(TEXT("a late focus loss ends nothing"),H.Update(true,.1f)==EStep::None);
+            H.Start();
+            TestTrue(TEXT("can be tried again"),H.IsWaiting());
+            TestTrue(TEXT("then exits"),H.Update(true,.1f)==EStep::Exit);
         });
     });
 }
