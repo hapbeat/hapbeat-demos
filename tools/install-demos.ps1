@@ -34,25 +34,18 @@ $demos = [ordered]@{
 $keys = if ($Only.Count) { $Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $demos.Keys }
 foreach ($key in $keys) { if (-not $demos.Contains($key)) { throw "Unknown demo '$key'. Known: $($demos.Keys -join ', ')" } }
 
-$adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
-if (-not $adb) { throw 'adb not found on PATH.' }
-function Get-Online {
-    & $adb devices | Select-String '^(\S+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value } |
-        Where-Object { $_ -notmatch '^emulator-' }
-}
-$cacheFile = Join-Path $env:LOCALAPPDATA 'Hapbeat\quest-wifi-ip.txt'   # shared with quest-mirror.ps1
-if ($Serial -match '^\d+\.\d+\.\d+\.\d+:\d+$' -and $Serial -notin @(Get-Online)) { & $adb connect $Serial | Out-Null }
-if (-not $Serial) {
-    $online = Get-Online
-    # Another tool (e.g. a Unity build) may have restarted the adb server; reconnect the last Wi-Fi Quest once.
-    if (-not $online -and (Test-Path $cacheFile)) {
-        & $adb connect "$((Get-Content $cacheFile -Raw).Trim()):5555" | Out-Null
-        $online = Get-Online
+. (Join-Path $PSScriptRoot 'quest-adb-common.ps1')
+$adb = Get-QuestAdb
+if ($Serial) {
+    if ($Serial -match '^\d+\.\d+\.\d+\.\d+:\d+$' -and $Serial -notin @(Get-OnlineDevices $adb)) { & $adb connect $Serial | Out-Null }
+} else {
+    # Another tool (e.g. a Unity build) may have restarted the adb server; reconnect known Wi-Fi Quests first.
+    Connect-KnownQuests $adb | Out-Null
+    $online = @(Get-OnlineDevices $adb)
+    if ($online.Count -ne 1) {
+        throw "Connect exactly one Quest or pass -Serial (online: $($online -join ', '))."
     }
-    if (@($online).Count -ne 1) {
-        throw "Connect exactly one Quest or pass -Serial (online: $(@($online) -join ', '))."
-    }
-    $Serial = @($online)[0]
+    $Serial = $online[0]
 }
 Write-Host "Quest: $Serial"
 

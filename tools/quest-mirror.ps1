@@ -1,78 +1,53 @@
-# Mirror the Quest screen on this PC over the local Wi-Fi LAN (no internet needed).
-# One action: double-click quest-mirror.cmd. Uses adb + scrcpy; the PC and the Quest must be on the same LAN.
+# Mirror every Quest on this PC over the local Wi-Fi LAN (no internet needed), one window per headset
+# titled "Quest 1 - Quest 3S (192.168.0.37)". One action: double-click quest-mirror.cmd.
 #
-#   1. Uses an already connected Wi-Fi adb device, else reconnects to the last known Quest IP.
-#   2. After a Quest reboot Wi-Fi adb is off (a non-rooted Quest cannot persist it): if a USB cable
-#      is connected, it re-enables Wi-Fi adb and the cable can then be removed.
-#   3. Starts scrcpy view-only (no audio, no input), cropped to the left eye unless -BothEyes.
+#   1. USB-connected Quests are switched to Wi-Fi adb first (needed after a Quest reboot; the cable can then be
+#      removed). Known Quests that dropped off adb are reconnected.
+#   2. scrcpy runs view-only (no audio, no input), cropped to the left eye unless -BothEyes.
 #
-#   powershell -ExecutionPolicy Bypass -File tools/quest-mirror.ps1 [-BothEyes] [-Ip 192.168.0.37]
-param([switch]$BothEyes, [string]$Ip = '')
+#   powershell -ExecutionPolicy Bypass -File tools/quest-mirror.ps1 [-BothEyes] [-Serial 192.168.0.37:5555]
+param([switch]$BothEyes, [string]$Serial = '', [int]$Width = 720)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'quest-adb-common.ps1')
 
-$cacheDir = Join-Path $env:LOCALAPPDATA 'Hapbeat'
-$cacheFile = Join-Path $cacheDir 'quest-wifi-ip.txt'
-
-function Find-Tool([string]$name) {
-    $local = Join-Path $PSScriptRoot "quest-mirror\scrcpy\$name.exe"
-    if ($name -eq 'scrcpy' -and (Test-Path $local)) { return $local }
-    $cmd = Get-Command $name -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    return $null
-}
-
-function Get-Devices {
-    & $script:adb devices | Select-String '^(\S+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
-}
-
-function Connect-Wifi([string]$address) {
-    if (-not $address) { return $null }
-    $target = if ($address -match ':\d+$') { $address } else { "${address}:5555" }
-    $result = (& $script:adb connect $target 2>&1) -join ' '
-    if ($result -match 'connected to') { return $target }
-    return $null
-}
-
-$script:adb = Find-Tool 'adb'
-if (-not $script:adb) { throw 'adb not found. Install Android platform-tools and add it to PATH.' }
-$scrcpy = Find-Tool 'scrcpy'
-if (-not $scrcpy) {
-    throw ("scrcpy not found. Put the official Windows build in tools\quest-mirror\scrcpy\ " +
-           "(https://github.com/Genymobile/scrcpy/releases) or run: winget install --exact --id Genymobile.scrcpy")
-}
-
-$serial = Get-Devices | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+:\d+$' } | Select-Object -First 1
-if (-not $serial) {
-    $known = if ($Ip) { $Ip } elseif (Test-Path $cacheFile) { (Get-Content $cacheFile -Raw).Trim() } else { '' }
-    $serial = Connect-Wifi $known
-}
-if (-not $serial) {
-    $usb = Get-Devices | Where-Object { $_ -notmatch ':' } | Select-Object -First 1
-    if (-not $usb) {
-        throw ('Quest not reachable over Wi-Fi. After a Quest reboot, connect the USB cable once ' +
-               '(allow USB debugging in the headset) and run this again.')
+$adb = Get-QuestAdb
+$scrcpy = Join-Path $PSScriptRoot 'quest-mirror\scrcpy\scrcpy.exe'
+if (-not (Test-Path $scrcpy)) {
+    $cmd = Get-Command scrcpy -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        throw ("scrcpy not found. Put the official Windows build in tools\quest-mirror\scrcpy\ " +
+               "(https://github.com/Genymobile/scrcpy/releases) or run: winget install --exact --id Genymobile.scrcpy")
     }
-    $wlan = (& $script:adb -s $usb shell ip -f inet addr show wlan0 | Select-String 'inet (\d+\.\d+\.\d+\.\d+)')
-    if (-not $wlan) { throw 'Quest has no Wi-Fi address (wlan0). Join the same network as this PC.' }
-    $address = $wlan.Matches[0].Groups[1].Value
-    & $script:adb -s $usb tcpip 5555 | Out-Null
-    Start-Sleep -Seconds 3
-    $serial = Connect-Wifi $address
-    if (-not $serial) { throw "adb connect ${address}:5555 failed." }
-    Write-Host 'Wi-Fi adb enabled. The USB cable can now be removed.'
+    $scrcpy = $cmd.Source
 }
-New-Item -ItemType Directory -Force $cacheDir | Out-Null
-Set-Content -Path $cacheFile -Value ($serial -replace ':\d+$', '') -NoNewline
 
-$scrcpyArgs = @("--serial=$serial", '--no-audio', '--no-control', '--max-fps=30', '--video-bit-rate=8M',
-          '--window-title=Quest mirror')
-$size = (& $script:adb -s $serial shell wm size) -join ' '
-if (-not $BothEyes -and $size -match '(\d+)x(\d+)') {
-    $width = [int]$Matches[1]; $height = [int]$Matches[2]
-    # The Quest mirror frame holds both eyes side by side; show the left half only.
-    if ($width -gt $height * 1.2) { $scrcpyArgs += "--crop=$([int]($width / 2)):${height}:0:0" }
+Enable-QuestWifi $adb | Out-Null
+$quests = @(Connect-KnownQuests $adb)
+if ($Serial) {
+    if ($Serial -notin $quests) { & $adb connect $Serial | Out-Null; $quests = @(Connect-KnownQuests $adb) }
+    $quests = @($quests | Where-Object { $_ -eq $Serial })
 }
-Write-Host "Mirroring $serial (view only, no audio). Close the window to stop."
+if (-not $quests.Count) {
+    throw ('No Quest reachable over Wi-Fi. After a Quest reboot, connect the USB cable once ' +
+           '(allow USB debugging in the headset) and run this again.')
+}
+
 # scrcpy ships its own adb; a different adb version would restart the running adb server.
-$env:ADB = $script:adb
-& $scrcpy @scrcpyArgs
+$env:ADB = $adb
+$index = 0
+foreach ($quest in ($quests | Sort-Object { [version](($_ -split ':')[0]) })) {
+    $index++
+    $model = Get-QuestModel $adb $quest
+    $title = "Quest $index - $model ($(($quest -split ':')[0]))"
+    $scrcpyArgs = @("--serial=$quest", '--no-audio', '--no-control', '--max-fps=30', '--video-bit-rate=8M',
+                    "--window-title=$title", "--window-x=$(40 + ($index - 1) * ($Width + 20))", '--window-y=60',
+                    "--window-width=$Width")
+    $size = (& $adb -s $quest shell wm size) -join ' '
+    if (-not $BothEyes -and $size -match '(\d+)x(\d+)') {
+        $w = [int]$Matches[1]; $h = [int]$Matches[2]
+        # The Quest mirror frame holds both eyes side by side; show the left half only.
+        if ($w -gt $h * 1.2) { $scrcpyArgs += "--crop=$([int]($w / 2)):${h}:0:0" }
+    }
+    Start-Process -FilePath $scrcpy -ArgumentList $scrcpyArgs | Out-Null
+    Write-Host "$title (view only, no audio). Close its window to stop."
+}
