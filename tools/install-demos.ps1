@@ -10,6 +10,9 @@
 #   powershell -File tools/install-demos.ps1 -Only volley,trex        # subset; address left as it is
 #   powershell -File tools/install-demos.ps1 -ClearAddress -ConfigOnly
 #   powershell -File tools/install-demos.ps1 -CollectOnly              # refresh quest-apks/ only
+#   powershell -File tools/install-demos.ps1 -Group 1 -Reinstall      # uninstall first (the Quest library then
+#                                                                      # shows the new app names); the apps' small
+#                                                                      # .json data (Hub presets etc.) is kept
 #
 # -Player / -Group: 1..99, or leave out (-1) to not set that axis. Without either, the address files are not
 # touched. Values forced in a demo's build settings still win (see the spec).
@@ -21,7 +24,8 @@ param(
     [switch]$ConfigOnly,
     [switch]$ClearAddress,
     [switch]$CollectOnly,
-    [switch]$NoCollect
+    [switch]$NoCollect,
+    [switch]$Reinstall
 )
 $ErrorActionPreference = 'Continue'
 if ($Group -eq 0 -or $Player -eq 0) { throw 'Player / Group must be 1..99 (or omitted).' }
@@ -91,9 +95,35 @@ foreach ($key in $keys) {
             if ($Only.Count) { $failed += $key }   # only an explicitly requested demo counts as a failure
             continue
         }
+        $backup = $null
+        if ($Reinstall) {
+            # The Quest library keeps the name from the first install; only an uninstall refreshes it. Keep the
+            # app's small .json files (Hub presets, settings, hapbeat-device.json) across the uninstall.
+            $remote = "/sdcard/Android/data/$($demo.Package)/files"
+            $backup = Join-Path $env:LOCALAPPDATA (Join-Path 'Hapbeat\app-backup' (Join-Path ($Serial -replace '[:.]', '_') $demo.Package))
+            Remove-Item $backup -Recurse -Force -ErrorAction SilentlyContinue
+            $files = @(& $adb -s $Serial shell "cd $remote 2>/dev/null && find . -name '*.json' -size -1024k" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like './*' })
+            foreach ($file in $files) {
+                $local = Join-Path $backup ($file.Substring(2).Replace('/', [IO.Path]::DirectorySeparatorChar))
+                New-Item -ItemType Directory -Force (Split-Path $local) | Out-Null
+                & $adb -s $Serial pull "$remote/$($file.Substring(2))" $local 2>&1 | Out-Null
+            }
+            & $adb -s $Serial uninstall $demo.Package 2>&1 | Out-Null
+            Write-Host "${key}: uninstalled ($($files.Count) data file(s) kept in $backup)"
+        }
         $result = (& $adb -s $Serial install -r $apk 2>&1) -join ' '
-        if ($result -notmatch 'Success') { Write-Warning "${key}: install failed: $result"; $failed += $key; continue }
+        if ($result -notmatch 'Success') { Write-Warning "${key}: install failed: $result (data kept in $backup)"; $failed += $key; continue }
         Write-Host "${key}: installed"
+        if ($backup -and (Test-Path $backup)) {
+            $remote = "/sdcard/Android/data/$($demo.Package)/files"
+            foreach ($local in Get-ChildItem $backup -Recurse -File) {
+                $relative = $local.FullName.Substring($backup.Length + 1).Replace([IO.Path]::DirectorySeparatorChar, '/')
+                $parent = ($relative -split '/' | Select-Object -SkipLast 1) -join '/'
+                & $adb -s $Serial shell "mkdir -p '$remote/$parent'" | Out-Null
+                & $adb -s $Serial push $local.FullName "$remote/$relative" 2>&1 | Out-Null
+            }
+            Write-Host "${key}: data restored"
+        }
     }
     if (-not $writeAddress) { continue }
     $dir = "/sdcard/Android/data/$($demo.Package)/files"
