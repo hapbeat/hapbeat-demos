@@ -10,7 +10,6 @@
 #   powershell -File tools/install-demos.ps1 -Only volley,trex        # subset; address left as it is
 #   powershell -File tools/install-demos.ps1 -ClearAddress -ConfigOnly
 #   powershell -File tools/install-demos.ps1 -CollectOnly              # refresh quest-apks/ only
-#   powershell -File tools/install-demos.ps1 -Only energyduel          # demos outside the default set
 #
 # -Player / -Group: 1..99, or leave out (-1) to not set that axis. Without either, the address files are not
 # touched. Values forced in a demo's build settings still win (see the spec).
@@ -37,8 +36,8 @@ $demos = [ordered]@{
     handdemo   = @{ Package = 'com.Hapbeat.HapticHandDemo_G2'; File = 'HandDemo.apk';      Default = $true;  Source = 'unity/handdemo/Build/HandDemo-switch-fixed.apk' }
     safetymill = @{ Package = 'com.hapbeat.safetymill';        File = 'SafetyMillVR.apk';  Default = $true;  Source = 'unreal/safety-mill-vr/Builds/QuestHands/Android_ASTC/SafetyMillVR-arm64.apk' }
     trex       = @{ Package = 'com.hapbeat.trexencounter';     File = 'TRexEncounter.apk'; Default = $true;  Source = 'unreal/trex-encounter/Builds/Quest/Android_ASTC/HapbeatTrexDemo-arm64.apk' }
-    energyduel = @{ Package = 'jp.hapbeat.energyduel';         File = 'EnergyDuel.apk';    Default = $false; Source = 'unity/energy-duel/Builds/EnergyDuel.apk' }
-    fps        = @{ Package = 'com.hapbeat.fpsdemo';           File = 'FPS.apk';           Default = $false; Source = 'unity/fps/Builds/Quest/HapbeatFPS-Quest.apk' }
+    energyduel = @{ Package = 'jp.hapbeat.energyduel';         File = 'EnergyDuel.apk';    Default = $true;  Source = 'unity/energy-duel/Builds/EnergyDuel.apk' }
+    fps        = @{ Package = 'com.hapbeat.fpsdemo';           File = 'FPS.apk';           Default = $true;  Source = 'unity/fps/Builds/Quest/HapbeatFPS-Quest.apk' }
 }
 $apkDir = Join-Path $root 'quest-apks'
 $keys = if ($Only.Count) { $Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
@@ -87,7 +86,11 @@ foreach ($key in $keys) {
     $demo = $demos[$key]
     if (-not $ConfigOnly) {
         $apk = Join-Path $apkDir $demo.File
-        if (-not (Test-Path $apk)) { Write-Warning "${key}: no quest-apks/$($demo.File) (build $($demo.Source) first)"; $failed += $key; continue }
+        if (-not (Test-Path $apk)) {
+            Write-Warning "${key}: no quest-apks/$($demo.File) (build $($demo.Source) first); skipped"
+            if ($Only.Count) { $failed += $key }   # only an explicitly requested demo counts as a failure
+            continue
+        }
         $result = (& $adb -s $Serial install -r $apk 2>&1) -join ' '
         if ($result -notmatch 'Success') { Write-Warning "${key}: install failed: $result"; $failed += $key; continue }
         Write-Host "${key}: installed"
