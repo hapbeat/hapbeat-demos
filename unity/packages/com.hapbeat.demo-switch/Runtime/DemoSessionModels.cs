@@ -276,7 +276,7 @@ namespace Hapbeat.DemoSwitch
         public const int MaxSteps = 32;
 
         public DemoSessionTicket(string sessionId, int index, bool hapticsUi, IReadOnlyList<DemoSessionStep> steps, DemoSessionComponent finish,
-            DemoHandStyle? handStyle = null)
+            DemoHandStyle? handStyle = null, bool recenterUi = false)
         {
             SessionId = sessionId;
             Index = index;
@@ -284,6 +284,7 @@ namespace Hapbeat.DemoSwitch
             Steps = steps.ToArray();
             Finish = finish;
             HandStyle = handStyle;
+            RecenterUi = recenterUi;
         }
 
         public string SessionId { get; }
@@ -293,13 +294,16 @@ namespace Hapbeat.DemoSwitch
         public DemoSessionComponent Finish { get; }
         /// <summary>`hand_style`; null when omitted (each runtime uses its own default).</summary>
         public DemoHandStyle? HandStyle { get; }
+        /// <summary>`recenter_ui`: show the 視線をリセット button (optional, default false).</summary>
+        public bool RecenterUi { get; }
 
         /// <summary>`index == len(steps)`: every step completed; only the finish runtime receives it.</summary>
         public bool IsFinished => Index == Steps.Count;
 
-        public DemoSessionTicket WithIndex(int index, bool hapticsUi) => new DemoSessionTicket(SessionId, index, hapticsUi, Steps, Finish, HandStyle);
-        public DemoSessionTicket WithSession(string sessionId) => new DemoSessionTicket(sessionId, Index, HapticsUi, Steps, Finish, HandStyle);
-        public DemoSessionTicket WithHandStyle(DemoHandStyle? handStyle) => new DemoSessionTicket(SessionId, Index, HapticsUi, Steps, Finish, handStyle);
+        public DemoSessionTicket WithIndex(int index, bool hapticsUi) => new DemoSessionTicket(SessionId, index, hapticsUi, Steps, Finish, HandStyle, RecenterUi);
+        public DemoSessionTicket WithSession(string sessionId) => new DemoSessionTicket(sessionId, Index, HapticsUi, Steps, Finish, HandStyle, RecenterUi);
+        public DemoSessionTicket WithHandStyle(DemoHandStyle? handStyle) => new DemoSessionTicket(SessionId, Index, HapticsUi, Steps, Finish, handStyle, RecenterUi);
+        public DemoSessionTicket WithRecenterUi(bool recenterUi) => new DemoSessionTicket(SessionId, Index, HapticsUi, Steps, Finish, HandStyle, recenterUi);
 
         public static string NewSessionId()
         {
@@ -335,6 +339,7 @@ namespace Hapbeat.DemoSwitch
                 ["finish"] = new JObject { ["package"] = Finish.PackageName, ["activity"] = Finish.ActivityName }
             };
             if (HandStyle.HasValue) root["hand_style"] = DemoHandStyles.ToValue(HandStyle.Value);
+            if (RecenterUi) root["recenter_ui"] = true;
             return root.ToString(Formatting.None);
         }
 
@@ -345,7 +350,7 @@ namespace Hapbeat.DemoSwitch
             if (!DemoSessionJson.TryLoad(json, out var root, out error)) return false;
             try
             {
-                if (!DemoSessionJson.OnlyFields(root, "version", "session_id", "index", "haptics_ui", "steps", "finish", "hand_style")) return Fail("Ticket contains an unknown field.", out error);
+                if (!DemoSessionJson.OnlyFields(root, "version", "session_id", "index", "haptics_ui", "steps", "finish", "hand_style", "recenter_ui")) return Fail("Ticket contains an unknown field.", out error);
                 if (!DemoSessionJson.TryVersion(root)) return Fail("version must be 1.", out error);
                 if (!DemoSessionJson.TryString(root, "session_id", out var sessionId) || !DemoSessionJson.IsSessionId(sessionId)) return Fail("session_id is invalid.", out error);
                 if (!root.TryGetValue("index", StringComparison.Ordinal, out var indexToken) || indexToken.Type != JTokenType.Integer) return Fail("index must be an integer.", out error);
@@ -368,7 +373,9 @@ namespace Hapbeat.DemoSwitch
                         return Fail("hand_style must be \"ghost\" or \"skin\".", out error);
                     handStyle = parsedStyle;
                 }
-                ticket = new DemoSessionTicket(sessionId, (int)index, hapticsUi, steps, finish, handStyle);
+                var recenterUi = false;
+                if (root.ContainsKey("recenter_ui") && !DemoSessionJson.TryBool(root, "recenter_ui", out recenterUi)) return Fail("recenter_ui must be a boolean.", out error);
+                ticket = new DemoSessionTicket(sessionId, (int)index, hapticsUi, steps, finish, handStyle, recenterUi);
                 error = null;
                 return true;
             }

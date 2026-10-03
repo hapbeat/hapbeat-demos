@@ -295,9 +295,10 @@ namespace Hapbeat.DemoSwitch
     /// <summary>
     /// World-space panel whose buttons accept fingertip pokes and controller ray + trigger without
     /// any EventSystem. Sizes are millimetres; the canvas is scaled so one unit equals 1 mm.
-    /// The last child is a depth-only layer (<see cref="DepthShaderPath"/>): world-space UI writes no depth,
-    /// and the shared hands draw after the panels (<see cref="HandSortingOrder"/>), so a hand in front of a
-    /// panel covers it with its fill and outline while a hand behind it stays hidden.
+    /// Every colour is drawn with <see cref="UiShaderPath"/> (ZTest Always), so the scene's models never hide
+    /// a panel. The last child is a depth-only layer (<see cref="DepthShaderPath"/>, also ZTest Always):
+    /// world-space UI writes no depth, and the shared hands draw after the panels (<see cref="HandSortingOrder"/>),
+    /// so a hand in front of a panel covers it with its fill and outline while a hand behind it stays hidden.
     /// </summary>
     public sealed class DemoSessionPanel : MonoBehaviour
     {
@@ -306,9 +307,12 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Renderer sorting order of the shared hands: after the panels' colours and their depth layer.</summary>
         public const int HandSortingOrder = SortingOrder + 1;
         public const string DepthShaderPath = "HapbeatDemoSession/PanelDepth";
+        public const string UiShaderPath = "HapbeatDemoSession/PanelUi";
         private const float MetresPerUnit = 0.001f;
         private const float HoverDepth = 0.08f;
         private static Material _depthMaterial;
+        private static Material _uiMaterial;
+        private static bool _uiMaterialFailed;
         private readonly List<DemoSessionButton> _buttons = new List<DemoSessionButton>();
         private readonly List<GameObject> _content = new List<GameObject>();
         private readonly Dictionary<int, DemoSessionPokeTracker> _pokes = new Dictionary<int, DemoSessionPokeTracker>();
@@ -341,6 +345,7 @@ namespace Hapbeat.DemoSwitch
             panel._background = go.AddComponent<Image>();
             panel._background.color = new Color(0.025f, 0.04f, 0.065f, 0.97f);
             panel._background.raycastTarget = false;
+            DrawOnTop(panel._background);
             for (var index = 0; index < panel._cursors.Length; index++)
             {
                 var cursor = new GameObject("Ray cursor " + index, typeof(RectTransform), typeof(Image)).GetComponent<Image>();
@@ -348,6 +353,7 @@ namespace Hapbeat.DemoSwitch
                 cursor.rectTransform.sizeDelta = new Vector2(9, 9);
                 cursor.color = new Color(0.6f, 0.95f, 1f, 0.95f);
                 cursor.raycastTarget = false;
+                DrawOnTop(cursor);
                 cursor.gameObject.SetActive(false);
                 panel._cursors[index] = cursor;
             }
@@ -357,6 +363,31 @@ namespace Hapbeat.DemoSwitch
 
         /// <summary>The depth-only layer, or null when its shader is missing or unsupported.</summary>
         internal Image DepthLayer => _depth;
+
+        /// <summary>The panels' colour material (<see cref="UiShaderPath"/>), or null when its shader is missing or unsupported.</summary>
+        internal static Material OnTopMaterial
+        {
+            get
+            {
+                if (_uiMaterial != null || _uiMaterialFailed) return _uiMaterial;
+                var shader = Resources.Load<Shader>(UiShaderPath);
+                if (shader == null || !shader.isSupported)
+                {
+                    _uiMaterialFailed = true;
+                    Debug.LogWarning("[Demo Session] Shader " + UiShaderPath + " is missing or unsupported; scene models may hide panels.");
+                    return null;
+                }
+                _uiMaterial = new Material(shader) { name = "Demo Panel UI" };
+                return _uiMaterial;
+            }
+        }
+
+        /// <summary>Draws <paramref name="graphic"/> over the scene (see <see cref="UiShaderPath"/>).</summary>
+        private static void DrawOnTop(Graphic graphic)
+        {
+            var material = OnTopMaterial;
+            if (material != null) graphic.material = material;
+        }
 
         private void CreateDepthLayer()
         {
@@ -407,6 +438,7 @@ namespace Hapbeat.DemoSwitch
             image.rectTransform.anchoredPosition = centre;
             image.color = color;
             image.raycastTarget = false;
+            DrawOnTop(image);
             _content.Add(image.gameObject);
             KeepOverlaysLast();
             return image;
@@ -430,6 +462,7 @@ namespace Hapbeat.DemoSwitch
             rect.anchoredPosition = centre;
             var image = go.GetComponent<Image>();
             image.raycastTarget = false;
+            DrawOnTop(image);
             var text = CreateText("Label", rect, size - new Vector2(10, 4), label, fontSize, Color.white, TextAnchor.MiddleCenter);
             text.resizeTextForBestFit = true;
             text.resizeTextMinSize = Mathf.Max(8, fontSize / 2);
@@ -591,6 +624,7 @@ namespace Hapbeat.DemoSwitch
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Truncate;
             text.raycastTarget = false;
+            DrawOnTop(text);
             return text;
         }
     }
@@ -723,7 +757,59 @@ namespace Hapbeat.DemoSwitch
     }
 
     /// <summary>
-    /// Heading-relative placement of small head-following controls (the haptics button, the Hub's 手前に移動):
+    /// "視線をリセット" button low-left in view, above the haptics button (yaw -30°, pitch -27°, 0.45 m), slowly
+    /// following the head's heading. Visible while <see cref="DemoSession.RecenterUiVisible"/> (default hidden),
+    /// in every runtime including the Hub. Press: <see cref="DemoRecenter.ResetView"/>.
+    /// </summary>
+    internal sealed class DemoSessionRecenterButton : MonoBehaviour
+    {
+        public const string Label = "視線をリセット";
+        public const float YawDegrees = -30f;
+        /// <summary>The haptics button is at 35° (±3.4° tall at 0.45 m); this one (±3.4°) sits above it with a gap.</summary>
+        public const float PitchDegrees = 27f;
+        public const float Distance = 0.45f;
+        private DemoSessionPanel _panel;
+        private bool _placed;
+
+        internal DemoSessionPanel Panel => _panel;
+
+        private void Update()
+        {
+            var camera = Camera.main;
+            var show = DemoSession.RecenterUiVisible && camera != null;
+            if (!show)
+            {
+                if (_panel != null && _panel.gameObject.activeSelf) _panel.gameObject.SetActive(false);
+                _placed = false;
+                return;
+            }
+            if (_panel == null) Build();
+            if (!_panel.gameObject.activeSelf) _panel.gameObject.SetActive(true);
+            DemoHeadingPlacement.Follow(_panel.transform, TargetPose(camera.transform.position, camera.transform.forward), !_placed, Time.unscaledDeltaTime);
+            _placed = true;
+        }
+
+        internal static Pose TargetPose(Vector3 headPosition, Vector3 headForward) =>
+            DemoHeadingPlacement.Target(headPosition, headForward, YawDegrees, PitchDegrees, Distance);
+
+        private void Build()
+        {
+            // Fixed width for the label at the haptics button's font size.
+            _panel = DemoSessionPanel.Create("Hapbeat Recenter Button", new Vector2(172, 54));
+            _panel.AddButton(Vector2.zero, new Vector2(164, 46), Label, 22, DemoRecenter.ResetView);
+            if (Application.isPlaying) DontDestroyOnLoad(_panel.gameObject);
+        }
+
+        private void OnDestroy()
+        {
+            if (_panel == null) return;
+            if (Application.isPlaying) Destroy(_panel.gameObject);
+            else DestroyImmediate(_panel.gameObject);
+        }
+    }
+
+    /// <summary>
+    /// Heading-relative placement of small head-following controls (the haptics and 視線をリセット buttons):
     /// a direction turned by yaw (negative = left) and lowered by pitch from the head's heading, at a distance.
     /// Head pitch is ignored, so looking down at a control keeps it still.
     /// </summary>

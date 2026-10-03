@@ -36,6 +36,7 @@ namespace Hapbeat.DemoSwitch
         public static event Action Closed;
         public static event Action<bool> HapticsEnabledChanged;
         public static event Action<bool> HapticsUiVisibleChanged;
+        public static event Action<bool> RecenterUiVisibleChanged;
 
         /// <summary>Running a step (`index < len(steps)`) of a valid ticket for this demo.</summary>
         public static bool IsActive { get; private set; }
@@ -49,6 +50,8 @@ namespace Hapbeat.DemoSwitch
         public static IReadOnlyDictionary<string, string> Options => _options;
         public static bool HapticsEnabled { get; private set; } = true;
         public static bool HapticsUiVisible { get; private set; }
+        /// <summary>The in-view 視線をリセット button is shown (ticket `recenter_ui`, CONTROL `recenter_ui_show` / `recenter_ui_hide`).</summary>
+        public static bool RecenterUiVisible { get; private set; }
         public static bool IsCompletionShown => _completion != null;
 
         public static DemoSessionNext Next
@@ -64,6 +67,7 @@ namespace Hapbeat.DemoSwitch
         public static string GetOption(string id) => id != null && _options.TryGetValue(id, out var value) ? value : null;
 
         internal static IDemoAppControls HapticsControls { get; } = new DemoSessionHapticsControls();
+        internal static IDemoAppControls RecenterControls { get; } = new DemoSessionRecenterControls();
         internal static string CurrentDemoId => _currentDemoId;
         internal static IDemoSessionPlatform Platform => _platform;
 
@@ -112,6 +116,7 @@ namespace Hapbeat.DemoSwitch
                 Ticket = ticket;
                 IsActive = false;
                 HapticsUiVisible = ticket.HapticsUi;
+                RecenterUiVisible = ticket.RecenterUi;
                 return true;
             }
             var step = ticket.Steps[ticket.Index];
@@ -134,6 +139,7 @@ namespace Hapbeat.DemoSwitch
             IsActive = true;
             HapticsEnabled = true;
             HapticsUiVisible = ticket.HapticsUi;
+            RecenterUiVisible = ticket.RecenterUi;
             Debug.Log("[Demo Session] Step " + (ticket.Index + 1) + " / " + ticket.Steps.Count + " (" + step.DemoId + ") session " + ticket.SessionId);
             return true;
         }
@@ -152,10 +158,13 @@ namespace Hapbeat.DemoSwitch
             _host = null;
             HapticsEnabled = true;
             HapticsUiVisible = false;
+            RecenterUiVisible = false;
             CompletionShown = null;
             Closed = null;
             HapticsEnabledChanged = null;
             HapticsUiVisibleChanged = null;
+            RecenterUiVisibleChanged = null;
+            DemoRecenter.ResetForTests();
         }
 
         public static void RegisterHost(IDemoSessionHost host)
@@ -191,6 +200,13 @@ namespace Hapbeat.DemoSwitch
             if (HapticsUiVisible == visible) return;
             HapticsUiVisible = visible;
             HapticsUiVisibleChanged?.Invoke(visible);
+        }
+
+        public static void SetRecenterUiVisible(bool visible)
+        {
+            if (RecenterUiVisible == visible) return;
+            RecenterUiVisible = visible;
+            RecenterUiVisibleChanged?.Invoke(visible);
         }
 
         /// <summary>Shows the completion panel (scene anchor, else in front of the user). Session mode only; closes a shown pause first.</summary>
@@ -239,14 +255,14 @@ namespace Hapbeat.DemoSwitch
         public static bool LaunchNext(out string error, Action<string> onFailed = null)
         {
             if (!IsActive) { error = "Demo Session is not active."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible), out error, onFailed);
+            return LaunchTicket(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible).WithRecenterUi(RecenterUiVisible), out error, onFailed);
         }
 
         /// <summary>Launches the finish runtime with the all-complete ticket.</summary>
         public static bool LaunchFinish(out string error, Action<string> onFailed = null)
         {
             if (Ticket == null) { error = "No Demo Session ticket."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible), out error, onFailed);
+            return LaunchTicket(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible).WithRecenterUi(RecenterUiVisible), out error, onFailed);
         }
 
         /// <summary>
@@ -285,6 +301,17 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        internal static bool ApplyRecenterAction(string action)
+        {
+            switch (action)
+            {
+                case "recenter": DemoRecenter.ResetView(); return true;
+                case "recenter_ui_show": SetRecenterUiVisible(true); return true;
+                case "recenter_ui_hide": SetRecenterUiVisible(false); return true;
+                default: return false;
+            }
+        }
+
         /// <summary>CONTROL adapter for `haptics_*`; it bypasses the scene's IDemoAppControls.</summary>
         private sealed class DemoSessionHapticsControls : IDemoAppControls
         {
@@ -295,6 +322,23 @@ namespace Hapbeat.DemoSwitch
             {
                 if (!CanExecuteControl(action, sceneId) || !ApplyHapticsAction(action))
                     throw new InvalidOperationException("Unsupported haptics control.");
+                yield break;
+            }
+        }
+
+        /// <summary>
+        /// CONTROL adapter for `recenter`, `recenter_ui_show` and `recenter_ui_hide`, accepted by every runtime
+        /// with this package (no descriptor or scene adapter needed); it bypasses the scene's IDemoAppControls.
+        /// </summary>
+        private sealed class DemoSessionRecenterControls : IDemoAppControls
+        {
+            public bool CanExecuteControl(string action, string sceneId) =>
+                sceneId == string.Empty && DemoSwitchProtocol.IsRecenterAction(action);
+
+            public IEnumerator ExecuteControl(string action, string sceneId)
+            {
+                if (!CanExecuteControl(action, sceneId) || !ApplyRecenterAction(action))
+                    throw new InvalidOperationException("Unsupported recenter control.");
                 yield break;
             }
         }

@@ -373,10 +373,14 @@ namespace Hapbeat.DemoSwitch
         }
 
         public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
-            || action == "recenter" || action == "restart" || action == "scene" || IsHapticsAction(action);
+            || action == "restart" || action == "scene" || IsHapticsAction(action) || IsRecenterAction(action);
 
         public static bool IsHapticsAction(string action) => action == "haptics_on" || action == "haptics_off"
             || action == "haptics_ui_show" || action == "haptics_ui_hide";
+
+        /// <summary>`recenter` (視線をリセット) and the visibility of its in-view button.</summary>
+        public static bool IsRecenterAction(string action) => action == "recenter"
+            || action == "recenter_ui_show" || action == "recenter_ui_hide";
 
         public static string Canonicalize(DemoSwitchCommand command) =>
             "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +

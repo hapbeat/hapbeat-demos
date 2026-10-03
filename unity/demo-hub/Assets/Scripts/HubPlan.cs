@@ -152,7 +152,7 @@ namespace Hapbeat.DemoHub
         /// (contract). Returns null when no step is installed.
         /// </summary>
         public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi,
-            DemoHandStyle handStyle)
+            DemoHandStyle handStyle, bool recenterUi)
         {
             var steps = new List<DemoSessionStep>();
             foreach (var step in Steps)
@@ -163,7 +163,7 @@ namespace Hapbeat.DemoHub
                     .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), null);
                 steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry), entry.PackageName, entry.ActivityName, options, step.Retry));
             }
-            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle);
+            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle, recenterUi);
         }
 
         public string ToJson()

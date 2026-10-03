@@ -1,7 +1,8 @@
 // Depth-only layer of a DemoSessionPanel: the canvas's last child, drawn after the panel's colours,
 // writes the panel plane into the depth buffer without touching colour. World-space UI otherwise
 // writes no depth, so the shared hands (drawn after the panels) would show through a panel they are
-// behind; with this layer they are hidden behind it and drawn over it when in front.
+// behind; with this layer they are hidden behind it and drawn over it when in front. ZTest Always, like
+// the panel's colours (PanelUi.shader): the panel plane replaces the depth of scene models in front of it.
 Shader "Hidden/Hapbeat/DemoPanelDepth"
 {
     Properties
@@ -14,7 +15,7 @@ Shader "Hidden/Hapbeat/DemoPanelDepth"
         Pass
         {
             ZWrite On
-            ZTest LEqual
+            ZTest Always
             ColorMask 0
             Cull Off
 

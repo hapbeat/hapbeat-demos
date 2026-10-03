@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Unity.XR.CoreUtils;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.XR;
 
 namespace Hapbeat.DemoSwitch
@@ -12,6 +14,7 @@ namespace Hapbeat.DemoSwitch
     /// also from a jump of the head pose in tracking space within one ordinary frame. Listeners are
     /// notified every frame for <see cref="SettleSeconds"/> so that the origin change and a demo's own
     /// re-alignment are taken in. The open pause and completion panels go in front of the HMD again.
+    /// <see cref="ResetView"/> is the app-space 視線をリセット (button and CONTROL `recenter`).
     /// </summary>
     public static class DemoRecenter
     {
@@ -22,8 +25,82 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Longer frames (loading, returning from the background) are not compared.</summary>
         public const float MaxFrameSeconds = 0.05f;
 
-        /// <summary>Raised every frame while a recenter settles (also by tracking recovery jumps).</summary>
+        /// <summary>Raised every frame while a recenter settles (also by tracking recovery jumps and 視線をリセット).</summary>
         public static event Action Recentered;
+
+        /// <summary>Realtime until which <see cref="Notify"/> runs every frame (<see cref="DemoRecenterWatch"/>).</summary>
+        internal static float SettleUntil = -1f;
+        private static Transform _startRig;
+        private static Vector3 _startPosition;
+        private static Vector3 _startForward;
+
+        internal static void ResetForTests()
+        {
+            SettleUntil = -1f;
+            _startRig = null;
+        }
+
+        /// <summary>
+        /// 視線をリセット: the current head position and heading become this runtime's start position and front
+        /// (app space; the floor height and the OS tracking origin stay). The registered host's
+        /// <see cref="IDemoSessionRecenter"/> wins; otherwise the scene's <see cref="XrStartAlignment"/> aligns again;
+        /// otherwise the XR Origin is turned and moved so the head is at the origin's pose when the scene loaded.
+        /// The Hub has no start pose: only its panel moves. Then the open panels go in front, as after a system recenter.
+        /// </summary>
+        public static void ResetView()
+        {
+            Debug.Log("[Demo Session] DEMO_SESSION_RESET_VIEW");
+            if (DemoSession.CurrentDemoId != DemoSwitchSettings.HubDemoId)
+            {
+                if (DemoSession.CurrentHost is IDemoSessionRecenter own) own.RecenterToStart();
+                else if (!XrStartAlignment.TryRealignActive()) AlignToStart();
+            }
+            SettleUntil = Time.realtimeSinceStartup + SettleSeconds;
+            Notify();
+        }
+
+        /// <summary>Remembers the rig's pose when a scene brings a new XR Origin (its authored start pose).</summary>
+        internal static void CaptureStart()
+        {
+            var rig = FindRig(out _);
+            if (rig == null || rig == _startRig) return;
+            _startRig = rig;
+            _startPosition = rig.position;
+            _startForward = rig.forward;
+        }
+
+        private static void AlignToStart()
+        {
+            var rig = FindRig(out var head);
+            if (rig == null || head == null)
+            {
+                Debug.LogWarning("[Demo Session] 視線をリセット: no XR Origin or head camera in the scene.");
+                return;
+            }
+            CaptureStart();
+            AlignRig(rig, head, _startPosition, _startForward);
+        }
+
+        /// <summary>Turns <paramref name="rig"/> about the head, then moves it horizontally, so the head is at <paramref name="startPosition"/> facing <paramref name="startForward"/>.</summary>
+        internal static void AlignRig(Transform rig, Transform head, Vector3 startPosition, Vector3 startForward)
+        {
+            rig.RotateAround(head.position, Vector3.up, XrStartAlignment.ComputeYaw(head.forward, startForward, Vector3.up));
+            rig.position += XrStartAlignment.ComputeHorizontalDelta(head.position, startPosition);
+        }
+
+        /// <summary>The XR Origin (or the head camera's parent) and the head camera.</summary>
+        private static Transform FindRig(out Transform head)
+        {
+            var origin = UnityEngine.Object.FindAnyObjectByType<XROrigin>();
+            if (origin != null && origin.Camera != null)
+            {
+                head = origin.Camera.transform;
+                return origin.Origin != null ? origin.Origin.transform : origin.transform;
+            }
+            var camera = Camera.main;
+            head = camera != null ? camera.transform : null;
+            return head != null ? head.parent : null;
+        }
 
         internal static void Notify()
         {
@@ -56,7 +133,6 @@ namespace Hapbeat.DemoSwitch
         private readonly List<XRInputSubsystem> _found = new List<XRInputSubsystem>();
         private readonly List<XRInputSubsystem> _subscribed = new List<XRInputSubsystem>();
         private bool _originUpdated;
-        private float _settleUntil = -1f;
         private float _nextScan;
         private bool _hasHead;
         private Vector3 _headPosition;
@@ -77,6 +153,12 @@ namespace Hapbeat.DemoSwitch
 
         private void OnTrackingOriginUpdated(XRInputSubsystem subsystem) => _originUpdated = true;
 
+        private void OnEnable() => SceneManager.sceneLoaded += OnSceneLoaded;
+
+        private void OnDisable() => SceneManager.sceneLoaded -= OnSceneLoaded;
+
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode) => DemoRecenter.CaptureStart();
+
         private void LateUpdate()
         {
             var source = _originUpdated ? "tracking origin updated" : null;
@@ -95,9 +177,9 @@ namespace Hapbeat.DemoSwitch
             if (source != null)
             {
                 Debug.Log("[Demo Session] DEMO_SESSION_RECENTER (" + source + ")");
-                _settleUntil = now + DemoRecenter.SettleSeconds;
+                DemoRecenter.SettleUntil = now + DemoRecenter.SettleSeconds;
             }
-            if (now <= _settleUntil) DemoRecenter.Notify();
+            if (now <= DemoRecenter.SettleUntil) DemoRecenter.Notify();
         }
 
         /// <summary>The HMD pose in tracking space.</summary>

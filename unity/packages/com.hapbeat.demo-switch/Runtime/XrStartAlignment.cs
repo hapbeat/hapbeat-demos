@@ -7,7 +7,8 @@ namespace Hapbeat.DemoSwitch
 {
     /// <summary>
     /// Aligns the first tracked HMD frame with a scene-authored X/Z and yaw anchor.
-    /// A later alignment is requested only when Demo Switch reads a fresh launch context.
+    /// A later alignment is requested only when Demo Switch reads a fresh launch context, or by 視線をリセット
+    /// (<see cref="DemoRecenter.ResetView"/>) when the scene host has no <see cref="IDemoSessionRecenter"/>.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class XrStartAlignment : MonoBehaviour
@@ -64,6 +65,18 @@ namespace Hapbeat.DemoSwitch
             }
 
             _alignmentCoroutine = null;
+        }
+
+        /// <summary>視線をリセット (<see cref="DemoRecenter.ResetView"/>): the first active alignment aligns again; false when the scene has none.</summary>
+        internal static bool TryRealignActive()
+        {
+            foreach (var alignment in FindObjectsByType<XrStartAlignment>(FindObjectsSortMode.InstanceID))
+            {
+                if (!alignment.isActiveAndEnabled) continue;
+                alignment.RequestAlignment();
+                return true;
+            }
+            return false;
         }
 
         private bool TryResolveSceneReferences()

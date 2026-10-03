@@ -60,6 +60,16 @@ namespace Hapbeat.DemoSwitch.Tests
             public void SetGameplayPaused(bool paused) => Paused = paused;
         }
 
+        sealed class RecenterHost : IDemoSessionHost, IDemoSessionRecenter
+        {
+            public int Recenters;
+            public void ApplyOptions(IReadOnlyDictionary<string, string> options) { }
+            public void Restart() { }
+            public void SetHapticsEnabled(bool enabled) { }
+            public void SetGameplayPaused(bool paused) { }
+            public void RecenterToStart() => Recenters++;
+        }
+
         FakePlatform _platform;
 
         static DemoSessionDescriptor Volley()
@@ -900,6 +910,219 @@ namespace Hapbeat.DemoSwitch.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        [Test]
+        public void RecenterUiIsOptionalAndCarriedToTheNextStep()
+        {
+            Assert.That(DemoSessionTicket.TryParse(Ticket, out var plain, out var error), Is.True, error);
+            Assert.That(plain.RecenterUi, Is.False, "Omitted: hidden.");
+            Assert.That(plain.ToJson(), Does.Not.Contain("recenter_ui"));
+            var shown = Ticket.Replace(@"""haptics_ui"":false", @"""haptics_ui"":false,""recenter_ui"":true");
+            Assert.That(DemoSessionTicket.TryParse(shown, out var ticket, out error), Is.True, error);
+            Assert.That(ticket.RecenterUi, Is.True);
+            Assert.That(ticket.WithIndex(2, false).RecenterUi, Is.True);
+            Assert.That(ticket.WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(DemoHandStyle.Skin).RecenterUi, Is.True);
+            Assert.That(DemoSessionTicket.TryParse(ticket.WithRecenterUi(false).ToJson(), out var hidden, out error), Is.True, error);
+            Assert.That(hidden.RecenterUi, Is.False);
+            Assert.That(DemoSessionTicket.TryParse(shown.Replace(@"""recenter_ui"":true", @"""recenter_ui"":""yes"""), out _, out error), Is.False);
+            Assert.That(error, Does.Contain("recenter_ui"));
+
+            Assert.That(DemoSession.TryBegin(shown.Replace(@"""index"":1", @"""index"":0"), "volley", Volley(), out error), Is.True, error);
+            Assert.That(DemoSession.RecenterUiVisible, Is.True, "The ticket sets the button.");
+            DemoSession.SetRecenterUiVisible(false);
+            Assert.That(DemoSession.LaunchNext(out error), Is.True, error);
+            Assert.That(DemoSessionTicket.TryParse(_platform.LaunchedTicket, out var sent, out error), Is.True, error);
+            Assert.That(sent.RecenterUi, Is.False, "The current state goes to the next step.");
+
+            DemoSession.ResetForTests(_platform);
+            Assert.That(DemoSession.TryBegin(AtIndex(2).Replace(@"""haptics_ui"":false", @"""haptics_ui"":false,""recenter_ui"":true"), DemoSwitchSettings.HubDemoId, null, out error), Is.True, error);
+            Assert.That(DemoSession.RecenterUiVisible, Is.True, "The finish runtime too.");
+        }
+
+        [Test]
+        public void RecenterControlsWorkInEveryRuntimeWithoutAdapter()
+        {
+            foreach (var action in new[] { "recenter", "recenter_ui_show", "recenter_ui_hide" })
+            {
+                var json = "{\"version\":1,\"type\":\"CONTROL\",\"controller_id\":\"m5-main\",\"seq\":5,\"demo_id\":\"volley\",\"action\":\"" + action + "\",\"scene_id\":\"\"}";
+                Assert.That(DemoSwitchProtocol.ParseCommand(json).Success, Is.True, action);
+                Assert.That(DemoSwitchProtocol.ParseCommand(json.Replace("\"scene_id\":\"\"", "\"scene_id\":\"block\"")).Success, Is.False, action);
+                Assert.That(DemoSwitchProtocol.IsRecenterAction(action), Is.True);
+                Assert.That(DemoSwitchProtocol.IsHapticsAction(action), Is.False);
+                Assert.That(DemoSession.RecenterControls.CanExecuteControl(action, ""), Is.True, "No descriptor or session needed.");
+                Assert.That(DemoSession.RecenterControls.CanExecuteControl(action, "block"), Is.False);
+            }
+            Assert.That(DemoSession.RecenterControls.CanExecuteControl("haptics_on", ""), Is.False);
+            Assert.That(DemoSession.RecenterControls.CanExecuteControl("menu_open", ""), Is.False);
+
+            var changes = new List<bool>();
+            DemoSession.RecenterUiVisibleChanged += visible => changes.Add(visible);
+            Run(DemoSession.RecenterControls.ExecuteControl("recenter_ui_show", ""));
+            Assert.That(DemoSession.RecenterUiVisible, Is.True);
+            Run(DemoSession.RecenterControls.ExecuteControl("recenter_ui_hide", ""));
+            Assert.That(DemoSession.RecenterUiVisible, Is.False);
+            Assert.That(changes, Is.EqualTo(new[] { true, false }));
+
+            DemoSession.ResetForTests(_platform, "volley");
+            var host = new RecenterHost();
+            DemoSession.RegisterHost(host);
+            Run(DemoSession.RecenterControls.ExecuteControl("recenter", ""));
+            Assert.That(host.Recenters, Is.EqualTo(1), "CONTROL recenter runs the demo's own start alignment.");
+        }
+
+        [Test]
+        public void ResetViewUsesTheHostAndPlacesPanelsInFront()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            var notified = 0;
+            System.Action onRecentered = () => notified++;
+            DemoRecenter.Recentered += onRecentered;
+            try
+            {
+                DemoSession.ResetForTests(_platform, "volley");
+                var host = new RecenterHost();
+                DemoSession.RegisterHost(host);
+                DemoPause.Pause();
+                Camera.main.transform.SetPositionAndRotation(new Vector3(0.6f, 1.5f, 0.3f), Quaternion.LookRotation(Vector3.left));
+                DemoRecenter.ResetView();
+                Assert.That(host.Recenters, Is.EqualTo(1));
+                Assert.That(notified, Is.EqualTo(1), "Listeners move their panels too (the Hub).");
+                Assert.That(DemoRecenter.SettleUntil, Is.GreaterThan(Time.realtimeSinceStartup), "The panels follow the alignment for a moment.");
+                AssertInFrontOfHead(DemoPause.Panel.transform, DemoPausePanel.Distance, DemoPausePanel.Drop, "The open pause panel goes in front.");
+                DemoPause.Resume();
+
+                DemoSession.ResetForTests(_platform, DemoSwitchSettings.HubDemoId);
+                host = new RecenterHost();
+                DemoSession.RegisterHost(host);
+                DemoRecenter.ResetView();
+                Assert.That(host.Recenters, Is.Zero, "The Hub only moves its panel.");
+                Assert.That(notified, Is.EqualTo(2));
+            }
+            finally
+            {
+                DemoRecenter.Recentered -= onRecentered;
+                Object.DestroyImmediate(camera);
+            }
+        }
+
+        [Test]
+        public void DefaultAlignmentPutsTheHeadAtTheStartPoseKeepingHeight()
+        {
+            var rig = new GameObject("test rig");
+            var head = new GameObject("test head");
+            try
+            {
+                head.transform.SetParent(rig.transform, false);
+                rig.transform.SetPositionAndRotation(new Vector3(2f, 0.1f, -1f), Quaternion.Euler(0, 70, 0));
+                head.transform.localPosition = new Vector3(0.4f, 1.6f, -0.3f);
+                head.transform.localRotation = Quaternion.Euler(20, -35, 5);
+                var start = new Vector3(-1f, 0f, 3f);
+                var front = Quaternion.Euler(0, 200, 0) * Vector3.forward;
+                var height = head.transform.position.y;
+                var rigHeight = rig.transform.position.y;
+                DemoRecenter.AlignRig(rig.transform, head.transform, start, front);
+                Assert.That(head.transform.position.x, Is.EqualTo(start.x).Within(1e-4f));
+                Assert.That(head.transform.position.z, Is.EqualTo(start.z).Within(1e-4f));
+                Assert.That(head.transform.position.y, Is.EqualTo(height).Within(1e-4f), "Floor height unchanged.");
+                Assert.That(rig.transform.position.y, Is.EqualTo(rigHeight).Within(1e-4f));
+                var heading = Vector3.ProjectOnPlane(head.transform.forward, Vector3.up).normalized;
+                Assert.That(Vector3.Angle(heading, front), Is.LessThan(0.01f), "The head faces the start front.");
+                Assert.That(Vector3.Angle(rig.transform.up, Vector3.up), Is.LessThan(0.01f), "Yaw only.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(head);
+                Object.DestroyImmediate(rig);
+            }
+        }
+
+        [Test]
+        public void RecenterButtonSitsAboveTheHapticsButtonAndIsHiddenByDefault()
+        {
+            var pose = DemoSessionRecenterButton.TargetPose(Vector3.up * 1.6f, Vector3.forward);
+            var offset = pose.position - Vector3.up * 1.6f;
+            Assert.That(offset.magnitude, Is.EqualTo(DemoSessionRecenterButton.Distance).Within(1e-4f));
+            Assert.That(offset.x, Is.LessThan(0f), "Left");
+            var pitch = Mathf.Asin(-offset.y / offset.magnitude) * Mathf.Rad2Deg;
+            Assert.That(pitch, Is.EqualTo(27f).Within(0.1f));
+            // Both panels are 54 mm tall: half-heights in degrees at 0.45 m.
+            var half = Mathf.Atan2(0.027f, 0.45f) * Mathf.Rad2Deg;
+            Assert.That(DemoSessionHapticsButton.PitchDegrees - half, Is.GreaterThan(pitch + half), "Above the haptics button with a gap.");
+            Assert.That(DemoSessionRecenterButton.Label, Is.EqualTo("視線をリセット"));
+
+            var go = new GameObject("recenter button");
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            try
+            {
+                var button = go.AddComponent<DemoSessionRecenterButton>();
+                var update = typeof(DemoSessionRecenterButton).GetMethod("Update", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                update.Invoke(button, null);
+                Assert.That(button.Panel, Is.Null, "Hidden by default.");
+                DemoSession.SetRecenterUiVisible(true);
+                update.Invoke(button, null);
+                Assert.That(button.Panel.gameObject.activeSelf, Is.True);
+                Assert.That(button.Panel.Buttons.Single().Label, Is.EqualTo("視線をリセット"));
+                DemoSession.SetRecenterUiVisible(false);
+                update.Invoke(button, null);
+                Assert.That(button.Panel.gameObject.activeSelf, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(camera);
+            }
+        }
+
+        [Test]
+        public void PanelsDrawOnTopOfTheScene()
+        {
+            var panel = DemoSessionPanel.Create("test panel", new Vector2(300, 200));
+            try
+            {
+                var button = panel.AddButton(Vector2.zero, new Vector2(120, 60), "OK", 20, null);
+                var text = panel.AddText(new Vector2(0, 60), new Vector2(200, 30), "text", 16, Color.white);
+                var rect = panel.AddRect(new Vector2(0, -60), new Vector2(200, 4), Color.white);
+                var graphics = panel.GetComponentsInChildren<UnityEngine.UI.Graphic>(true).Where(g => g != panel.DepthLayer).ToArray();
+                Assert.That(graphics.Length, Is.GreaterThanOrEqualTo(6), "Background, cursors, button, label, text, rect.");
+                foreach (var graphic in graphics)
+                    Assert.That(graphic.material.shader.name, Is.EqualTo("Hidden/Hapbeat/DemoPanelUi"), graphic.name);
+                Assert.That(DemoSessionPanel.OnTopMaterial.shader.isSupported, Is.True);
+                Assert.That(button.Text.material, Is.SameAs(DemoSessionPanel.OnTopMaterial));
+                Assert.That(text.material, Is.SameAs(DemoSessionPanel.OnTopMaterial));
+                Assert.That(rect.material, Is.SameAs(DemoSessionPanel.OnTopMaterial));
+                Assert.That(panel.DepthLayer.material.shader.name, Is.EqualTo("Hidden/Hapbeat/DemoPanelDepth"));
+            }
+            finally { Object.DestroyImmediate(panel.gameObject); }
+        }
+
+        [Test]
+        public void PausePanelAcceptsInputWhileTimeIsStopped()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            var previous = Time.timeScale;
+            try
+            {
+                var host = new Host();
+                DemoSession.RegisterHost(host);
+                // A demo's own pause (e.g. Volley's menu) stops time; the shared panels and hands use real time.
+                Time.timeScale = 0f;
+                DemoPause.Pause();
+                var panel = DemoPause.Panel;
+                var resume = panel.ResumeButton.Rect;
+                var now = Time.realtimeSinceStartup + DemoPausePanel.InputDelaySeconds + 0.1f;
+                var front = resume.position - panel.transform.forward * 0.03f;
+                var through = resume.position + panel.transform.forward * 0.002f;
+                panel.Panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = front } }, now);
+                panel.Panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = through } }, now);
+                Assert.That(DemoPause.IsPaused, Is.False, "再開 pressed by a fingertip with time stopped.");
+                Assert.That(host.Paused, Is.False);
+            }
+            finally
+            {
+                Time.timeScale = previous;
+                Object.DestroyImmediate(camera);
+            }
+        }
+
 #if UNITY_ANDROID
         [Test]
         public void ManifestQueryForTheHubIsAddedOnce()
@@ -917,7 +1140,7 @@ namespace Hapbeat.DemoSwitch.Tests
         {
             var font = DemoSessionFont.Get();
             Assert.That(font.name, Does.Contain("Noto"));
-            foreach (var character in "体験完了もう一度次へ：デモを終了触覚ONOFF起動できませんでした/0123456789一時停止再開最初からやり直すHubに戻る")
+            foreach (var character in "体験完了もう一度次へ：デモを終了触覚ONOFF起動できませんでした/0123456789一時停止再開最初からやり直すHubに戻る視線をリセット")
                 Assert.That(font.HasCharacter(character), Is.True, character.ToString());
         }
     }

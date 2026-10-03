@@ -45,7 +45,8 @@ namespace Hapbeat.DemoHub
         public const string StaffWaitingOff = "スタッフ待機モード：OFF";
         public const string HandStyleGhost = "手の見た目：ゴースト";
         public const string HandStyleSkin = "手の見た目：肌";
-        public const string Recenter = "手前に移動";
+        public const string RecenterUiOn = "視線リセットボタン：表示する";
+        public const string RecenterUiOff = "視線リセットボタン：表示しない";
         public const string Done = "完了";
         public const string SaveFailed = "保存できませんでした";
         public const string FinishedMessage = "体験は以上です。\nヘッドセットを外してください";
@@ -65,8 +66,8 @@ namespace Hapbeat.DemoHub
     /// and the finish screen follows a completed multi-step session. With staff waiting mode on, the top
     /// screen is the M5 waiting room instead. M5 SWITCH keeps working in every screen.
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
-    /// then stays put; 手前に移動 (a small head-following key at the lower left of view) and a system
-    /// recenter place it in front of the head again.
+    /// then stays put; the package's 視線をリセット button (shown when the manage screen turns it on) and a
+    /// system recenter place it in front of the head again.
     /// </summary>
     public sealed class DemoHubController : MonoBehaviour
     {
@@ -95,7 +96,7 @@ namespace Hapbeat.DemoHub
         private const float BarHeight = 44f;
         private const float HeadingHeight = 26f;
         private const float StatusHeight = 22f;
-        private const float FooterButtonWidth = 230f;
+        private const float FooterButtonWidth = 190f;
         private const float DoneWidth = 120f;
         private const float FooterGap = 8f;
         /// <summary>Long press on a row's grip before it can be dragged.</summary>
@@ -124,7 +125,6 @@ namespace Hapbeat.DemoHub
         private readonly HubHoldGesture _dragHold = new HubHoldGesture(DragHoldSeconds);
         private readonly List<DemoSessionButton> _grips = new List<DemoSessionButton>();
         private DemoSessionPanel _panel;
-        private DemoSessionPanel _recenterKey;
         private HubScreen? _builtScreen;
         private int _dragCandidate = -1;
         private int _dragFrom = -1;
@@ -145,8 +145,6 @@ namespace Hapbeat.DemoHub
         /// <summary>The preset shown in the manage screen (the last preset while the tiles tab is open).</summary>
         public HubPlan EditedPlan => _presets[Mathf.Min(_tab, HubPlanStore.PresetCount - 1)];
         internal DemoSessionPanel Panel => _panel;
-        /// <summary>The head-following 手前に移動 key (null until the first frame with a camera).</summary>
-        internal DemoSessionPanel RecenterKey => _recenterKey;
         internal DemoSessionButton ManageButton => _manageButton;
         /// <summary>Plan row being dragged (-1: none).</summary>
         internal int DragFrom => _dragFrom;
@@ -156,7 +154,7 @@ namespace Hapbeat.DemoHub
         internal int Tab => _tab;
         /// <summary>Plan row whose options the manage screen edits (-1: none).</summary>
         internal int SelectedStep => _selectedStep;
-        /// <summary>The panel has its final place (head tracking was valid); it moves again only on 手前に移動.</summary>
+        /// <summary>The panel has its final place (head tracking was valid); it moves again only on 視線をリセット or a system recenter.</summary>
         internal bool Placed => _placed;
 
         public HubPlan Preset(int number) => _presets[number - 1];
@@ -176,7 +174,11 @@ namespace Hapbeat.DemoHub
             Settings = _store.LoadSettings();
             for (var number = 1; number <= HubPlanStore.PresetCount; number++) _presets[number - 1] = _store.LoadPreset(number);
             ApplyHandStyle();
+            ApplyRecenterUi();
         }
+
+        /// <summary>The Hub's own 視線をリセット button follows the manage-screen choice, like every launch's `recenter_ui`.</summary>
+        private void ApplyRecenterUi() => DemoSession.SetRecenterUiVisible(Settings.RecenterUi);
 
         /// <summary>The Hub's own shared hands follow the manage-screen choice (ticket hand_style is for the demos).</summary>
         private void ApplyHandStyle()
@@ -196,7 +198,6 @@ namespace Hapbeat.DemoHub
         {
             var camera = Camera.main;
             TickPlacement(camera != null ? camera.transform : null, Application.isEditor || IsHeadTracked());
-            if (camera != null) TickRecenterKey(camera.transform, Time.unscaledDeltaTime);
             UpdateManageHold(Time.realtimeSinceStartup);
             UpdateDrag(Time.realtimeSinceStartup);
         }
@@ -212,34 +213,18 @@ namespace Hapbeat.DemoHub
             _placed = tracked;
         }
 
-        /// <summary>手前に移動: the only move after the first placement.</summary>
+        /// <summary>視線をリセット and a system recenter: the only moves after the first placement.</summary>
         internal void PlaceInFrontOf(Transform head)
         {
             var pose = HubPanelPlacement.Target(head.position, head.forward, head.up);
             _panel.transform.SetPositionAndRotation(pose.position, pose.rotation);
         }
 
-        /// <summary>手前に移動 and a system recenter.</summary>
+        /// <summary>視線をリセット (the package's button or CONTROL `recenter`) and a system recenter (<see cref="DemoRecenter.Recentered"/>).</summary>
         private void Recenter()
         {
             var camera = Camera.main;
             if (camera != null && _panel != null) PlaceInFrontOf(camera.transform);
-        }
-
-        /// <summary>
-        /// 手前に移動 follows the head's heading at the lower left of view like the shared haptics button,
-        /// above it so the two never overlap (the Hub shows no haptics button, but the place is reserved).
-        /// </summary>
-        internal void TickRecenterKey(Transform head, float deltaTime)
-        {
-            var snap = _recenterKey == null;
-            if (snap)
-            {
-                _recenterKey = DemoSessionPanel.Create("Hub Recenter Key", new Vector2(HubRecenterKey.Width + 8f, RowHeight + 8f));
-                _recenterKey.GlyphPixelsPerMillimetre = GlyphPixelsPerMillimetre;
-                _recenterKey.AddButton(Vector2.zero, new Vector2(HubRecenterKey.Width, RowHeight), HubText.Recenter, 16, Recenter);
-            }
-            DemoHeadingPlacement.Follow(_recenterKey.transform, HubRecenterKey.Target(head.position, head.forward), snap, deltaTime);
         }
 
         /// <summary>Long press on 管理: the button label shows the hold progress, 1 s opens the manage screen.</summary>
@@ -397,11 +382,11 @@ namespace Hapbeat.DemoHub
             value == DemoDeviceAddress.Unspecified ? HubText.Unspecified : value.ToString(CultureInfo.InvariantCulture);
 
         internal void StartPreset(int number) =>
-            Launch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle));
+            Launch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi));
 
         /// <summary>A demo tile is a one-step session: descriptor defaults, retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
-            Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle));
+            Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi));
 
         private static DemoSessionComponent Finish() =>
             DemoSessionCatalog.TryGetOwnComponent(out var finish) ? finish : new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
@@ -430,7 +415,7 @@ namespace Hapbeat.DemoHub
         /// </summary>
         internal Vector2 ManageSize => new Vector2(
             Mathf.Max(Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
-                Margin + 3f * (FooterButtonWidth + FooterGap) + DoneWidth + Margin,
+                Margin + 4f * (FooterButtonWidth + FooterGap) + DoneWidth + Margin,
                 Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + Margin),
             Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + 4f + StatusHeight + Margin);
 
@@ -498,6 +483,12 @@ namespace Hapbeat.DemoHub
             }
             Footer(FooterButtonWidth, Settings.HapticsUi ? HubText.HapticsUiOn : HubText.HapticsUiOff, 18,
                 () => { Settings.HapticsUi = !Settings.HapticsUi; SettingsChanged(); }).Highlighted = Settings.HapticsUi;
+            Footer(FooterButtonWidth, Settings.RecenterUi ? HubText.RecenterUiOn : HubText.RecenterUiOff, 18, () =>
+            {
+                Settings.RecenterUi = !Settings.RecenterUi;
+                ApplyRecenterUi();
+                SettingsChanged();
+            }).Highlighted = Settings.RecenterUi;
             Footer(FooterButtonWidth, Settings.StaffWaiting ? HubText.StaffWaitingOn : HubText.StaffWaitingOff, 18,
                 () => { Settings.StaffWaiting = !Settings.StaffWaiting; SettingsChanged(); }).Highlighted = Settings.StaffWaiting;
             Footer(FooterButtonWidth, Settings.HandStyle == DemoHandStyle.Skin ? HubText.HandStyleSkin : HubText.HandStyleGhost, 18, () =>
@@ -763,38 +754,23 @@ namespace Hapbeat.DemoHub
             _panel.AddText(new Vector2(0, -160), new Vector2(500, 24), _status, 15, Warning);
         }
 
-        /// <summary>Same steps as the completed ticket, new session ID, index 0, the current haptics UI and hand settings.</summary>
+        /// <summary>Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI and hand settings.</summary>
         internal void RestartFinishedSession()
         {
             var finished = DemoSession.Ticket;
             if (finished == null) { Show(HubScreen.Top); return; }
-            var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle);
+            var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle)
+                .WithRecenterUi(Settings.RecenterUi);
             if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
         }
 
         private void OnDestroy()
         {
             DemoRecenter.Recentered -= Recenter;
-            foreach (var panel in new[] { _panel, _recenterKey })
-            {
-                if (panel == null) continue;
-                if (Application.isPlaying) Destroy(panel.gameObject);
-                else DestroyImmediate(panel.gameObject);
-            }
+            if (_panel == null) return;
+            if (Application.isPlaying) Destroy(_panel.gameObject);
+            else DestroyImmediate(_panel.gameObject);
         }
-    }
-
-    /// <summary>Where the head-following 手前に移動 key sits: lower left of view, above the shared haptics button.</summary>
-    public static class HubRecenterKey
-    {
-        public const float YawDegrees = -30f;
-        /// <summary>The haptics button is at 35° (±3.4° tall at 0.45 m); this key (±2.5°) sits above it with a gap.</summary>
-        public const float PitchDegrees = 27f;
-        public const float Distance = 0.45f;
-        public const float Width = 112f;
-
-        public static Pose Target(Vector3 headPosition, Vector3 headForward) =>
-            DemoHeadingPlacement.Target(headPosition, headForward, YawDegrees, PitchDegrees, Distance);
     }
 
     public static class HubIdentity

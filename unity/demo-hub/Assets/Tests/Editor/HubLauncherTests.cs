@@ -59,7 +59,7 @@ namespace Hapbeat.DemoHub.Tests
         public void TileStartsAOneStepSessionWithDescriptorDefaults()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost);
+            var ticket = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost, false);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.True);
@@ -71,17 +71,21 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Finish.ActivityName, Is.EqualTo(HubIdentity.ActivityName));
             Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley ブロック 7点先取"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
+            Assert.That(parsed.RecenterUi, Is.False);
+            var shown = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true);
+            Assert.That(DemoSessionTicket.TryParse(shown.ToJson(), out parsed, out error), Is.True, error);
+            Assert.That(parsed.RecenterUi, Is.True);
         }
 
         [Test]
         public void FinishedTileReturnsToTopAndFinishedPlanShowsFinishScreen()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var single = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost);
+            var single = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false);
             var plan = new HubPlan();
             plan.Add(_volley);
             plan.Add(_boxing);
-            var multi = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost);
+            var multi = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false);
             Assert.That(DemoHubController.InitialScreen(null), Is.EqualTo(DemoHubController.HubScreen.Top));
             Assert.That(DemoHubController.InitialScreen(single.WithIndex(1, false)), Is.EqualTo(DemoHubController.HubScreen.Top));
             Assert.That(DemoHubController.InitialScreen(multi.WithIndex(2, false)), Is.EqualTo(DemoHubController.HubScreen.Finished));
@@ -120,13 +124,14 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(first.VisiblePresets, Is.EquivalentTo(new[] { 1 }), "The migrated plan is shown.");
             Assert.That(store.LoadPreset(1).Steps.Single().DemoId, Is.EqualTo("trex-encounter"));
             Assert.That(store.Exists(HubPlanStore.LegacyLastSlot), Is.False);
-            Assert.That(first.HapticsUi || first.StaffWaiting || first.VisibleDemos.Count > 0, Is.False, "Defaults are off.");
+            Assert.That(first.HapticsUi || first.StaffWaiting || first.RecenterUi || first.VisibleDemos.Count > 0, Is.False, "Defaults are off.");
             Assert.That(first.HandStyle, Is.EqualTo(DemoHandStyle.Ghost), "Ghost hands by default.");
 
             first.VisiblePresets.Add(3);
             first.VisibleDemos.Add("volley");
             first.HapticsUi = true;
             first.StaffWaiting = true;
+            first.RecenterUi = true;
             first.HandStyle = DemoHandStyle.Skin;
             Assert.That(store.SaveSettings(first), Is.True);
             // A later legacy file is not migrated again.
@@ -134,7 +139,7 @@ namespace Hapbeat.DemoHub.Tests
             var loaded = store.LoadSettings();
             Assert.That(loaded.VisiblePresets, Is.EquivalentTo(new[] { 1, 3 }));
             Assert.That(loaded.VisibleDemos, Is.EquivalentTo(new[] { "volley" }));
-            Assert.That(loaded.HapticsUi && loaded.StaffWaiting, Is.True);
+            Assert.That(loaded.HapticsUi && loaded.StaffWaiting && loaded.RecenterUi, Is.True);
             Assert.That(loaded.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
             Assert.That(HubSettings.TryFromJson("{\"version\":1,\"hand_style\":\"glove\"}", out var unknown), Is.True);
             Assert.That(unknown.HandStyle, Is.EqualTo(DemoHandStyle.Ghost), "Unknown look: the default.");
@@ -177,22 +182,10 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(Vector3.Distance(panel.position, expected.position), Is.LessThan(1e-4f));
                 Assert.That(Quaternion.Angle(panel.rotation, expected.rotation), Is.LessThan(0.01f));
 
-                // 手前に移動 is not on the panel but a head-following key at the lower left; it places the panel in front again.
-                Assert.That(Buttons(controller).Any(b => b.Label == HubText.Recenter), Is.False);
-                controller.TickRecenterKey(head, 0f);
-                var key = controller.RecenterKey;
-                var keyTarget = HubRecenterKey.Target(head.position, head.forward);
-                Assert.That(Vector3.Distance(key.transform.position, keyTarget.position), Is.LessThan(1e-4f), "Snaps on the first frame.");
-                var local = Quaternion.Inverse(Quaternion.LookRotation(Vector3.ProjectOnPlane(head.forward, Vector3.up))) * (key.transform.position - head.position);
-                Assert.That(local.x < 0f && local.y < 0f, Is.True, "Lower left of view.");
-                var haptics = DemoHeadingPlacement.Target(head.position, head.forward, -30f, 35f, 0.45f);
-                Assert.That(Vector3.Distance(key.transform.position, haptics.position), Is.GreaterThan(0.05f), "Clear of the haptics button.");
-                Press(key.Buttons.Single(b => b.Label == HubText.Recenter));
+                // 視線をリセット (the package's button, DemoRecenter.Recentered) places the panel in front again.
+                typeof(DemoHubController).GetMethod("Recenter", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(controller, null);
                 var main = Camera.main.transform; // The test head, or an open scene's own main camera.
                 Assert.That(Vector3.Distance(panel.position, HubPanelPlacement.Target(main.position, main.forward, main.up).position), Is.LessThan(1e-4f));
-                head.rotation = Quaternion.Euler(0, 60, 0);
-                controller.TickRecenterKey(head, 0.1f);
-                Assert.That(Vector3.Distance(key.transform.position, keyTarget.position), Is.GreaterThan(1e-3f), "Follows the heading.");
             }
             finally
             {
@@ -429,10 +422,49 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(store.LoadSettings().HandStyle, Is.EqualTo(DemoHandStyle.Skin), "Saved at once.");
 
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle);
+                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle, false);
                 Assert.That(ticket.ToJson(), Does.Contain("\"hand_style\":\"skin\""));
             }
             finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RecenterButtonChoiceShowsTheHubsButtonAndIsSentInTickets()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                DemoSession.SetRecenterUiVisible(false);
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                Assert.That(DemoSession.RecenterUiVisible, Is.False, "Hidden by default.");
+                controller.Show(DemoHubController.HubScreen.Manage);
+                var toggle = Buttons(controller).Single(b => b.Label == HubText.RecenterUiOff);
+                var width = toggle.Rect.sizeDelta.x;
+                Press(toggle);
+                Assert.That(controller.Settings.RecenterUi, Is.True);
+                Assert.That(DemoSession.RecenterUiVisible, Is.True, "The Hub's own button follows the choice.");
+                var shown = Buttons(controller).Single(b => b.Label == HubText.RecenterUiOn);
+                Assert.That(shown.Rect.sizeDelta.x, Is.EqualTo(width), "Fixed width: no layout shift.");
+                Assert.That(shown.Highlighted, Is.True);
+                Assert.That(store.LoadSettings().RecenterUi, Is.True, "Saved at once.");
+                AssertInsideWithoutOverlap(controller);
+
+                DemoSession.SetRecenterUiVisible(false);
+                var again = new GameObject("hub test 2");
+                try
+                {
+                    again.AddComponent<DemoHubController>().Initialize(_catalog, store);
+                    Assert.That(DemoSession.RecenterUiVisible, Is.True, "Applied from the saved settings at start.");
+                }
+                finally { Object.DestroyImmediate(again); }
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                DemoSession.SetRecenterUiVisible(false);
+            }
         }
 
         static IReadOnlyList<DemoSessionButton> Buttons(DemoHubController controller) => controller.Panel.Buttons;

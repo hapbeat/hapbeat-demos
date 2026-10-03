@@ -43,6 +43,7 @@ namespace Hapbeat.DemoSwitch
             StartForegroundReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
+            gameObject.AddComponent<DemoSessionRecenterButton>();
             gameObject.AddComponent<DemoRecenterWatch>();
             if (settings.Hands) gameObject.AddComponent<DemoHands>().SetStyle(DemoHands.ResolveStyle(DemoSession.Ticket, settings.HandStyle));
             if (settings.PauseMenu && settings.CurrentDemoId != DemoSwitchSettings.HubDemoId)
@@ -191,8 +192,9 @@ namespace Hapbeat.DemoSwitch
         private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
         {
             IDemoAppControls adapter = null;
-            // haptics_* belong to the shared Demo Session layer, never to the scene's control adapter.
+            // haptics_* and recenter / recenter_ui_* belong to the shared Demo Session layer, never to the scene's control adapter.
             if (DemoSwitchProtocol.IsHapticsAction(command.Action)) adapter = DemoSession.HapticsControls;
+            else if (DemoSwitchProtocol.IsRecenterAction(command.Action)) adapter = DemoSession.RecenterControls;
             else foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
             {
                 if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;

@@ -110,7 +110,7 @@ namespace Hapbeat.DemoHub.Tests
             plan.ToggleRetry(2);
             plan.Add(_trex);
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Skin);
+            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Skin, false);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.False);
@@ -128,7 +128,7 @@ namespace Hapbeat.DemoHub.Tests
 
             var empty = new HubPlan();
             empty.Steps.Add(new HubPlanStep("not-installed", null, true));
-            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost), Is.Null);
+            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false), Is.Null);
         }
 
         [Test]

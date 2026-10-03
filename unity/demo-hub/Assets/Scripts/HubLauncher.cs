@@ -23,6 +23,8 @@ namespace Hapbeat.DemoHub
         public bool StaffWaiting { get; set; }
         /// <summary>Look of the shared hands: the Hub's own and every ticket's `hand_style` (default ghost).</summary>
         public DemoHandStyle HandStyle { get; set; } = DemoHandStyle.Ghost;
+        /// <summary>Initial `recenter_ui` of every launch and the Hub's own 視線をリセット button (default hidden).</summary>
+        public bool RecenterUi { get; set; }
 
         public string ToJson() => new JObject
         {
@@ -31,7 +33,8 @@ namespace Hapbeat.DemoHub
             ["visible_demos"] = new JArray(VisibleDemos.OrderBy(d => d, StringComparer.Ordinal).Cast<object>().ToArray()),
             ["haptics_ui"] = HapticsUi,
             ["staff_waiting"] = StaffWaiting,
-            ["hand_style"] = DemoHandStyles.ToValue(HandStyle)
+            ["hand_style"] = DemoHandStyles.ToValue(HandStyle),
+            ["recenter_ui"] = RecenterUi
         }.ToString(Formatting.Indented);
 
         public static bool TryFromJson(string json, out HubSettings settings)
@@ -45,7 +48,8 @@ namespace Hapbeat.DemoHub
                 {
                     HapticsUi = root.Value<bool?>("haptics_ui") ?? false,
                     StaffWaiting = root.Value<bool?>("staff_waiting") ?? false,
-                    HandStyle = DemoHandStyles.TryParse(root.Value<string>("hand_style"), out var handStyle) ? handStyle : DemoHandStyle.Ghost
+                    HandStyle = DemoHandStyles.TryParse(root.Value<string>("hand_style"), out var handStyle) ? handStyle : DemoHandStyle.Ghost,
+                    RecenterUi = root.Value<bool?>("recenter_ui") ?? false
                 };
                 if (root["visible_presets"] is JArray presets)
                     foreach (var token in presets)
@@ -134,7 +138,7 @@ namespace Hapbeat.DemoHub
 
     /// <summary>
     /// Where the panel is placed: once, when head tracking first becomes valid, and again only when the
-    /// operator presses 手前に移動 or after a system recenter. It never follows the head.
+    /// 視線をリセット is pressed (or CONTROL `recenter`) or after a system recenter. It never follows the head.
     /// </summary>
     public static class HubPanelPlacement
     {
