@@ -6,7 +6,7 @@
 namespace
 {
     // T-Rex development pause (TrexXRInteraction ProcessDebugPause): palm within 60 deg of the eye direction,
-    // pinch closes at 1.5 cm and stays closed up to 3 cm.
+    // pinch closes at 1.5 cm and stays closed up to 3 cm (until the shape is let go, also after it has fired).
     constexpr float FacingDot=.5f, PinchStart=1.5f, PinchKeep=3.f;
 }
 
@@ -25,6 +25,12 @@ FHapbeatPauseSettings FHapbeatPauseSettings::Load()
     FString Gesture;
     if(GConfig->GetString(TEXT("HapbeatDemoSession.Pause"),TEXT("Gesture"),Gesture,GGameIni)&&!ParseGesture(Gesture,S.Gesture))
         UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SESSION_PAUSE unknown Gesture=%s (SystemMenu is used)"),*Gesture);
+    S.HoldSeconds=S.Gesture==EHapbeatPauseGesture::SystemMenu?SystemMenuHoldSeconds:PalmPinchHoldSeconds;
+    float Hold=0;
+    if(GConfig->GetFloat(TEXT("HapbeatDemoSession.Pause"),TEXT("HoldSeconds"),Hold,GGameIni)) {
+        if(Hold>0) S.HoldSeconds=Hold;
+        else UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SESSION_PAUSE HoldSeconds=%g ignored (%g is used)"),Hold,S.HoldSeconds);
+    }
     return S;
 }
 
@@ -50,13 +56,16 @@ bool FHapbeatPauseDetector::Update(const FHapbeatPauseInput& In,float Dt)
 {
     const bool bPressed=In.bMenuButton&&!bMenuDown;
     bMenuDown=In.bMenuButton;
-    if(Gesture==EHapbeatPauseGesture::PalmPinchHold) {
-        if(!In.bLeftHand||!IsPalmPinch(In.LeftHand,In.Eye,Hold>0?PinchKeep:PinchStart)) {Hold=0;bArmed=true;}
-        else if(bArmed) {
-            Hold+=Dt;
-            if(Hold>=HoldSeconds) {Hold=0;bArmed=false;return true;}
-        }
-    }
+    const bool bHandMenu=Gesture==EHapbeatPauseGesture::SystemMenu&&In.bHandMenu;
+    const bool bHandPressed=bHandMenu&&!bHandMenuDown;
+    bHandMenuDown=bHandMenu;
+    bPinching=In.bLeftHand&&IsPalmPinch(In.LeftHand,In.Eye,bPinching?PinchKeep:PinchStart);
+    if(!bPinching) Hold=0;
+    // The held shape and the runtime's menu flag are one gesture: it is over when both are off.
+    if(!bPinching&&!bHandMenu) {bArmed=true;return bPressed;}
+    if(!bArmed) return bPressed;
+    if(bPinching) Hold+=Dt;
+    if(bHandPressed||Hold>=HoldSeconds) {Hold=0;bArmed=false;return true;}
     return bPressed;
 }
 

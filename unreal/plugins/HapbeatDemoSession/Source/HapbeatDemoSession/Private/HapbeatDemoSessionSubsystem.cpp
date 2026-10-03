@@ -1,6 +1,7 @@
 #include "HapbeatDemoSessionSubsystem.h"
 #include "HapbeatDemoSessionLog.h"
 #include "HapbeatDemoSessionDeviceAddress.h"
+#include "HapbeatDemoSessionHandMenu.h"
 #include "HapbeatDemoSessionPlatform.h"
 #include "HapbeatDemoSessionUi.h"
 #include "HapbeatDemoSessionPanelAnchor.h"
@@ -40,9 +41,10 @@ void UHapbeatDemoSessionSubsystem::Initialize(FSubsystemCollectionBase& Collecti
     // The pause works with or without a descriptor / ticket (a demo started from the Quest library too).
     PauseSettings=FHapbeatPauseSettings::Load();
     PauseDetector.Gesture=PauseSettings.Gesture;
+    PauseDetector.HoldSeconds=PauseSettings.HoldSeconds;
     bHubInstalled=HapbeatDemoSessionPlatform::IsInstalled(HubComponent().Package);
-    if(PauseSettings.bEnabled) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE enabled gesture=%s hub=%d"),
-        PauseSettings.Gesture==EHapbeatPauseGesture::SystemMenu?TEXT("SystemMenu"):TEXT("PalmPinchHold"),bHubInstalled);
+    if(PauseSettings.bEnabled) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE enabled gesture=%s hold=%.2f hub=%d"),
+        PauseSettings.Gesture==EHapbeatPauseGesture::SystemMenu?TEXT("SystemMenu"):TEXT("PalmPinchHold"),PauseSettings.HoldSeconds,bHubInstalled);
     // On Android the activity's pause is broadcast on the game thread, which is suspended right after: the
     // hand-over has to end the task from inside this callback (LaunchAndroid.cpp SuspendApp_EventThread).
     DeactivateHandle=FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this,&UHapbeatDemoSessionSubsystem::OnApplicationDeactivated);
@@ -310,14 +312,13 @@ FHapbeatPauseInput UHapbeatDemoSessionSubsystem::ReadPauseInput(APlayerControlle
     bool bUseFocus=false,bFocus=true;
     UHeadMountedDisplayFunctionLibrary::GetVRFocusState(bUseFocus,bFocus);
     if(bUseFocus&&!bFocus) return In;
-    // The controller's ≡ button; in SystemMenu mode also Quest's menu gesture of the tracked left hand, which
-    // the runtime reports as the same button (FHapbeatDemoSessionModule::GetInputKeyOverrides).
+    // The controller's ≡ button, the left hand's joints and, in SystemMenu mode, the runtime's hand menu flag
+    // (XR_FB_hand_tracking_aim, FHapbeatDemoSessionModule).
     In.bMenuButton=PC->IsInputKeyDown(EKeys::OculusTouch_Left_Menu_Click);
-    if(PauseDetector.Gesture==EHapbeatPauseGesture::PalmPinchHold) {
-        FXRHandTrackingState S;
-        UHeadMountedDisplayFunctionLibrary::GetHandTrackingState(PC,EXRSpaceType::UnrealWorldSpace,EControllerHand::Left,S);
-        In.SetLeftHand(S);
-    }
+    In.bHandMenu=PauseDetector.Gesture==EHapbeatPauseGesture::SystemMenu&&HapbeatDemoSessionHandMenu::IsLeftMenuPressed();
+    FXRHandTrackingState S;
+    UHeadMountedDisplayFunctionLibrary::GetHandTrackingState(PC,EXRSpaceType::UnrealWorldSpace,EControllerHand::Left,S);
+    In.SetLeftHand(S);
     return In;
 }
 

@@ -7,7 +7,7 @@ public class HapbeatDemoSession : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine" });
         PrivateDependencyModuleNames.AddRange(new string[] { "InputCore", "Json", "Sockets", "Networking", "Slate", "SlateCore", "UMG", "HeadMountedDisplay", "XRBase", "OpenXRHMD", "HapbeatSDK" });
-        // IOpenXRExtensionPlugin (pause: the hand menu gesture as the left menu button).
+        // IOpenXRExtensionPlugin (pause: the left hand menu gesture via XR_FB_hand_tracking_aim).
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenXR");
         // HMAC-SHA256 for Demo Switch authentication (the engine's OpenSSL also links on Android).
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");

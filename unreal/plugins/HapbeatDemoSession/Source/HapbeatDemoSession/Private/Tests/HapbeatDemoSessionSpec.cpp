@@ -414,22 +414,74 @@ void FHapbeatDemoSessionSpec::Define()
             TestFalse(TEXT("back of the hand to the eye"),FHapbeatPauseDetector::IsPalmPinch(Away.LeftHand,Away.Eye,1.5f));
             TestFalse(TEXT("not pinched"),FHapbeatPauseDetector::IsPalmPinch(Open.LeftHand,Open.Eye,1.5f));
         });
-        It(TEXT("SystemMenu fires on the menu button's rising edge only"),[this,Hand]()
+        It(TEXT("SystemMenu fires on the menu button's rising edge"),[this,Hand]()
         {
             FHapbeatPauseDetector D;
-            FHapbeatPauseInput In=Hand(.5f,true);
-            for(int32 I=0;I<40;++I) TestFalse(TEXT("a held pinch does nothing in A"),D.Update(In,.1f));
+            FHapbeatPauseInput In=Hand(5.f,true);
+            for(int32 I=0;I<10;++I) TestFalse(TEXT("an open hand does nothing"),D.Update(In,.1f));
             In.bMenuButton=true;
             TestTrue(TEXT("press"),D.Update(In,.1f));
             TestFalse(TEXT("held"),D.Update(In,.1f));
             In.bMenuButton=false;D.Update(In,.1f);
             In.bMenuButton=true;
             TestTrue(TEXT("second press"),D.Update(In,.1f));
+            FHapbeatPauseInput NoHand;NoHand.bMenuButton=true;
+            D.Update(FHapbeatPauseInput(),.1f);
+            TestTrue(TEXT("without a tracked hand"),D.Update(NoHand,.1f));
+        });
+        It(TEXT("SystemMenu fires after a short hold of the palm-facing pinch, once until it is let go"),[this,Hand]()
+        {
+            constexpr float T=.0625f;
+            // 1/16 s steps (exact in float): 4 of them stay under the default 0.3 s, the 5th passes it.
+            FHapbeatPauseDetector D;
+            TestEqual(TEXT("default hold"),D.HoldSeconds,FHapbeatPauseSettings::SystemMenuHoldSeconds);
+            const FHapbeatPauseInput Pinch=Hand(.5f,true), Loose=Hand(2.5f,true), Open=Hand(5.f,true), Away=Hand(.5f,false);
+            bool Fired=false;
+            for(int32 I=0;I<4;++I) Fired|=D.Update(I<2?Pinch:Loose,T); // starts at <= 1.5 cm, holds up to 3 cm
+            TestFalse(TEXT("not before 0.3 s"),Fired);
+            TestTrue(TEXT("past 0.3 s"),D.Update(Pinch,T));
+            for(int32 I=0;I<40;++I) TestFalse(TEXT("still held: once only"),D.Update(I%2?Pinch:Loose,T));
+            D.Update(Open,T);
+            for(int32 I=0;I<4;++I) TestFalse(TEXT("second hold, not yet"),D.Update(Pinch,T));
+            TestTrue(TEXT("again after a release (closes the pause)"),D.Update(Pinch,T));
+            D.Update(Open,T);
+            for(int32 I=0;I<3;++I) D.Update(Pinch,T);
+            D.Update(Away,T);
+            for(int32 I=0;I<4;++I) TestFalse(TEXT("turning the palm away restarts the count"),D.Update(Pinch,T));
+            TestTrue(TEXT("after a full hold"),D.Update(Pinch,T));
+            D.Update(Open,T);
+            for(int32 I=0;I<20;++I) TestFalse(TEXT("the back of the hand never fires"),D.Update(Away,T));
+            FHapbeatPauseDetector Slow;Slow.HoldSeconds=.5f;
+            bool SlowFired=false;
+            for(int32 I=0;I<7;++I) SlowFired|=Slow.Update(Pinch,T);
+            TestFalse(TEXT("HoldSeconds is the setting"),SlowFired);
+            TestTrue(TEXT("at 0.5 s (8 steps)"),Slow.Update(Pinch,T));
+        });
+        It(TEXT("SystemMenu: the runtime's hand menu flag fires at once and is the same gesture as the hold"),[this,Hand]()
+        {
+            constexpr float T=.0625f;
+            FHapbeatPauseDetector D;
+            FHapbeatPauseInput Flag=Hand(.5f,true);Flag.bHandMenu=true;
+            const FHapbeatPauseInput Pinch=Hand(.5f,true), Open=Hand(5.f,true);
+            TestTrue(TEXT("flag fires at once"),D.Update(Flag,T));
+            for(int32 I=0;I<20;++I) TestFalse(TEXT("the pinch held after it does not fire again"),D.Update(Pinch,T));
+            D.Update(Open,T);
+            for(int32 I=0;I<4;++I) D.Update(Pinch,T);
+            TestTrue(TEXT("hold fires first"),D.Update(Pinch,T));
+            TestFalse(TEXT("a flag later in the same gesture does nothing"),D.Update(Flag,T));
+            D.Update(Open,T);
+            FHapbeatPauseInput FlagNoJoints;FlagNoJoints.bHandMenu=true;
+            TestTrue(TEXT("flag without joints"),D.Update(FlagNoJoints,T));
+            TestFalse(TEXT("flag held"),D.Update(FlagNoJoints,T));
+            D.Update(FHapbeatPauseInput(),T);
+            TestTrue(TEXT("flag again after a release"),D.Update(FlagNoJoints,T));
+            FHapbeatPauseDetector B;B.Gesture=EHapbeatPauseGesture::PalmPinchHold;B.HoldSeconds=FHapbeatPauseSettings::PalmPinchHoldSeconds;
+            TestFalse(TEXT("B ignores the flag"),B.Update(FlagNoJoints,T));
         });
         It(TEXT("PalmPinchHold fires after 2 s of the gesture and needs a release before the next"),[this,Hand]()
         {
             // 0.125 s steps: 16 of them are exactly HoldSeconds.
-            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;
+            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;D.HoldSeconds=FHapbeatPauseSettings::PalmPinchHoldSeconds;
             const FHapbeatPauseInput Pinch=Hand(.5f,true), Loose=Hand(2.5f,true), Open=Hand(5.f,true), Away=Hand(.5f,false);
             bool Fired=false;
             for(int32 I=0;I<15;++I) Fired|=D.Update(I<2?Pinch:Loose,.125f); // starts at <= 1.5 cm, holds up to 3 cm
@@ -448,7 +500,7 @@ void FHapbeatDemoSessionSpec::Define()
         });
         It(TEXT("Reset waits for a release"),[this,Hand]()
         {
-            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;
+            FHapbeatPauseDetector D;D.Gesture=EHapbeatPauseGesture::PalmPinchHold;D.HoldSeconds=FHapbeatPauseSettings::PalmPinchHoldSeconds;
             const FHapbeatPauseInput Pinch=Hand(.5f,true), Open=Hand(5.f,true);
             for(int32 I=0;I<8;++I) D.Update(Pinch,.125f);
             D.Reset();
