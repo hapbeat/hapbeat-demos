@@ -63,9 +63,10 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(plan.CycleOption(0, _volley, "balls"), Is.False, "Inactive option cannot be cycled.");
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
             Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "balls" }));
-            Assert.That(HubPlan.Title(step, _volley), Is.EqualTo("バレーボール レシーブ 10球"));
+            var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley レシーブ 10球"));
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
-            Assert.That(HubPlan.Title(step, _volley), Is.EqualTo("バレーボール ブロック 3点先取"), "Hidden choices are remembered.");
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley ブロック 3点先取"), "Hidden choices are remembered.");
             plan.ToggleRetry(0);
             Assert.That(step.Retry, Is.False);
             Assert.That(HubPlan.Truncate(new string('あ', 50), 40).Length, Is.EqualTo(40));
@@ -104,13 +105,15 @@ namespace Hapbeat.DemoHub.Tests
             plan.ToggleRetry(2);
             plan.Add(_trex);
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false);
+            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Skin);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.False);
             Assert.That(parsed.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "boxing", "trex-encounter" }));
             Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["points"] = "3" }), "Only active options.");
-            Assert.That(parsed.Steps[0].Title, Is.EqualTo("バレーボール ブロック 3点先取"));
+            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley ブロック 3点先取"), "Application name, then option values.");
+            Assert.That(parsed.Steps[2].Title, Is.EqualTo("T-Rex Encounter"));
+            Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
             Assert.That(parsed.Steps[0].PackageName, Is.EqualTo("jp.hapbeat.volley"));
             Assert.That(parsed.Steps[1].Retry, Is.False);
             Assert.That(parsed.Steps[2].ActivityName, Is.EqualTo("com.epicgames.unreal.GameActivity"));
@@ -121,7 +124,22 @@ namespace Hapbeat.DemoHub.Tests
 
             var empty = new HubPlan();
             empty.Steps.Add(new HubPlanStep("not-installed", null, true));
-            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false), Is.Null);
+            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost), Is.Null);
+        }
+
+        [Test]
+        public void NamesComeFromTheApplicationLabel()
+        {
+            var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
+            Assert.That(volley.DisplayName, Is.EqualTo("Volley"), "PackageManager label, no Hapbeat prefix.");
+            Assert.That(DemoHubController.TileLabel(volley), Is.EqualTo("Volley\n目安 約3分"));
+            var unlabeled = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", "  ");
+            Assert.That(unlabeled.DisplayName, Is.EqualTo("バレーボール"), "Without a label: the descriptor title.");
+            var longName = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", new string('x', 45));
+            var plan = new HubPlan();
+            plan.Add(_volley);
+            Assert.That(HubPlan.Title(plan.Steps[0], longName).Length, Is.EqualTo(HubPlan.TitleMaxLength), "Step titles keep the 40-character limit.");
+            Assert.That(plan.Summary(_catalog), Is.EqualTo("Volley ブロック 7点先取"));
         }
 
         [Test]

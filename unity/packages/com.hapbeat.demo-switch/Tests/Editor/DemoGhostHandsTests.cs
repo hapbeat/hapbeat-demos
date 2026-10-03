@@ -16,7 +16,7 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         /// <summary>A flat open right hand: fingers along +z from a wrist at the origin, 2 cm apart along x.</summary>
-        private static (Vector3[] positions, bool[] valid) OpenHand()
+        internal static (Vector3[] positions, bool[] valid) OpenHand()
         {
             var positions = new Vector3[DemoGhostHandShape.JointCount];
             var valid = new bool[DemoGhostHandShape.JointCount];
@@ -140,20 +140,6 @@ namespace Hapbeat.DemoSwitch.Tests
 
             Assert.That(shader, Is.Not.Null);
             Assert.That(shader.isSupported, Is.True);
-        }
-
-        [Test]
-        public void Settings_GhostHandsAreOffByDefault()
-        {
-            var settings = ScriptableObject.CreateInstance<DemoSwitchSettings>();
-            try
-            {
-                Assert.That(settings.GhostHands, Is.False);
-            }
-            finally
-            {
-                Object.DestroyImmediate(settings);
-            }
         }
     }
 }

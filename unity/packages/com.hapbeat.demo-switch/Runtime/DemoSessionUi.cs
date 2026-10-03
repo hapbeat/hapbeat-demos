@@ -173,7 +173,7 @@ namespace Hapbeat.DemoSwitch
             OnPress = onPress;
         }
 
-        internal RectTransform Rect { get; }
+        public RectTransform Rect { get; }
         internal Action OnPress { get; set; }
         internal bool Hovered { get; set; }
         /// <summary>Pressed and still held this frame: a fingertip that pressed it stays past the surface, or a ray keeps the trigger down on it.</summary>
@@ -192,14 +192,19 @@ namespace Hapbeat.DemoSwitch
 
         internal void Press()
         {
-            _flashUntil = Time.realtimeSinceStartup + 0.15f;
+            FlashFor(0.15f);
             OnPress?.Invoke();
         }
+
+        /// <summary>Shows the pressed colour for <paramref name="seconds"/> (e.g. a row that a rebuild just moved).</summary>
+        public void FlashFor(float seconds) => _flashUntil = Time.realtimeSinceStartup + seconds;
+
+        public bool IsFlashing => Time.realtimeSinceStartup < _flashUntil;
 
         internal void Refresh()
         {
             _background.color = !Interactable ? Disabled
-                : Time.realtimeSinceStartup < _flashUntil ? Flash
+                : IsFlashing ? Flash
                 : Hovered ? Hover
                 : Highlighted ? Selected
                 : Normal;
@@ -226,6 +231,7 @@ namespace Hapbeat.DemoSwitch
 
         public RectTransform Root => _root;
         public Vector2 Size => _root.sizeDelta;
+        public IReadOnlyList<DemoSessionButton> Buttons => _buttons;
 
         public static DemoSessionPanel Create(string name, Vector2 sizeMillimetres)
         {
@@ -535,8 +541,9 @@ namespace Hapbeat.DemoSwitch
             var seenPackages = new HashSet<string>(StringComparer.Ordinal);
             var seenDemos = new HashSet<string>(StringComparer.Ordinal);
             platform.TryGetOwnComponent(out var own);
-            foreach (var component in platform.ListLauncherActivities())
+            foreach (var activity in platform.ListLauncherActivities())
             {
+                var component = activity.Component;
                 if (own != null && component.PackageName == own.PackageName) continue;
                 if (!seenPackages.Add(component.PackageName)) continue;
                 if (!platform.TryReadPackageAsset(component.PackageName, DemoSessionDescriptor.FileName, out var text, out _)) continue;
@@ -550,7 +557,7 @@ namespace Hapbeat.DemoSwitch
                     Debug.LogWarning("[Demo Session] Duplicate demo_id '" + descriptor.DemoId + "' in " + component.PackageName + " was ignored.");
                     continue;
                 }
-                result.Add(new DemoSessionCatalogEntry(descriptor, component.PackageName, component.ActivityName));
+                result.Add(new DemoSessionCatalogEntry(descriptor, component.PackageName, component.ActivityName, activity.Label));
             }
             return result;
         }

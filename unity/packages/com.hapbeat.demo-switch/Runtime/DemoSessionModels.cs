@@ -249,19 +249,41 @@ namespace Hapbeat.DemoSwitch
         public bool Retry { get; }
     }
 
+    /// <summary>Look of the shared tracked hands (<see cref="DemoHands"/>); the ticket's optional `hand_style`.</summary>
+    public enum DemoHandStyle { Ghost, Skin }
+
+    public static class DemoHandStyles
+    {
+        public const string Ghost = "ghost";
+        public const string Skin = "skin";
+
+        public static string ToValue(DemoHandStyle style) => style == DemoHandStyle.Skin ? Skin : Ghost;
+
+        public static bool TryParse(string value, out DemoHandStyle style)
+        {
+            style = DemoHandStyle.Ghost;
+            if (string.Equals(value, Ghost, StringComparison.Ordinal)) return true;
+            if (!string.Equals(value, Skin, StringComparison.Ordinal)) return false;
+            style = DemoHandStyle.Skin;
+            return true;
+        }
+    }
+
     /// <summary>Immutable session ticket carried between runtimes in the Intent extra.</summary>
     public sealed class DemoSessionTicket
     {
         public const int MaxBytes = 16384;
         public const int MaxSteps = 32;
 
-        public DemoSessionTicket(string sessionId, int index, bool hapticsUi, IReadOnlyList<DemoSessionStep> steps, DemoSessionComponent finish)
+        public DemoSessionTicket(string sessionId, int index, bool hapticsUi, IReadOnlyList<DemoSessionStep> steps, DemoSessionComponent finish,
+            DemoHandStyle? handStyle = null)
         {
             SessionId = sessionId;
             Index = index;
             HapticsUi = hapticsUi;
             Steps = steps.ToArray();
             Finish = finish;
+            HandStyle = handStyle;
         }
 
         public string SessionId { get; }
@@ -269,12 +291,15 @@ namespace Hapbeat.DemoSwitch
         public bool HapticsUi { get; }
         public IReadOnlyList<DemoSessionStep> Steps { get; }
         public DemoSessionComponent Finish { get; }
+        /// <summary>`hand_style`; null when omitted (each runtime uses its own default).</summary>
+        public DemoHandStyle? HandStyle { get; }
 
         /// <summary>`index == len(steps)`: every step completed; only the finish runtime receives it.</summary>
         public bool IsFinished => Index == Steps.Count;
 
-        public DemoSessionTicket WithIndex(int index, bool hapticsUi) => new DemoSessionTicket(SessionId, index, hapticsUi, Steps, Finish);
-        public DemoSessionTicket WithSession(string sessionId) => new DemoSessionTicket(sessionId, Index, HapticsUi, Steps, Finish);
+        public DemoSessionTicket WithIndex(int index, bool hapticsUi) => new DemoSessionTicket(SessionId, index, hapticsUi, Steps, Finish, HandStyle);
+        public DemoSessionTicket WithSession(string sessionId) => new DemoSessionTicket(sessionId, Index, HapticsUi, Steps, Finish, HandStyle);
+        public DemoSessionTicket WithHandStyle(DemoHandStyle? handStyle) => new DemoSessionTicket(SessionId, Index, HapticsUi, Steps, Finish, handStyle);
 
         public static string NewSessionId()
         {
@@ -300,7 +325,7 @@ namespace Hapbeat.DemoSwitch
                     ["retry"] = step.Retry
                 });
             }
-            return new JObject
+            var root = new JObject
             {
                 ["version"] = 1,
                 ["session_id"] = SessionId,
@@ -308,7 +333,9 @@ namespace Hapbeat.DemoSwitch
                 ["haptics_ui"] = HapticsUi,
                 ["steps"] = steps,
                 ["finish"] = new JObject { ["package"] = Finish.PackageName, ["activity"] = Finish.ActivityName }
-            }.ToString(Formatting.None);
+            };
+            if (HandStyle.HasValue) root["hand_style"] = DemoHandStyles.ToValue(HandStyle.Value);
+            return root.ToString(Formatting.None);
         }
 
         /// <summary>Schema-equivalent validation plus the 16384-byte limit and `index <= len(steps)`.</summary>
@@ -318,7 +345,7 @@ namespace Hapbeat.DemoSwitch
             if (!DemoSessionJson.TryLoad(json, out var root, out error)) return false;
             try
             {
-                if (!DemoSessionJson.OnlyFields(root, "version", "session_id", "index", "haptics_ui", "steps", "finish")) return Fail("Ticket contains an unknown field.", out error);
+                if (!DemoSessionJson.OnlyFields(root, "version", "session_id", "index", "haptics_ui", "steps", "finish", "hand_style")) return Fail("Ticket contains an unknown field.", out error);
                 if (!DemoSessionJson.TryVersion(root)) return Fail("version must be 1.", out error);
                 if (!DemoSessionJson.TryString(root, "session_id", out var sessionId) || !DemoSessionJson.IsSessionId(sessionId)) return Fail("session_id is invalid.", out error);
                 if (!root.TryGetValue("index", StringComparison.Ordinal, out var indexToken) || indexToken.Type != JTokenType.Integer) return Fail("index must be an integer.", out error);
@@ -334,7 +361,14 @@ namespace Hapbeat.DemoSwitch
                 }
                 if (!TryParseComponent(root["finish"], out var finish)) return Fail("finish is invalid.", out error);
                 if (index > steps.Count) return Fail("index exceeds the number of steps.", out error);
-                ticket = new DemoSessionTicket(sessionId, (int)index, hapticsUi, steps, finish);
+                DemoHandStyle? handStyle = null;
+                if (root.ContainsKey("hand_style"))
+                {
+                    if (!DemoSessionJson.TryString(root, "hand_style", out var handValue) || !DemoHandStyles.TryParse(handValue, out var parsedStyle))
+                        return Fail("hand_style must be \"ghost\" or \"skin\".", out error);
+                    handStyle = parsedStyle;
+                }
+                ticket = new DemoSessionTicket(sessionId, (int)index, hapticsUi, steps, finish, handStyle);
                 error = null;
                 return true;
             }

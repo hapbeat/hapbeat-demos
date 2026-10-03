@@ -9,16 +9,34 @@ namespace Hapbeat.DemoSwitch
     /// <summary>Installed demo whose APK carries a valid descriptor, resolved through PackageManager.</summary>
     public sealed class DemoSessionCatalogEntry
     {
-        public DemoSessionCatalogEntry(DemoSessionDescriptor descriptor, string packageName, string activityName)
+        public DemoSessionCatalogEntry(DemoSessionDescriptor descriptor, string packageName, string activityName, string appLabel = null)
         {
             Descriptor = descriptor;
             PackageName = packageName;
             ActivityName = activityName;
+            AppLabel = string.IsNullOrWhiteSpace(appLabel) ? null : appLabel.Trim();
         }
 
         public DemoSessionDescriptor Descriptor { get; }
         public string PackageName { get; }
         public string ActivityName { get; }
+        /// <summary>PackageManager label of the launcher activity (the name in Quest's library), or null when unknown.</summary>
+        public string AppLabel { get; }
+        /// <summary>The application name for lists and step titles: <see cref="AppLabel"/>, else the descriptor's Japanese title.</summary>
+        public string DisplayName => AppLabel ?? Descriptor.Title.Ja;
+    }
+
+    /// <summary>One MAIN/LAUNCHER activity with its PackageManager label (null when it could not be read).</summary>
+    internal sealed class DemoSessionLauncherActivity
+    {
+        public DemoSessionLauncherActivity(DemoSessionComponent component, string label)
+        {
+            Component = component;
+            Label = label;
+        }
+
+        public DemoSessionComponent Component { get; }
+        public string Label { get; }
     }
 
     internal interface IDemoSessionPlatform
@@ -29,7 +47,7 @@ namespace Hapbeat.DemoSwitch
         void FinishTask();
         bool TryReadOwnAsset(string name, out string text, out string error);
         bool TryGetOwnComponent(out DemoSessionComponent component);
-        IReadOnlyList<DemoSessionComponent> ListLauncherActivities();
+        IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities();
         bool TryReadPackageAsset(string packageName, string name, out string text, out string error);
     }
 
@@ -90,7 +108,7 @@ namespace Hapbeat.DemoSwitch
             return DemoSessionJson.IsJavaName(Application.identifier);
         }
 
-        public IReadOnlyList<DemoSessionComponent> ListLauncherActivities() => Array.Empty<DemoSessionComponent>();
+        public IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities() => Array.Empty<DemoSessionLauncherActivity>();
 
         public bool TryReadPackageAsset(string packageName, string name, out string text, out string error)
         {
@@ -185,9 +203,9 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
-        public IReadOnlyList<DemoSessionComponent> ListLauncherActivities()
+        public IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities()
         {
-            var result = new List<DemoSessionComponent>();
+            var result = new List<DemoSessionLauncherActivity>();
             try
             {
                 using (var activity = CurrentActivity())
@@ -206,7 +224,7 @@ namespace Hapbeat.DemoSwitch
                                 var package = info.Get<string>("packageName");
                                 var name = info.Get<string>("name");
                                 if (DemoSessionJson.IsJavaName(package) && DemoSessionJson.IsJavaName(name))
-                                    result.Add(new DemoSessionComponent(package, name));
+                                    result.Add(new DemoSessionLauncherActivity(new DemoSessionComponent(package, name), LoadLabel(resolve, manager)));
                             }
                         }
                     }
@@ -233,6 +251,21 @@ namespace Hapbeat.DemoSwitch
                 text = null;
                 error = exception.Message;
                 return false;
+            }
+        }
+
+        /// <summary>ResolveInfo.loadLabel: the name shown in Quest's library (activity label, else application label).</summary>
+        private static string LoadLabel(AndroidJavaObject resolve, AndroidJavaObject manager)
+        {
+            try
+            {
+                using (var label = resolve.Call<AndroidJavaObject>("loadLabel", manager))
+                    return label?.Call<string>("toString");
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Session] Could not read an application label: " + exception.Message);
+                return null;
             }
         }
 

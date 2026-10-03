@@ -98,11 +98,14 @@ namespace Hapbeat.DemoHub
         public static IReadOnlyList<DemoSessionOption> VisibleOptions(HubPlanStep step, DemoSessionDescriptor descriptor) =>
             descriptor.Options.Where(o => descriptor.IsActive(o, step.Options)).ToList();
 
-        /// <summary>"バレーボール ブロック 3点先取": descriptor title plus active value labels, at most 40 characters.</summary>
-        public static string Title(HubPlanStep step, DemoSessionDescriptor descriptor)
+        /// <summary>
+        /// "Volley ブロック 3点先取": the application name (<see cref="DemoSessionCatalogEntry.DisplayName"/>)
+        /// plus the active value labels, at most 40 characters.
+        /// </summary>
+        public static string Title(HubPlanStep step, DemoSessionCatalogEntry entry)
         {
-            var parts = new List<string> { descriptor.Title.Ja };
-            foreach (var option in VisibleOptions(step, descriptor))
+            var parts = new List<string> { entry.DisplayName };
+            foreach (var option in VisibleOptions(step, entry.Descriptor))
                 parts.Add(option.Find(Value(step, option)).Label.Ja);
             return Truncate(string.Join(" ", parts), TitleMaxLength);
         }
@@ -123,14 +126,14 @@ namespace Hapbeat.DemoHub
         public double Minutes(IReadOnlyList<DemoSessionCatalogEntry> catalog) =>
             Steps.Select(s => Find(catalog, s.DemoId)).Where(e => e != null).Sum(e => e.Descriptor.Minutes ?? 0);
 
-        /// <summary>"バレーボール ブロック 3点先取 → T-Rex エンカウンター": installed steps only, at most 60 characters.</summary>
+        /// <summary>"Volley ブロック 3点先取 → T-Rex Encounter": installed steps only, at most 60 characters.</summary>
         public string Summary(IReadOnlyList<DemoSessionCatalogEntry> catalog)
         {
             var titles = new List<string>();
             foreach (var step in Steps)
             {
                 var entry = Find(catalog, step.DemoId);
-                if (entry != null) titles.Add(Title(step, entry.Descriptor));
+                if (entry != null) titles.Add(Title(step, entry));
             }
             return Truncate(string.Join(HubText.Arrow, titles), SummaryMaxLength);
         }
@@ -142,7 +145,8 @@ namespace Hapbeat.DemoHub
         /// Ticket at index 0 for the installed steps. Options contain exactly the active options
         /// (contract). Returns null when no step is installed.
         /// </summary>
-        public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi)
+        public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi,
+            DemoHandStyle handStyle)
         {
             var steps = new List<DemoSessionStep>();
             foreach (var step in Steps)
@@ -151,9 +155,9 @@ namespace Hapbeat.DemoHub
                 if (entry == null) continue;
                 var options = entry.Descriptor.Normalize(step.Options.Where(p => entry.Descriptor.FindOption(p.Key) != null)
                     .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), null);
-                steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry.Descriptor), entry.PackageName, entry.ActivityName, options, step.Retry));
+                steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry), entry.PackageName, entry.ActivityName, options, step.Retry));
             }
-            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish);
+            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle);
         }
 
         public string ToJson()

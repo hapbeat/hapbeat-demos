@@ -43,9 +43,13 @@ namespace Hapbeat.DemoHub.Editor
             Require(settings != null && settings.ReceiverEnabled && settings.CurrentDemoId == "demo_hub", "Hub receiver identity");
             foreach (var id in new[] { "demo_hub", "gloveball", "handdemo", "gloveball_v2", "boxing" })
                 Require(settings.TryResolveTarget(id, out _), "Launch target: " + id);
-            Require(settings.GhostHands && Resources.Load<Shader>(DemoGhostHands.ShaderResourcePath) != null, "Ghost hands enabled with the package shader");
+            Require(settings.Hands, "Shared hands enabled");
+            foreach (var shader in new[] { DemoGhostHands.ShaderResourcePath, DemoHands.GhostShaderPath, DemoHands.SkinShaderPath, DemoHands.OutlineShaderPath })
+                Require(Resources.Load<Shader>(shader) != null, "Hand shader in the package: " + shader);
+            var meta = Resources.Load<GameObject>(DemoHands.MetaLeftModelPath) != null && Resources.Load<GameObject>(DemoHands.MetaRightModelPath) != null;
             Require(EditorBuildSettings.scenes.Length == 1 && EditorBuildSettings.scenes[0].path == HubProject.ScenePath, "Hub-only build");
-            Debug.Log("[Hub] Validation passed: scene, tracking, Japanese glyphs, session controller, no audio, switch allowlist, ghost hands.");
+            Debug.Log("[Hub] Validation passed: scene, tracking, Japanese glyphs, session controller, no audio, switch allowlist, hands ("
+                + (meta ? "Meta hand meshes from the private assets" : "private assets not linked: procedural ghost hands") + ").");
         }
 
         // Runs without Play Mode: no UDP receiver, sound, or haptic traffic is started.

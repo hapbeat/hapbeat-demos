@@ -20,21 +20,21 @@ namespace Hapbeat.DemoHub
 
         private const string UnityActivity = "com.unity3d.player.UnityPlayerGameActivity";
 
-        private static readonly (string json, string package, string activity)[] Dummies =
+        private static readonly (string json, string package, string activity, string label)[] Dummies =
         {
             (@"{""version"":1,""demo_id"":""volley"",""title"":{""ja"":""バレーボール"",""en"":""Volleyball""},""minutes"":3,""supports"":{""haptics_toggle"":true},
                ""options"":[{""id"":""scene"",""label"":{""ja"":""モード""},""default"":""block"",""values"":[{""value"":""block"",""label"":{""ja"":""ブロック""}},{""value"":""receive"",""label"":{""ja"":""レシーブ""}}]},
                {""id"":""points"",""label"":{""ja"":""点数""},""default"":""7"",""when"":{""scene"":[""block""]},""values"":[{""value"":""3"",""label"":{""ja"":""3点先取""}},{""value"":""5"",""label"":{""ja"":""5点先取""}},{""value"":""7"",""label"":{""ja"":""7点先取""}}]},
                {""id"":""balls"",""label"":{""ja"":""球数""},""default"":""10"",""when"":{""scene"":[""receive""]},""values"":[{""value"":""10"",""label"":{""ja"":""10球""}},{""value"":""20"",""label"":{""ja"":""20球""}}]}]}",
-             "jp.hapbeat.volley", UnityActivity),
+             "jp.hapbeat.volley", UnityActivity, "Volley"),
             (@"{""version"":1,""demo_id"":""boxing"",""title"":{""ja"":""ボクシング"",""en"":""Boxing""},""minutes"":2,""supports"":{""haptics_toggle"":true},
                ""options"":[{""id"":""round"",""label"":{""ja"":""ラウンド""},""default"":""90"",""values"":[{""value"":""60"",""label"":{""ja"":""60秒""}},{""value"":""90"",""label"":{""ja"":""90秒""}}]}]}",
-             "com.hapbeat.boxing", UnityActivity),
+             "com.hapbeat.boxing", UnityActivity, "Boxing"),
             (@"{""version"":1,""demo_id"":""trex-encounter"",""title"":{""ja"":""T-Rex エンカウンター"",""en"":""T-Rex Encounter""},""minutes"":3,""supports"":{""haptics_toggle"":true},""options"":[]}",
-             "com.hapbeat.trexencounter", "com.epicgames.unreal.GameActivity"),
+             "com.hapbeat.trexencounter", "com.epicgames.unreal.GameActivity", "T-Rex Encounter"),
         };
 
-        /// <summary>Editor preview catalog (no PackageManager in the Editor).</summary>
+        /// <summary>Editor preview catalog (no PackageManager in the Editor); the labels stand in for the Quest app names.</summary>
         public static IReadOnlyList<DemoSessionCatalogEntry> EditorDummy()
         {
             var result = new List<DemoSessionCatalogEntry>();
@@ -42,7 +42,7 @@ namespace Hapbeat.DemoHub
             {
                 if (!DemoSessionDescriptor.TryParse(dummy.json, out var descriptor, out var error))
                     throw new InvalidOperationException("Invalid dummy descriptor: " + error);
-                result.Add(new DemoSessionCatalogEntry(descriptor, dummy.package, dummy.activity));
+                result.Add(new DemoSessionCatalogEntry(descriptor, dummy.package, dummy.activity, dummy.label));
             }
             return result;
         }

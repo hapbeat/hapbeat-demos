@@ -44,7 +44,7 @@ namespace Hapbeat.DemoSwitch.Tests
             public void FinishTask() => Finishes++;
             public bool TryReadOwnAsset(string name, out string text, out string error) { text = null; error = "none"; return false; }
             public bool TryGetOwnComponent(out DemoSessionComponent component) { component = null; return false; }
-            public IReadOnlyList<DemoSessionComponent> ListLauncherActivities() => new DemoSessionComponent[0];
+            public IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities() => new DemoSessionLauncherActivity[0];
             public bool TryReadPackageAsset(string packageName, string name, out string text, out string error) { text = null; error = "none"; return false; }
         }
 
@@ -170,6 +170,34 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(again.Steps[0].Options["points"], Is.EqualTo("3"));
             Assert.That(again.Finish.PackageName, Is.EqualTo("jp.hapbeat.demohub"));
             Assert.That(DemoSessionJson.IsSessionId(DemoSessionTicket.NewSessionId()), Is.True);
+        }
+
+        [Test]
+        public void HandStyleIsOptionalAndCarriedToTheNextStep()
+        {
+            Assert.That(DemoSessionTicket.TryParse(Ticket, out var plain, out var error), Is.True, error);
+            Assert.That(plain.HandStyle, Is.Null);
+            Assert.That(plain.ToJson(), Does.Not.Contain("hand_style"), "Omitted when not chosen.");
+
+            var skin = Ticket.Replace(@"""haptics_ui"":false", @"""haptics_ui"":false,""hand_style"":""skin""");
+            Assert.That(skin, Does.Contain("hand_style"));
+            Assert.That(DemoSessionTicket.TryParse(skin, out var ticket, out error), Is.True, error);
+            Assert.That(ticket.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(ticket.WithIndex(2, true).HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(ticket.WithSession(DemoSessionTicket.NewSessionId()).HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(DemoSessionTicket.TryParse(ticket.WithHandStyle(DemoHandStyle.Ghost).ToJson(), out var ghost, out error), Is.True, error);
+            Assert.That(ghost.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
+            Assert.That(DemoSessionTicket.TryParse(skin.Replace(@"""skin""", @"""glove"""), out _, out error), Is.False);
+            Assert.That(error, Does.Contain("hand_style"));
+
+            Assert.That(DemoHands.ResolveStyle(ticket, DemoHandStyle.Ghost), Is.EqualTo(DemoHandStyle.Skin), "The ticket wins.");
+            Assert.That(DemoHands.ResolveStyle(plain, DemoHandStyle.Skin), Is.EqualTo(DemoHandStyle.Skin), "Omitted: the settings default.");
+            Assert.That(DemoHands.ResolveStyle(null, DemoHandStyle.Ghost), Is.EqualTo(DemoHandStyle.Ghost));
+
+            Assert.That(DemoSession.TryBegin(skin.Replace(@"""index"":1", @"""index"":0"), "volley", Volley(), out error), Is.True, error);
+            Assert.That(DemoSession.LaunchNext(out error), Is.True, error);
+            Assert.That(DemoSessionTicket.TryParse(_platform.LaunchedTicket, out var sent, out error), Is.True, error);
+            Assert.That(sent.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
         }
 
         [Test]

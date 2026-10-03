@@ -10,7 +10,8 @@ namespace Hapbeat.DemoHub
 {
     /// <summary>
     /// Operator settings from the manage screen: which presets and demos the top screen offers, the
-    /// initial `haptics_ui` of every launch, and the M5 staff waiting mode. Stored as hub-settings.json.
+    /// initial `haptics_ui` of every launch, the M5 staff waiting mode and the shared hands' look
+    /// (`hand_style` of every launch and the Hub's own hands). Stored as hub-settings.json.
     /// </summary>
     public sealed class HubSettings
     {
@@ -20,6 +21,8 @@ namespace Hapbeat.DemoHub
         public bool HapticsUi { get; set; }
         /// <summary>Head-locked "staff will start" labels instead of the launcher (M5 operation).</summary>
         public bool StaffWaiting { get; set; }
+        /// <summary>Look of the shared hands: the Hub's own and every ticket's `hand_style` (default ghost).</summary>
+        public DemoHandStyle HandStyle { get; set; } = DemoHandStyle.Ghost;
 
         public string ToJson() => new JObject
         {
@@ -27,7 +30,8 @@ namespace Hapbeat.DemoHub
             ["visible_presets"] = new JArray(VisiblePresets.OrderBy(n => n).Cast<object>().ToArray()),
             ["visible_demos"] = new JArray(VisibleDemos.OrderBy(d => d, StringComparer.Ordinal).Cast<object>().ToArray()),
             ["haptics_ui"] = HapticsUi,
-            ["staff_waiting"] = StaffWaiting
+            ["staff_waiting"] = StaffWaiting,
+            ["hand_style"] = DemoHandStyles.ToValue(HandStyle)
         }.ToString(Formatting.Indented);
 
         public static bool TryFromJson(string json, out HubSettings settings)
@@ -40,7 +44,8 @@ namespace Hapbeat.DemoHub
                 var result = new HubSettings
                 {
                     HapticsUi = root.Value<bool?>("haptics_ui") ?? false,
-                    StaffWaiting = root.Value<bool?>("staff_waiting") ?? false
+                    StaffWaiting = root.Value<bool?>("staff_waiting") ?? false,
+                    HandStyle = DemoHandStyles.TryParse(root.Value<string>("hand_style"), out var handStyle) ? handStyle : DemoHandStyle.Ghost
                 };
                 if (root["visible_presets"] is JArray presets)
                     foreach (var token in presets)
@@ -121,64 +126,24 @@ namespace Hapbeat.DemoHub
     }
 
     /// <summary>
-    /// Lazy yaw-only follow: the panel stays put while it is within 35° of the head's heading (and
-    /// near its distance and height), otherwise it eases back in front over 0.5 s.
+    /// Where the panel is placed: once, when head tracking first becomes valid, and again only when the
+    /// operator presses 手前に移動. It never follows the head.
     /// </summary>
-    public sealed class HubPanelFollow
+    public static class HubPanelPlacement
     {
         public const float Distance = 0.6f;
         /// <summary>Panel centre below eye height, metres.</summary>
         public const float Drop = 0.18f;
-        public const float RecenterDegrees = 35f;
-        public const float RecenterSeconds = 0.5f;
-        /// <summary>Distance or height error that also recentres (refitting, sitting down).</summary>
-        public const float MaxOffset = 0.25f;
-        private Pose _from;
-        private float _elapsed = -1f;
-
-        public bool Moving => _elapsed >= 0f;
 
         /// <summary>In front of the head's heading (pitch and roll ignored), facing the head.</summary>
         public static Pose Target(Vector3 headPosition, Vector3 headForward, Vector3 headUp)
-        {
-            var heading = Heading(headForward, headUp);
-            var position = headPosition + heading * Distance + Vector3.down * Drop;
-            return new Pose(position, Quaternion.LookRotation(position - headPosition, Vector3.up));
-        }
-
-        public static bool OutOfPlace(Vector3 headPosition, Vector3 headForward, Vector3 headUp, Vector3 panelPosition)
-        {
-            var offset = panelPosition - headPosition;
-            var flat = Vector3.ProjectOnPlane(offset, Vector3.up);
-            if (flat.sqrMagnitude < 0.0001f) return true;
-            if (Vector3.Angle(Heading(headForward, headUp), flat) >= RecenterDegrees) return true;
-            return Mathf.Abs(flat.magnitude - Distance) > MaxOffset || Mathf.Abs(offset.y + Drop) > MaxOffset;
-        }
-
-        /// <summary>Next panel pose: starts a recentre when out of place, then eases to the moving target.</summary>
-        public Pose Step(Pose current, Vector3 headPosition, Vector3 headForward, Vector3 headUp, float deltaTime)
-        {
-            if (!Moving && OutOfPlace(headPosition, headForward, headUp, current.position))
-            {
-                _from = current;
-                _elapsed = 0f;
-            }
-            if (!Moving) return current;
-            _elapsed += deltaTime;
-            var t = Mathf.Clamp01(_elapsed / RecenterSeconds);
-            if (t >= 1f) _elapsed = -1f;
-            var eased = t * t * (3f - 2f * t);
-            var target = Target(headPosition, headForward, headUp);
-            return new Pose(Vector3.Lerp(_from.position, target.position, eased), Quaternion.Slerp(_from.rotation, target.rotation, eased));
-        }
-
-        private static Vector3 Heading(Vector3 headForward, Vector3 headUp)
         {
             var heading = Vector3.ProjectOnPlane(headForward, Vector3.up);
             // Looking straight down: the top of the head points the way the user faces.
             if (heading.sqrMagnitude < 0.0001f) heading = Vector3.ProjectOnPlane(headUp, Vector3.up);
             if (heading.sqrMagnitude < 0.0001f) heading = Vector3.forward;
-            return heading.normalized;
+            var position = headPosition + heading.normalized * Distance + Vector3.down * Drop;
+            return new Pose(position, Quaternion.LookRotation(position - headPosition, Vector3.up));
         }
     }
 }

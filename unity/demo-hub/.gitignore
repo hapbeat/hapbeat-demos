@@ -1,0 +1,4 @@
+# Private assets junction (tools/link-private-assets.ps1): Meta's OpenXR hand meshes and their baked
+# skin textures may ship only inside built apps, never in this public repository.
+/Assets/HapbeatPrivate
+/Assets/HapbeatPrivate.meta

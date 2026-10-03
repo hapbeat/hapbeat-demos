@@ -30,4 +30,5 @@ MonoBehaviour:
   - _demoId: boxing
     _packageName: com.hapbeat.boxing
     _activityName: com.unity3d.player.UnityPlayerGameActivity
-  _ghostHands: 1
+  _hands: 1
+  _handStyle: 0
