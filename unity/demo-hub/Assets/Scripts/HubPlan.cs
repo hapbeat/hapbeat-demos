@@ -132,10 +132,6 @@ namespace Hapbeat.DemoHub
             return builder.ToString();
         }
 
-        /// <summary>Estimated minutes of installed steps (descriptor `minutes`).</summary>
-        public double Minutes(IReadOnlyList<DemoSessionCatalogEntry> catalog) =>
-            Steps.Select(s => Find(catalog, s.DemoId)).Where(e => e != null).Sum(e => e.Descriptor.Minutes ?? 0);
-
         /// <summary>"Volley ブロック 3点先取 → T-Rex Encounter": installed steps only, at most 60 characters.</summary>
         public string Summary(IReadOnlyList<DemoSessionCatalogEntry> catalog)
         {

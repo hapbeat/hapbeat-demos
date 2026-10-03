@@ -125,7 +125,6 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[2].Options, Is.Empty);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo("jp.hapbeat.demohub"));
             Assert.That(parsed.SessionId, Does.Match("^[0-9a-f]{16}$"));
-            Assert.That(plan.Minutes(_catalog), Is.EqualTo(8).Within(1e-6));
 
             var empty = new HubPlan();
             empty.Steps.Add(new HubPlanStep("not-installed", null, true));
@@ -137,7 +136,6 @@ namespace Hapbeat.DemoHub.Tests
         {
             var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
             Assert.That(volley.DisplayName, Is.EqualTo("Volley"), "PackageManager label, no Hapbeat prefix.");
-            Assert.That(DemoHubController.TileLabel(volley), Is.EqualTo("Volley\n目安 約3分"));
             var unlabeled = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", "  ");
             Assert.That(unlabeled.DisplayName, Is.EqualTo("バレーボール"), "Without a label: the descriptor title.");
             var longName = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", new string('x', 45));

@@ -16,7 +16,6 @@ namespace Hapbeat.DemoHub
         public const string HoldFilled = "■";
         public const string HoldEmpty = "□";
         public const string StaffWaitingNote = "スタッフ待機モード（解除は「管理」を1秒長押し）";
-        public const string AboutMinutes = "目安 約{0}分";
         public const string Arrow = " → ";
         public const string NotInstalled = "（未インストール）";
         public const string NothingInstalled = "インストール済みのデモがプランにありません。";
@@ -110,7 +109,7 @@ namespace Hapbeat.DemoHub
         private const float TopWidth = 640f;
         private const float PresetHeight = 66f;
         private const float TileWidth = 192f;
-        private const float TileHeight = 76f;
+        private const float TileHeight = 56f;
         private const float TopGap = 10f;
         private const float RowFlashSeconds = 0.5f;
         private static readonly Color Muted = new Color(0.7f, 0.8f, 0.9f);
@@ -356,7 +355,7 @@ namespace Hapbeat.DemoHub
                     var index = row * TileColumns + column;
                     if (index >= items.Demos.Count) break;
                     var entry = items.Demos[index];
-                    _panel.AddButton(new Vector2((column - 1) * (TileWidth + TopGap), y), new Vector2(TileWidth, TileHeight), TileLabel(entry), 20, () => StartDemo(entry));
+                    _panel.AddButton(new Vector2((column - 1) * (TileWidth + TopGap), y), new Vector2(TileWidth, TileHeight), entry.DisplayName, 20, () => StartDemo(entry));
                 }
                 y -= TileHeight * 0.5f + TopGap;
             }
@@ -384,21 +383,9 @@ namespace Hapbeat.DemoHub
             _manageButton = _panel.AddButton(new Vector2(232, -28), new Vector2(104, BarHeight), HubText.Manage, 18, null);
         }
 
-        /// <summary>"プリセット 1　目安 約8分" over the step summary.</summary>
-        private string PresetLabel(int number)
-        {
-            var plan = _presets[number - 1];
-            var minutes = plan.Minutes(_catalog);
-            var heading = HubText.Preset + " " + number + (minutes > 0 ? "　" + MinutesText(minutes) : string.Empty);
-            return heading + "\n" + plan.Summary(_catalog);
-        }
-
-        /// <summary>"Volley" over "目安 約3分": the application name and the descriptor's estimated minutes.</summary>
-        internal static string TileLabel(DemoSessionCatalogEntry entry) =>
-            entry.DisplayName + (entry.Descriptor.Minutes > 0 ? "\n" + MinutesText(entry.Descriptor.Minutes.Value) : string.Empty);
-
-        private static string MinutesText(double minutes) =>
-            string.Format(CultureInfo.InvariantCulture, HubText.AboutMinutes, minutes.ToString("0.#", CultureInfo.InvariantCulture));
+        /// <summary>"プリセット 1" over the step summary.</summary>
+        private string PresetLabel(int number) =>
+            HubText.Preset + " " + number + "\n" + _presets[number - 1].Summary(_catalog);
 
         /// <summary>This device's hapbeat-device.json; a missing or invalid file shows both axes as unspecified.</summary>
         internal static string DeviceAddressLine(DemoDeviceAddress address) =>
@@ -741,8 +728,7 @@ namespace Hapbeat.DemoHub
                 var entry = _catalog[index];
                 var columnLeft = left + (index / RowsPerColumn) * columnWidth;
                 var y = RowCentreY(GridTop, index % RowsPerColumn);
-                var minutes = entry.Descriptor.Minutes > 0 ? "（" + MinutesText(entry.Descriptor.Minutes.Value) + "）" : string.Empty;
-                _panel.AddText(new Vector2(columnLeft + TileLabelWidth * 0.5f, y), new Vector2(TileLabelWidth, RowHeight), entry.DisplayName + minutes, 17, Color.white, TextAnchor.MiddleLeft);
+                _panel.AddText(new Vector2(columnLeft + TileLabelWidth * 0.5f, y), new Vector2(TileLabelWidth, RowHeight), entry.DisplayName, 17, Color.white, TextAnchor.MiddleLeft);
                 var visible = Settings.VisibleDemos.Contains(entry.Descriptor.DemoId);
                 _panel.AddButton(new Vector2(columnLeft + TileLabelWidth + ButtonGap + TileToggleWidth * 0.5f, y), new Vector2(TileToggleWidth, RowHeight),
                     visible ? HubText.TileOn : HubText.TileOff, 17, () =>
