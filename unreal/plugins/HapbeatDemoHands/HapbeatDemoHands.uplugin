@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Hapbeat Demo Hands",
+	"Description": "The tracked-hand look shared by the Hapbeat Unreal demos: Meta's OpenXR hand mesh driven from the 26 OpenXR joints, drawn as a Custom Depth copy, an outline shell and a Skin or Ghost surface.",
+	"Category": "Hapbeat",
+	"CreatedBy": "Hapbeat",
+	"CreatedByURL": "https://hapbeat.com",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "HapbeatDemoHands",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
