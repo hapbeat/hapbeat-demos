@@ -18,7 +18,7 @@ param(
     [switch]$ConfigOnly,
     [switch]$ClearAddress
 )
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 if ($Group -eq 0 -or $Player -eq 0) { throw 'Player / Group must be 1..99 (or omitted).' }
 
 $root = Split-Path $PSScriptRoot -Parent

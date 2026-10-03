@@ -5,6 +5,9 @@ $script:QuestCacheFile = Join-Path $env:LOCALAPPDATA 'Hapbeat\quest-wifi-ip.txt'
 function Get-QuestAdb {
     $cmd = Get-Command adb -ErrorAction SilentlyContinue
     if (-not $cmd) { throw 'adb not found. Install Android platform-tools and add it to PATH.' }
+    # Start the server up front: its "daemon not running; starting now" stderr would otherwise surface as an
+    # error from the first real command under Windows PowerShell.
+    cmd /c "`"$($cmd.Source)`" start-server >nul 2>&1"
     return $cmd.Source
 }
 

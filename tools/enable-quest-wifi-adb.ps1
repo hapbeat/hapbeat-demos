@@ -2,7 +2,7 @@
 # enable-quest-wifi-adb.cmd). Needed after every Quest reboot: a non-rooted Quest cannot persist the adb TCP
 # port (setprop persist.adb.tcp.port is refused). Sleep/wake keeps it; a reboot resets it.
 # The Quest needs Developer Mode and must be on the same LAN as this PC.
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'quest-adb-common.ps1')
 $adb = Get-QuestAdb
 $new = @(Enable-QuestWifi $adb)

@@ -7,7 +7,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File tools/quest-mirror.ps1 [-BothEyes] [-Serial 192.168.0.37:5555]
 param([switch]$BothEyes, [string]$Serial = '', [int]$Width = 720)
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'quest-adb-common.ps1')
 
 $adb = Get-QuestAdb
