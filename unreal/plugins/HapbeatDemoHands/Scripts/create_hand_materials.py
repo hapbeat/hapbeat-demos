@@ -4,7 +4,7 @@ Creates under /Game/HapbeatDemoHands (the path UHapbeatDemoHand / FHapbeatDemoHa
 - Materials/M_HandDepth: invisible copy that only writes Custom Depth (the depth pre-pass stand-in).
 - Materials/M_SkinHand: textured skin, translucent, nearest layer only, short fade past the wrist.
 - Materials/M_HandInside: opaque inner shell (back faces only, darker skin), seen only through the wrist opening,
-  where it shows the inside of the hand instead of the scene behind (UHapbeatDemoHand::SetInsideVisible).
+  where it shows the inside of the hand instead of the scene behind (UHapbeatDemoHand::SetInsideVisible, off by default).
 - Materials/M_GhostHand + M_GhostOutline: Quest-style dark fill with a light outline shell.
 - Textures/T_MetaHand_{L,R}: from <project>/ThirdParty/MetaHands/Textures (baked with bake_meta_hand_textures.py
   from Meta's OpenXR hand meshes; derived from Meta's asset, so they stay in each project and are not shared here).

@@ -12,8 +12,8 @@ like `HapbeatDemoSession`.
   a Custom Depth copy (never drawn, the depth pre-pass stand-in), an outline shell and the visible surface, which
   draw only the hand's nearest layer and fade out just past the wrist where Meta's mesh ends.
   Styles: `Skin` (textured, thin darker contour) and `Ghost` (Quest-style dark fill, light outline).
-  A fourth copy, the opaque inner shell (Skin only, `SetInsideVisible`, on by default), shows the inside of the hand
-  through the wrist opening instead of the scene behind it.
+  A fourth copy, the opaque inner shell (Skin only, `SetInsideVisible(true)`, off by default), can show the inside of
+  the hand through the wrist opening instead of the scene behind it.
   `GetOutlineMaterial()` / `GetSurfaceMaterial()` are the dynamic instances (e.g. tint the outline while grabbing).
 
 ## Per project

@@ -75,8 +75,9 @@ public:
     void SetStyle(EHapbeatHandStyle InStyle);
     EHapbeatHandStyle GetStyle() const { return Style; }
     /**
-     * Skin only. True (default): an opaque inner shell shows the inside of the hand through the wrist opening;
-     * false: the opening shows the scene behind (the Safety Mill look of 2026-10-01).
+     * Skin only. True: an opaque inner shell shows the inside of the hand through the wrist opening. False (default):
+     * the opening shows the scene behind (the Safety Mill look of 2026-10-01; the shell was tried in T-Rex on
+     * 2026-10-03 and the softer see-through wrist was preferred).
      */
     void SetInsideVisible(bool bVisible);
     /** The Custom Depth copy: query bones here (all layers share its pose). */
@@ -94,6 +95,6 @@ private:
     UPROPERTY() TObjectPtr<UTexture2D> SkinTexture;
     FHapbeatHandRig Rig;
     EHapbeatHandStyle Style=EHapbeatHandStyle::Skin;
-    bool bInsideVisible=true,bShown=false;
+    bool bInsideVisible=false,bShown=false;
     bool IsLayerShown(int32 Layer) const;
 };
