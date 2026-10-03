@@ -6,3 +6,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("GloveBallDemo.Tests.Editor")]
 [assembly: InternalsVisibleTo("Hapbeat.Boxing.Tests")]
 [assembly: InternalsVisibleTo("HandDemo.Tests.Editor")]
+[assembly: InternalsVisibleTo("EnergyDuel.Tests.Editor")]
+[assembly: InternalsVisibleTo("EnergyDuel.Editor")]

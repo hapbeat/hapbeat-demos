@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -75,6 +76,14 @@ namespace Hapbeat.DemoSwitch
         public DemoHandStyle Style { get; private set; } = DemoHandStyle.Ghost;
         /// <summary>True when Meta's mesh is drawn; false before the first frame or with the procedural fallback.</summary>
         public bool UsesMetaModel => _mode == Mode.Meta;
+        /// <summary>True once the hands chose Meta's mesh or the procedural fallback (first frame after start).</summary>
+        public bool IsResolved => _mode != Mode.Pending;
+        /// <summary>The materials of the current look on Meta's mesh (null before resolution or with the fallback),
+        /// e.g. for a tutorial hand that should look like the tracked hands.</summary>
+        public IReadOnlyList<Material> CurrentMaterials =>
+            _mode == Mode.Meta ? (Style == DemoHandStyle.Skin ? _skinMaterials : _ghostMaterials) : null;
+        /// <summary>Raised by <see cref="SetStyle"/> after the look changed.</summary>
+        public event Action<DemoHandStyle> StyleChanged;
 
         /// <summary>The ticket's `hand_style` when present, otherwise <paramref name="fallback"/> (the settings' default).</summary>
         public static DemoHandStyle ResolveStyle(DemoSessionTicket ticket, DemoHandStyle fallback) =>
@@ -83,8 +92,10 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Switches the look; the procedural fallback has only the ghost look.</summary>
         public void SetStyle(DemoHandStyle style)
         {
+            var changed = Style != style;
             Style = style;
             if (_mode == Mode.Meta) ApplyStyle();
+            if (changed) StyleChanged?.Invoke(style);
         }
 
         private void Awake()
@@ -303,7 +314,7 @@ namespace Hapbeat.DemoSwitch
                         if (released.Add(material)) Release(material);
         }
 
-        private static void Release(Object target)
+        private static void Release(UnityEngine.Object target)
         {
             if (target == null) return;
             if (Application.isPlaying) Destroy(target);
