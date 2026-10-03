@@ -1,0 +1,21 @@
+{
+  "name": "Hapbeat.DemoSwitch.HapbeatSdk.Tests.Editor",
+  "rootNamespace": "Hapbeat.DemoSwitch.Tests",
+  "references": [
+    "Hapbeat.DemoSwitch",
+    "Hapbeat.DemoSwitch.HapbeatSdk",
+    "Hapbeat.Runtime",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS", "HAPBEAT_DEMO_SWITCH_HAS_SDK"],
+  "versionDefines": [
+    {
+      "name": "com.hapbeat.sdk",
+      "expression": "0.0.0",
+      "define": "HAPBEAT_DEMO_SWITCH_HAS_SDK"
+    }
+  ]
+}

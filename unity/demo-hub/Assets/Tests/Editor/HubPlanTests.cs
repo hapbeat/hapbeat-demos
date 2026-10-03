@@ -160,5 +160,13 @@ namespace Hapbeat.DemoHub.Tests
                 foreach (var character in value.Where(c => !char.IsWhiteSpace(c) && c != '{' && c != '}'))
                     Assert.That(font.HasCharacter(character), Is.True, value + ": " + character);
         }
+
+        [Test]
+        public void DeviceAddressLineShowsUnspecifiedAxes()
+        {
+            Assert.That(DemoHubController.DeviceAddressLine(new DemoDeviceAddress(1, 2)), Is.EqualTo("この端末: プレイヤー 1 / グループ 2"));
+            Assert.That(DemoHubController.DeviceAddressLine(new DemoDeviceAddress(-1, 99)), Is.EqualTo("この端末: プレイヤー 指定なし / グループ 99"));
+            Assert.That(DemoHubController.DeviceAddressLine(null), Is.EqualTo("この端末: プレイヤー 指定なし / グループ 指定なし"));
+        }
     }
 }

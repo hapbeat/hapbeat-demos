@@ -1,0 +1,18 @@
+{
+  "name": "Hapbeat.DemoSwitch.HapbeatSdk",
+  "rootNamespace": "Hapbeat.DemoSwitch",
+  "references": [
+    "Hapbeat.DemoSwitch",
+    "Hapbeat.Runtime"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": ["HAPBEAT_DEMO_SWITCH_HAS_SDK"],
+  "versionDefines": [
+    {
+      "name": "com.hapbeat.sdk",
+      "expression": "0.0.0",
+      "define": "HAPBEAT_DEMO_SWITCH_HAS_SDK"
+    }
+  ],
+  "noEngineReferences": false
+}

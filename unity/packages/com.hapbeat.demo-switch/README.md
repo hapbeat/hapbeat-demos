@@ -1,6 +1,6 @@
 # Hapbeat Demo Switch
 
-Foreground demo applications use this package to receive controller commands on UDP 7710 and launch only locally allowlisted applications, and to run self-paced Demo Sessions. It is independent of the Hapbeat SDK and UDP 7700.
+Foreground demo applications use this package to receive controller commands on UDP 7710 and launch only locally allowlisted applications, and to run self-paced Demo Sessions. It is independent of the Hapbeat SDK and UDP 7700; only the optional per-device address applier uses the SDK when it is installed.
 
 ## Install and configure
 
@@ -44,6 +44,14 @@ Self-paced sequences built in the Hub follow `hapbeat-contracts/specs/demo-sessi
 - **CONTROL**: `haptics_on`, `haptics_off`, `haptics_ui_show` and `haptics_ui_hide` are handled here instead of by `IDemoAppControls`, also without a session, with the usual authentication, sequence, ACK and READY. A demo without `haptics_toggle` returns `FAILED/not_allowed`.
 - **Input**: panels use their own input: XR Hands index-tip poke (arm 2 cm in front, press at the surface) and Input System XR controller pointer ray + trigger. No EventSystem or demo input stack is required.
 - **Font**: Noto Sans CJK JP (SIL OFL 1.1, `Runtime/Resources/HapbeatDemoSession/OFL.txt`) is loaded from `Resources`, so every APK using this package includes it (about 16 MB uncompressed).
+
+### Per-device Hapbeat address (0.1.0-d6)
+
+Follows the "device address file" section of `hapbeat-contracts/specs/demo-session.md`. `hapbeat-demos/tools/install-demos.ps1 -Group <n> [-Player <n>]` writes `{"version":1,"player":<n>,"group":<n>}` to each package's `/sdcard/Android/data/<package>/files/hapbeat-device.json`.
+
+- **Read** (`DemoDeviceAddress`, SDK-independent): players read `Application.persistentDataPath/hapbeat-device.json` once. At most 1024 bytes, `version` 1, `player`/`group` -1 or 1..99, no other field. A missing file does nothing; an invalid one logs a warning and does nothing. The Editor reads only the file named by the environment variable `HAPBEAT_DEVICE_ADDRESS_FILE` (tests set `DemoDeviceAddress.PathOverride`).
+- **Apply** (assembly `Hapbeat.DemoSwitch.HapbeatSdk`, compiled only when `com.hapbeat.sdk` is installed, so the Hub builds without the SDK): bootstraps itself before the first scene, waits for `HapbeatManager.Instance` and calls `SetAddressOverride(player, group, persist: false)` once. The SDK reads -1 as "disable this axis", so a -1 axis in the file passes the manager's current effective value instead and stays unchanged. Build-forced axes (`HapbeatConfig.buildOverride*`) are kept by the SDK. The file wins over a PlayerPrefs override restored by the SDK; later runtime UI or API changes are free. It logs `HAPBEAT_DEVICE_ADDRESS player=<n> group=<n> source=<path>` with the effective values. No demo code or scene change is needed.
+- **Hub**: reads its own file and shows it on the top screen (no haptics).
 
 ## Controller flow and IP discovery
 

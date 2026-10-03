@@ -43,6 +43,8 @@ namespace Hapbeat.DemoHub
         public const string PlanFull = "プランは最大 32 件です";
         public const string SaveFailed = "に保存できませんでした";
         public const string Separator = "　／　";
+        public const string DeviceAddress = "この端末: プレイヤー {0} / グループ {1}";
+        public const string Unspecified = "指定なし";
 
         public static IEnumerable<string> All => typeof(HubText).GetFields()
             .Where(f => f.IsLiteral && f.FieldType == typeof(string)).Select(f => (string)f.GetRawConstantValue());
@@ -72,6 +74,7 @@ namespace Hapbeat.DemoHub
         private int _catalogPage, _planPage;
         private string _status = string.Empty;
         private bool _placed;
+        private DemoDeviceAddress _deviceAddress;
 
         public HubScreen Screen { get; private set; }
         public HubPlan Plan { get; private set; } = new HubPlan();
@@ -79,6 +82,7 @@ namespace Hapbeat.DemoHub
 
         private void Start()
         {
+            _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
             Show(DemoSession.IsFinishedSession ? HubScreen.Finished : HubScreen.Top);
         }
@@ -145,11 +149,12 @@ namespace Hapbeat.DemoHub
         {
             _panel.Resize(new Vector2(540, 380));
             _panel.AddText(new Vector2(0, 160), new Vector2(500, 40), HubText.TopTitle, 30, Color.white);
+            _panel.AddText(new Vector2(0, 128), new Vector2(500, 24), DeviceAddressLine(_deviceAddress), 17, Muted);
             var lines = new List<string>();
             for (var index = 0; index < Plan.Steps.Count && lines.Count < 5; index++) lines.Add(Summary(index));
             if (Plan.Steps.Count > 5) lines.Add(string.Format(CultureInfo.InvariantCulture, HubText.More, Plan.Steps.Count - 5));
             var summary = Plan.Steps.Count == 0 ? HubText.EmptyPlan : string.Join("\n", lines);
-            _panel.AddText(new Vector2(0, 45), new Vector2(500, 180), summary, 19, Color.white, TextAnchor.UpperLeft);
+            _panel.AddText(new Vector2(0, 35), new Vector2(500, 160), summary, 19, Color.white, TextAnchor.UpperLeft);
             var minutes = Plan.Minutes(_catalog);
             _panel.AddText(new Vector2(0, -68), new Vector2(500, 30),
                 string.Format(CultureInfo.InvariantCulture, HubText.Minutes, minutes.ToString("0.#", CultureInfo.InvariantCulture))
@@ -159,6 +164,15 @@ namespace Hapbeat.DemoHub
             _panel.AddButton(new Vector2(185, -122), new Vector2(140, 50), HubText.Edit, 20, () => Show(HubScreen.Edit));
             _panel.AddText(new Vector2(0, -170), new Vector2(500, 30), _status, 16, Warning);
         }
+
+        /// <summary>This device's hapbeat-device.json; a missing or invalid file shows both axes as unspecified.</summary>
+        internal static string DeviceAddressLine(DemoDeviceAddress address) =>
+            string.Format(CultureInfo.InvariantCulture, HubText.DeviceAddress,
+                Axis(address == null ? DemoDeviceAddress.Unspecified : address.Player),
+                Axis(address == null ? DemoDeviceAddress.Unspecified : address.Group));
+
+        private static string Axis(int value) =>
+            value == DemoDeviceAddress.Unspecified ? HubText.Unspecified : value.ToString(CultureInfo.InvariantCulture);
 
         private string Summary(int index)
         {
