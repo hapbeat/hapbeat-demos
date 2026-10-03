@@ -360,6 +360,37 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
+        public void PressedButtonReportsHeldUntilReleased()
+        {
+            var panel = DemoSessionPanel.Create("test panel", new Vector2(300, 200));
+            try
+            {
+                var button = panel.AddButton(Vector2.zero, new Vector2(120, 60), "Hold", 20, null);
+                panel.EnableInputAfter(0f);
+                var now = Time.realtimeSinceStartup + 1f;
+                var front = panel.transform.position - panel.transform.forward * 0.03f;
+                var through = panel.transform.position + panel.transform.forward * 0.002f;
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = through } }, now);
+                Assert.That(button.Held, Is.False, "A tip that came from behind does not hold.");
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = front } }, now);
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = through } }, now);
+                Assert.That(button.Held, Is.True);
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = through } }, now);
+                Assert.That(button.Held, Is.True, "Still pressed.");
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = front } }, now);
+                Assert.That(button.Held, Is.False, "Released.");
+
+                var ray = new DemoSessionPointer { Id = 3, Position = panel.transform.position - panel.transform.forward * 0.5f, Direction = panel.transform.forward, TriggerHeld = true };
+                panel.ProcessPointers(new[] { ray }, now);
+                Assert.That(button.Held, Is.True);
+                ray.TriggerHeld = false;
+                panel.ProcessPointers(new[] { ray }, now);
+                Assert.That(button.Held, Is.False);
+            }
+            finally { Object.DestroyImmediate(panel.gameObject); }
+        }
+
+        [Test]
         public void LaunchNextAdvancesIndexAndCarriesHapticsUi()
         {
             Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);

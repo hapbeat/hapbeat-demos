@@ -126,8 +126,8 @@ namespace Hapbeat.DemoHub.Editor
         public static void Configure()
         {
             PlayerSettings.companyName = "Hapbeat";
-            PlayerSettings.productName = "Hapbeat Demo Hub";
-            PlayerSettings.bundleVersion = "0.1.0-d2";
+            PlayerSettings.productName = "Demo Hub";
+            PlayerSettings.bundleVersion = "0.1.0-d3";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageId);
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -136,7 +136,7 @@ namespace Hapbeat.DemoHub.Editor
             PlayerSettings.Android.forceInternetPermission = true;
             PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.GameActivity;
             PlayerSettings.Android.useCustomKeystore = false;
-            PlayerSettings.Android.bundleVersionCode = 2;
+            PlayerSettings.Android.bundleVersionCode = 3;
             PlayerSettings.runInBackground = false;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);

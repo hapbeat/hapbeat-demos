@@ -26,7 +26,7 @@ namespace Hapbeat.DemoHub
     }
 
     /// <summary>
-    /// The Hub's editable plan. The stored format is internal to the Hub (contract: plan format is
+    /// A preset's editable plan. The stored format is internal to the Hub (contract: plan format is
     /// implementation-defined); only <see cref="BuildTicket"/> produces contract data.
     /// </summary>
     public sealed class HubPlan
@@ -36,9 +36,17 @@ namespace Hapbeat.DemoHub
         private static readonly System.Text.RegularExpressions.Regex IdentifierPattern =
             new System.Text.RegularExpressions.Regex(@"^[a-z0-9][a-z0-9._-]{0,63}\z");
 
+        public const int SummaryMaxLength = 60;
+
         public List<HubPlanStep> Steps { get; } = new List<HubPlanStep>();
-        /// <summary>Initial `haptics_ui` for the whole session (default hidden).</summary>
-        public bool HapticsUi { get; set; }
+
+        /// <summary>One-step plan for a demo tile: descriptor default options, retry offered.</summary>
+        public static HubPlan Single(DemoSessionDescriptor descriptor)
+        {
+            var plan = new HubPlan();
+            plan.Add(descriptor);
+            return plan;
+        }
 
         public bool Add(DemoSessionDescriptor descriptor)
         {
@@ -115,6 +123,18 @@ namespace Hapbeat.DemoHub
         public double Minutes(IReadOnlyList<DemoSessionCatalogEntry> catalog) =>
             Steps.Select(s => Find(catalog, s.DemoId)).Where(e => e != null).Sum(e => e.Descriptor.Minutes ?? 0);
 
+        /// <summary>"バレーボール ブロック 3点先取 → T-Rex エンカウンター": installed steps only, at most 60 characters.</summary>
+        public string Summary(IReadOnlyList<DemoSessionCatalogEntry> catalog)
+        {
+            var titles = new List<string>();
+            foreach (var step in Steps)
+            {
+                var entry = Find(catalog, step.DemoId);
+                if (entry != null) titles.Add(Title(step, entry.Descriptor));
+            }
+            return Truncate(string.Join(HubText.Arrow, titles), SummaryMaxLength);
+        }
+
         public static DemoSessionCatalogEntry Find(IReadOnlyList<DemoSessionCatalogEntry> catalog, string demoId) =>
             catalog.FirstOrDefault(e => e.Descriptor.DemoId == demoId);
 
@@ -122,7 +142,7 @@ namespace Hapbeat.DemoHub
         /// Ticket at index 0 for the installed steps. Options contain exactly the active options
         /// (contract). Returns null when no step is installed.
         /// </summary>
-        public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId)
+        public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi)
         {
             var steps = new List<DemoSessionStep>();
             foreach (var step in Steps)
@@ -133,7 +153,7 @@ namespace Hapbeat.DemoHub
                     .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), null);
                 steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry.Descriptor), entry.PackageName, entry.ActivityName, options, step.Retry));
             }
-            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, HapticsUi, steps, finish);
+            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish);
         }
 
         public string ToJson()
@@ -145,7 +165,7 @@ namespace Hapbeat.DemoHub
                 foreach (var pair in step.Options.OrderBy(p => p.Key, StringComparer.Ordinal)) options[pair.Key] = pair.Value;
                 steps.Add(new JObject { ["demo_id"] = step.DemoId, ["options"] = options, ["retry"] = step.Retry });
             }
-            return new JObject { ["version"] = 1, ["haptics_ui"] = HapticsUi, ["steps"] = steps }.ToString(Formatting.Indented);
+            return new JObject { ["version"] = 1, ["steps"] = steps }.ToString(Formatting.Indented);
         }
 
         public static bool TryFromJson(string json, out HubPlan plan)
@@ -155,7 +175,7 @@ namespace Hapbeat.DemoHub
             {
                 var root = JObject.Parse(json);
                 if (root.Value<int?>("version") != 1 || !(root["steps"] is JArray steps)) return false;
-                var result = new HubPlan { HapticsUi = root.Value<bool?>("haptics_ui") ?? false };
+                var result = new HubPlan();
                 foreach (var token in steps.Take(MaxSteps))
                 {
                     var demoId = token.Value<string>("demo_id");
@@ -176,11 +196,13 @@ namespace Hapbeat.DemoHub
         }
     }
 
-    /// <summary>Last plan (auto-saved) and three preset slots under persistentDataPath.</summary>
+    /// <summary>Three preset plans and the launcher settings under persistentDataPath/demo-session.</summary>
     public sealed class HubPlanStore
     {
-        public const string LastSlot = "last";
         public const int PresetCount = 3;
+        public const string SettingsSlot = "hub-settings";
+        /// <summary>The planner Hub's auto-saved plan; moved to preset 1 once, when the launcher first runs.</summary>
+        public const string LegacyLastSlot = "last";
         private readonly string _directory;
 
         public HubPlanStore(string directory)
@@ -191,41 +213,86 @@ namespace Hapbeat.DemoHub
         public static HubPlanStore Default => new HubPlanStore(Path.Combine(Application.persistentDataPath, "demo-session"));
         public static string PresetSlot(int number) => "preset-" + number;
 
-        public bool Save(HubPlan plan, string slot)
+        public bool Save(HubPlan plan, string slot) => Write(slot, plan.ToJson());
+
+        public bool TryLoad(string slot, out HubPlan plan)
+        {
+            plan = null;
+            return TryRead(slot, out var text) && HubPlan.TryFromJson(text, out plan);
+        }
+
+        /// <summary>Preset 1..3; a missing or unreadable preset is an empty plan.</summary>
+        public HubPlan LoadPreset(int number) => TryLoad(PresetSlot(number), out var plan) ? plan : new HubPlan();
+
+        public bool SaveSettings(HubSettings settings) => Write(SettingsSlot, settings.ToJson());
+
+        /// <summary>
+        /// Saved settings, or defaults (nothing shown on the top screen). On the first run (no settings
+        /// file) the legacy last plan moves to preset 1, which is then shown when it has steps.
+        /// </summary>
+        public HubSettings LoadSettings()
+        {
+            if (TryRead(SettingsSlot, out var text) && HubSettings.TryFromJson(text, out var settings)) return settings;
+            settings = new HubSettings();
+            if (Exists(SettingsSlot)) return settings;
+            if (TryLoad(LegacyLastSlot, out var last) && Save(last, PresetSlot(1)))
+            {
+                Delete(LegacyLastSlot);
+                if (last.Steps.Count > 0) settings.VisiblePresets.Add(1);
+            }
+            SaveSettings(settings);
+            return settings;
+        }
+
+        public bool Exists(string slot) => File.Exists(PathFor(slot));
+
+        private bool Write(string slot, string text)
         {
             try
             {
                 Directory.CreateDirectory(_directory);
                 var path = PathFor(slot);
                 var temporary = path + ".tmp";
-                File.WriteAllText(temporary, plan.ToJson(), new UTF8Encoding(false));
+                File.WriteAllText(temporary, text, new UTF8Encoding(false));
                 if (File.Exists(path)) File.Delete(path);
                 File.Move(temporary, path);
                 return true;
             }
             catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
             {
-                Debug.LogWarning("[Demo Hub] Could not save plan '" + slot + "': " + exception.Message);
+                Debug.LogWarning("[Demo Hub] Could not save '" + slot + "': " + exception.Message);
                 return false;
             }
         }
 
-        public bool TryLoad(string slot, out HubPlan plan)
+        private bool TryRead(string slot, out string text)
         {
-            plan = null;
+            text = null;
             try
             {
                 var path = PathFor(slot);
-                return File.Exists(path) && HubPlan.TryFromJson(File.ReadAllText(path, Encoding.UTF8), out plan);
+                if (!File.Exists(path)) return false;
+                text = File.ReadAllText(path, Encoding.UTF8);
+                return true;
             }
             catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
             {
-                Debug.LogWarning("[Demo Hub] Could not load plan '" + slot + "': " + exception.Message);
+                Debug.LogWarning("[Demo Hub] Could not load '" + slot + "': " + exception.Message);
                 return false;
             }
         }
 
-        public bool Exists(string slot) => File.Exists(PathFor(slot));
+        private void Delete(string slot)
+        {
+            try
+            {
+                File.Delete(PathFor(slot));
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                Debug.LogWarning("[Demo Hub] Could not remove '" + slot + "': " + exception.Message);
+            }
+        }
 
         private string PathFor(string slot) => Path.Combine(_directory, slot + ".json");
     }

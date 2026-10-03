@@ -130,6 +130,7 @@ namespace Hapbeat.DemoSwitch
     /// <summary>
     /// Fingertip press with hysteresis. The tip must first be 2 cm in front of the surface (armed);
     /// crossing the surface fires once. A tip that comes from behind the panel never fires.
+    /// After a press the tip counts as holding until it leaves the surface again (long press).
     /// </summary>
     internal struct DemoSessionPokeTracker
     {
@@ -137,14 +138,17 @@ namespace Hapbeat.DemoSwitch
         public const float PressDepth = 0f;
         public const float MaxDepth = 0.06f;
         public bool Armed;
+        public bool Holding;
 
         /// <summary><paramref name="depth"/> is metres past the surface (negative = in front).</summary>
         public bool Update(float depth, bool overTarget)
         {
-            if (depth <= ArmDepth) { Armed = true; return false; }
-            if (depth > MaxDepth) { Armed = false; return false; }
+            if (depth <= ArmDepth) { Armed = true; Holding = false; return false; }
+            if (depth > MaxDepth) { Armed = false; Holding = false; return false; }
+            if (depth < PressDepth) Holding = false;
             if (!Armed || depth < PressDepth) return false;
             Armed = false;
+            Holding = overTarget;
             return overTarget;
         }
     }
@@ -171,6 +175,8 @@ namespace Hapbeat.DemoSwitch
         internal RectTransform Rect { get; }
         internal Action OnPress { get; set; }
         internal bool Hovered { get; set; }
+        /// <summary>Pressed and still held this frame: a fingertip that pressed it stays past the surface, or a ray keeps the trigger down on it.</summary>
+        public bool Held { get; internal set; }
         public bool Interactable { get; set; } = true;
         /// <summary>Selected/ON look for chips and toggles.</summary>
         public bool Highlighted { get; set; }
@@ -316,7 +322,7 @@ namespace Hapbeat.DemoSwitch
 
         internal void ProcessPointers(IReadOnlyList<DemoSessionPointer> pointers, float now)
         {
-            foreach (var button in _buttons) button.Hovered = false;
+            foreach (var button in _buttons) button.Hovered = button.Held = false;
             var accepts = AcceptsInputAt(now);
             var cursorShown = new bool[_cursors.Length];
             DemoSessionButton pressed = null;
@@ -330,6 +336,7 @@ namespace Hapbeat.DemoSwitch
                     if (target != null && depth > -HoverDepth && depth < DemoSessionPokeTracker.MaxDepth) target.Hovered = true;
                     _pokes.TryGetValue(pointer.Id, out var tracker);
                     if (tracker.Update(depth, target != null) && accepts && target != null && target.Interactable) pressed = target;
+                    if (tracker.Holding && accepts && target != null && target.Interactable) target.Held = true;
                     _pokes[pointer.Id] = tracker;
                     continue;
                 }
@@ -350,6 +357,7 @@ namespace Hapbeat.DemoSwitch
                 var button = ButtonAt(hit);
                 if (button == null) continue;
                 button.Hovered = true;
+                if (pointer.TriggerHeld && accepts && button.Interactable) button.Held = true;
                 if (pointer.TriggerHeld && !wasHeld && accepts && button.Interactable) pressed = button;
             }
             for (var index = 0; index < _cursors.Length; index++)

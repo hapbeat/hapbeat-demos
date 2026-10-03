@@ -72,26 +72,25 @@ namespace Hapbeat.DemoHub.Tests
         }
 
         [Test]
-        public void PresetsAndLastPlanRoundTrip()
+        public void PresetsRoundTrip()
         {
             var store = new HubPlanStore(_directory);
-            Assert.That(store.TryLoad(HubPlanStore.LastSlot, out _), Is.False);
-            var plan = new HubPlan { HapticsUi = true };
+            Assert.That(store.TryLoad(HubPlanStore.PresetSlot(1), out _), Is.False);
+            Assert.That(store.LoadPreset(1).Steps, Is.Empty);
+            var plan = new HubPlan();
             plan.Add(_volley);
             plan.CycleOption(0, _volley, "scene");
             plan.ToggleRetry(0);
             plan.Add(_trex);
             for (var number = 1; number <= HubPlanStore.PresetCount; number++)
                 Assert.That(store.Save(plan, HubPlanStore.PresetSlot(number)), Is.True);
-            Assert.That(store.Save(new HubPlan(), HubPlanStore.LastSlot), Is.True);
             Assert.That(store.TryLoad(HubPlanStore.PresetSlot(2), out var loaded), Is.True);
-            Assert.That(loaded.HapticsUi, Is.True);
             Assert.That(loaded.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
             Assert.That(loaded.Steps[0].Options["scene"], Is.EqualTo("receive"));
             Assert.That(loaded.Steps[0].Retry, Is.False);
-            Assert.That(store.TryLoad(HubPlanStore.LastSlot, out var last) && last.Steps.Count == 0, Is.True);
             File.WriteAllText(Path.Combine(_directory, "preset-3.json"), "{broken");
             Assert.That(store.TryLoad(HubPlanStore.PresetSlot(3), out _), Is.False);
+            Assert.That(store.LoadPreset(3).Steps, Is.Empty, "A broken preset is empty.");
         }
 
         [Test]
@@ -105,7 +104,7 @@ namespace Hapbeat.DemoHub.Tests
             plan.ToggleRetry(2);
             plan.Add(_trex);
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId());
+            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.False);
@@ -122,33 +121,7 @@ namespace Hapbeat.DemoHub.Tests
 
             var empty = new HubPlan();
             empty.Steps.Add(new HubPlanStep("not-installed", null, true));
-            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId()), Is.Null);
-        }
-
-        [Test]
-        public void ControllerScreensBuildAndStartFailsSafelyInTheEditor()
-        {
-            var go = new GameObject("hub test");
-            try
-            {
-                var controller = go.AddComponent<DemoHubController>();
-                controller.Initialize(_catalog, new HubPlanStore(_directory));
-                controller.Plan.Add(_volley);
-                controller.Show(DemoHubController.HubScreen.Edit);
-                controller.Show(DemoHubController.HubScreen.Finished);
-                controller.Show(DemoHubController.HubScreen.Top);
-                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
-                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
-                controller.StartSession();
-                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
-                var texts = controller.Panel.GetComponentsInChildren<UnityEngine.UI.Text>().Select(t => t.text).ToList();
-                Assert.That(texts.Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
-                controller.SavePreset(1);
-                controller.Plan.Remove(0);
-                controller.LoadPreset(1);
-                Assert.That(controller.Plan.Steps.Single().DemoId, Is.EqualTo("volley"));
-            }
-            finally { Object.DestroyImmediate(go); }
+            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false), Is.Null);
         }
 
         [Test]
