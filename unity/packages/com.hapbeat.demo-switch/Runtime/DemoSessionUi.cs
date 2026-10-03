@@ -168,6 +168,64 @@ namespace Hapbeat.DemoSwitch
         }
     }
 
+    /// <summary>
+    /// Short, quiet click played when a panel button is pressed (not on hover, never for a disabled button).
+    /// The clip is synthesised once (no external audio asset): a 2.4 kHz tone with a 1 ms attack and a 5 ms
+    /// exponential decay, 30 ms long. One 2D source survives scene loads and keeps playing while the shared
+    /// pause holds Unity audio, so the pause panel's own buttons click too. Edit mode (tests) never plays it.
+    /// </summary>
+    internal static class DemoSessionClickSound
+    {
+        public const int SampleRate = 48000;
+        public const float DurationSeconds = 0.03f;
+        public const float FrequencyHz = 2400f;
+        public const float AttackSeconds = 0.001f;
+        public const float DecaySeconds = 0.005f;
+        /// <summary>Peak of the clip itself.</summary>
+        public const float Peak = 0.4f;
+        /// <summary>Source volume: the click peaks at Peak * Volume (about -14 dBFS).</summary>
+        public const float Volume = 0.5f;
+        private static AudioSource _source;
+        private static AudioClip _clip;
+
+        /// <summary>The clip's mono PCM samples at <paramref name="sampleRate"/>.</summary>
+        internal static float[] Samples(int sampleRate)
+        {
+            var count = Mathf.RoundToInt(DurationSeconds * sampleRate);
+            var samples = new float[count];
+            for (var index = 0; index < count; index++)
+            {
+                var time = (float)index / sampleRate;
+                var envelope = time < AttackSeconds ? time / AttackSeconds : Mathf.Exp(-(time - AttackSeconds) / DecaySeconds);
+                // The last millisecond ramps to exact silence, so the clip never ends on a step.
+                var tail = Mathf.Clamp01((count - 1 - index) / (AttackSeconds * sampleRate));
+                samples[index] = Peak * envelope * tail * Mathf.Sin(2f * Mathf.PI * FrequencyHz * time);
+            }
+            return samples;
+        }
+
+        public static void Play()
+        {
+            if (!Application.isPlaying) return;
+            if (_source == null)
+            {
+                if (_clip == null)
+                {
+                    _clip = AudioClip.Create("Hapbeat Demo Click", Mathf.RoundToInt(DurationSeconds * SampleRate), 1, SampleRate, false);
+                    _clip.SetData(Samples(SampleRate), 0);
+                }
+                var go = new GameObject("Hapbeat Demo Click Sound");
+                UnityEngine.Object.DontDestroyOnLoad(go);
+                _source = go.AddComponent<AudioSource>();
+                _source.playOnAwake = false;
+                _source.spatialBlend = 0f;
+                _source.volume = Volume;
+                _source.ignoreListenerPause = true;
+            }
+            _source.PlayOneShot(_clip);
+        }
+    }
+
     public sealed class DemoSessionButton
     {
         private static readonly Color Normal = new Color(0.12f, 0.2f, 0.27f, 1f);
@@ -214,6 +272,7 @@ namespace Hapbeat.DemoSwitch
         internal void Press()
         {
             FlashFor(0.15f);
+            DemoSessionClickSound.Play();
             OnPress?.Invoke();
         }
 
@@ -236,11 +295,20 @@ namespace Hapbeat.DemoSwitch
     /// <summary>
     /// World-space panel whose buttons accept fingertip pokes and controller ray + trigger without
     /// any EventSystem. Sizes are millimetres; the canvas is scaled so one unit equals 1 mm.
+    /// The last child is a depth-only layer (<see cref="DepthShaderPath"/>): world-space UI writes no depth,
+    /// and the shared hands draw after the panels (<see cref="HandSortingOrder"/>), so a hand in front of a
+    /// panel covers it with its fill and outline while a hand behind it stays hidden.
     /// </summary>
     public sealed class DemoSessionPanel : MonoBehaviour
     {
+        /// <summary>Canvas sorting order of every panel (in front of the scene's ordinary transparent objects).</summary>
+        public const int SortingOrder = 500;
+        /// <summary>Renderer sorting order of the shared hands: after the panels' colours and their depth layer.</summary>
+        public const int HandSortingOrder = SortingOrder + 1;
+        public const string DepthShaderPath = "HapbeatDemoSession/PanelDepth";
         private const float MetresPerUnit = 0.001f;
         private const float HoverDepth = 0.08f;
+        private static Material _depthMaterial;
         private readonly List<DemoSessionButton> _buttons = new List<DemoSessionButton>();
         private readonly List<GameObject> _content = new List<GameObject>();
         private readonly Dictionary<int, DemoSessionPokeTracker> _pokes = new Dictionary<int, DemoSessionPokeTracker>();
@@ -250,6 +318,7 @@ namespace Hapbeat.DemoSwitch
         private RectTransform _root;
         private CanvasScaler _scaler;
         private Image _background;
+        private Image _depth;
         private float _inputEnabledAt;
 
         public RectTransform Root => _root;
@@ -261,7 +330,7 @@ namespace Hapbeat.DemoSwitch
             var go = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
-            canvas.sortingOrder = 500;
+            canvas.sortingOrder = SortingOrder;
             var panel = go.AddComponent<DemoSessionPanel>();
             panel._scaler = go.GetComponent<CanvasScaler>();
             // Renders dynamic glyphs at a resolution that stays sharp at arm's length.
@@ -282,7 +351,39 @@ namespace Hapbeat.DemoSwitch
                 cursor.gameObject.SetActive(false);
                 panel._cursors[index] = cursor;
             }
+            panel.CreateDepthLayer();
             return panel;
+        }
+
+        /// <summary>The depth-only layer, or null when its shader is missing or unsupported.</summary>
+        internal Image DepthLayer => _depth;
+
+        private void CreateDepthLayer()
+        {
+            if (_depthMaterial == null)
+            {
+                var shader = Resources.Load<Shader>(DepthShaderPath);
+                if (shader == null || !shader.isSupported)
+                {
+                    Debug.LogWarning("[Demo Session] Shader " + DepthShaderPath + " is missing or unsupported; hands may show through panels.");
+                    return;
+                }
+                _depthMaterial = new Material(shader) { name = "Demo Panel Depth" };
+            }
+            _depth = new GameObject("Depth", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+            _depth.rectTransform.SetParent(_root, false);
+            _depth.rectTransform.anchorMin = Vector2.zero;
+            _depth.rectTransform.anchorMax = Vector2.one;
+            _depth.rectTransform.sizeDelta = Vector2.zero;
+            _depth.material = _depthMaterial;
+            _depth.raycastTarget = false;
+        }
+
+        /// <summary>Cursors stay on top of later content, and the depth layer after everything.</summary>
+        private void KeepOverlaysLast()
+        {
+            foreach (var cursor in _cursors) cursor.rectTransform.SetAsLastSibling();
+            if (_depth != null) _depth.rectTransform.SetAsLastSibling();
         }
 
         public void Resize(Vector2 sizeMillimetres) => _root.sizeDelta = sizeMillimetres;
@@ -307,7 +408,7 @@ namespace Hapbeat.DemoSwitch
             image.color = color;
             image.raycastTarget = false;
             _content.Add(image.gameObject);
-            foreach (var cursor in _cursors) cursor.rectTransform.SetAsLastSibling();
+            KeepOverlaysLast();
             return image;
         }
 
@@ -316,6 +417,7 @@ namespace Hapbeat.DemoSwitch
             var label = CreateText("Text", _root, size, text, fontSize, color, alignment);
             label.rectTransform.anchoredPosition = centre;
             _content.Add(label.gameObject);
+            KeepOverlaysLast();
             return label;
         }
 
@@ -336,8 +438,7 @@ namespace Hapbeat.DemoSwitch
             button.Refresh();
             _buttons.Add(button);
             _content.Add(go);
-            // Cursors stay on top of later content.
-            foreach (var cursor in _cursors) cursor.rectTransform.SetAsLastSibling();
+            KeepOverlaysLast();
             return button;
         }
 
@@ -381,6 +482,15 @@ namespace Hapbeat.DemoSwitch
         {
             ProcessPointers(DemoSessionPointers.Current, Time.realtimeSinceStartup);
             foreach (var button in _buttons) button.Refresh();
+            UpdateDepthLayer();
+        }
+
+        /// <summary>A panel whose background was made see-through (e.g. a floating marker) does not hide what is behind it.</summary>
+        internal void UpdateDepthLayer()
+        {
+            if (_depth == null) return;
+            var occludes = _background.color.a >= 0.5f;
+            if (_depth.enabled != occludes) _depth.enabled = occludes;
         }
 
         internal void ProcessPointers(IReadOnlyList<DemoSessionPointer> pointers, float now)

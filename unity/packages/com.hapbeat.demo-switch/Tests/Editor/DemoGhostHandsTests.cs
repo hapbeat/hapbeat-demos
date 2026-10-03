@@ -108,6 +108,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(mesh.vertexCount, Is.GreaterThan(0));
             Assert.That(mesh.subMeshCount, Is.EqualTo(2));
             Assert.That(hands.HandRenderer(1).sharedMaterials.Length, Is.EqualTo(2));
+            Assert.That(hands.HandRenderer(1).sortingOrder, Is.EqualTo(DemoSessionPanel.HandSortingOrder), "Drawn after the panels.");
             var farthest = float.MinValue;
             foreach (var vertex in mesh.vertices) farthest = Mathf.Max(farthest, vertex.z);
             // The low-poly cap reaches the tip joint within a millimetre and never past it.

@@ -296,6 +296,8 @@ namespace Hapbeat.DemoSwitch
                 renderer.lightProbeUsage = LightProbeUsage.Off;
                 renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+                // After the panels (whose depth layer then hides a hand behind them), see DemoSessionPanel.
+                renderer.sortingOrder = DemoSessionPanel.HandSortingOrder;
                 go.SetActive(false);
                 _renderers[side] = renderer;
                 _meshes[side] = mesh;

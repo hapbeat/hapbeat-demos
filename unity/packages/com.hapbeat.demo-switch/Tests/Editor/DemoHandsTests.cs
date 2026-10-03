@@ -77,6 +77,7 @@ namespace Hapbeat.DemoSwitch.Tests
             var renderer = hands.HandRenderer(1);
             Assert.That(renderer.sharedMaterials.Length, Is.EqualTo(3));
             Assert.That(renderer.sharedMaterials.Select(m => m.renderQueue), Is.EqualTo(new[] { 2999, 3000, 3001 }));
+            Assert.That(renderer.sortingOrder, Is.EqualTo(DemoSessionPanel.HandSortingOrder), "Drawn after the panels.");
             Assert.That(renderer.sharedMaterials[1].shader.name, Is.EqualTo("Hidden/Hapbeat/DemoHandGhost"));
             var block = new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);

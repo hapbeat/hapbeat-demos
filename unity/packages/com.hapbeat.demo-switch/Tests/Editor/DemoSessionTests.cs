@@ -389,6 +389,49 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
+        public void PanelDepthLayerStaysLastAndHandsDrawAfterPanels()
+        {
+            var panel = DemoSessionPanel.Create("test panel", new Vector2(300, 200));
+            try
+            {
+                Assert.That(DemoSessionPanel.HandSortingOrder, Is.GreaterThan(DemoSessionPanel.SortingOrder));
+                Assert.That(panel.GetComponent<Canvas>().sortingOrder, Is.EqualTo(DemoSessionPanel.SortingOrder));
+                var depth = panel.DepthLayer;
+                Assert.That(depth, Is.Not.Null);
+                Assert.That(depth.material.shader.name, Is.EqualTo("Hidden/Hapbeat/DemoPanelDepth"));
+                panel.AddButton(Vector2.zero, new Vector2(120, 60), "OK", 20, null);
+                panel.AddText(new Vector2(0, 60), new Vector2(200, 30), "text", 16, Color.white);
+                panel.AddRect(new Vector2(0, -60), new Vector2(200, 4), Color.white);
+                Assert.That(depth.rectTransform.GetSiblingIndex(), Is.EqualTo(panel.Root.childCount - 1), "Depth after every colour.");
+                Assert.That(depth.rectTransform.rect.size, Is.EqualTo(panel.Size), "Covers the whole panel.");
+                panel.UpdateDepthLayer();
+                Assert.That(depth.enabled, Is.True);
+                panel.GetComponent<UnityEngine.UI.Image>().color = Color.clear;
+                panel.UpdateDepthLayer();
+                Assert.That(depth.enabled, Is.False, "A see-through panel hides nothing.");
+            }
+            finally { Object.DestroyImmediate(panel.gameObject); }
+        }
+
+        [Test]
+        public void ClickSoundIsShortQuietAndEndsSilent()
+        {
+            var rate = DemoSessionClickSound.SampleRate;
+            var samples = DemoSessionClickSound.Samples(rate);
+            Assert.That(samples.Length, Is.EqualTo(Mathf.RoundToInt(0.03f * rate)), "30 ms.");
+            var peak = samples.Max(Mathf.Abs);
+            Assert.That(peak, Is.GreaterThan(0.3f).And.LessThanOrEqualTo(DemoSessionClickSound.Peak));
+            Assert.That(peak * DemoSessionClickSound.Volume, Is.LessThanOrEqualTo(0.2f), "About -14 dBFS at most.");
+            Assert.That(samples[0], Is.EqualTo(0f));
+            Assert.That(samples[samples.Length - 1], Is.EqualTo(0f).Within(1e-6f), "No step at the end.");
+            var lastMs = samples.Skip(samples.Length - rate / 1000).Max(Mathf.Abs);
+            Assert.That(lastMs, Is.LessThan(peak * 0.01f), "Decayed below 1 % before the end.");
+            // Most of the energy is in the first 10 ms: a click, not a tone.
+            var early = samples.Take(rate / 100).Sum(v => v * v);
+            Assert.That(early / samples.Sum(v => v * v), Is.GreaterThan(0.95f));
+        }
+
+        [Test]
         public void PressedButtonReportsHeldUntilReleased()
         {
             var panel = DemoSessionPanel.Create("test panel", new Vector2(300, 200));

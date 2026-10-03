@@ -96,7 +96,7 @@ namespace Hapbeat.DemoHub
     /// <summary>Long press: fires once after <see cref="Duration"/> (default <see cref="Seconds"/>) of continuous holding; releasing resets.</summary>
     public sealed class HubHoldGesture
     {
-        public const float Seconds = 2f;
+        public const float Seconds = 1f;
         private float _since = -1f;
         private bool _fired;
 

@@ -15,7 +15,7 @@ namespace Hapbeat.DemoHub
         public const string Manage = "管理";
         public const string HoldFilled = "■";
         public const string HoldEmpty = "□";
-        public const string StaffWaitingNote = "スタッフ待機モード（解除は「管理」を2秒長押し）";
+        public const string StaffWaitingNote = "スタッフ待機モード（解除は「管理」を1秒長押し）";
         public const string AboutMinutes = "目安 約{0}分";
         public const string Arrow = " → ";
         public const string NotInstalled = "（未インストール）";
@@ -62,7 +62,7 @@ namespace Hapbeat.DemoHub
 
     /// <summary>
     /// Self-service launcher: the top screen starts a shown preset or a single demo tile, the manage
-    /// screen (2 s long press) edits the three presets, what the top screen shows and the shared settings,
+    /// screen (1 s long press) edits the three presets, what the top screen shows and the shared settings,
     /// and the finish screen follows a completed multi-step session. With staff waiting mode on, the top
     /// screen is the M5 waiting room instead. M5 SWITCH keeps working in every screen.
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
@@ -243,7 +243,7 @@ namespace Hapbeat.DemoHub
             DemoHeadingPlacement.Follow(_recenterKey.transform, HubRecenterKey.Target(head.position, head.forward), snap, deltaTime);
         }
 
-        /// <summary>Long press on 管理: the button label shows the hold progress, 2 s opens the manage screen.</summary>
+        /// <summary>Long press on 管理: the button label shows the hold progress, 1 s opens the manage screen.</summary>
         internal void UpdateManageHold(float now)
         {
             if (Screen != HubScreen.Top || _manageButton == null) return;

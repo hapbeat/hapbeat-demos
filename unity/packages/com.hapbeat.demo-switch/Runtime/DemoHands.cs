@@ -256,13 +256,16 @@ namespace Hapbeat.DemoSwitch
             renderer.lightProbeUsage = LightProbeUsage.Off;
             renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
             renderer.skinnedMotionVectors = false;
+            // After the panels (whose depth layer then hides a hand behind them), see DemoSessionPanel.
+            renderer.sortingOrder = DemoSessionPanel.HandSortingOrder;
             renderer.enabled = false;
             return new MetaHand { Model = model, Renderer = renderer, Joints = joints, Skin = skin };
         }
 
         /// <summary>
         /// One submesh drawn three times by queue: a depth pre-pass (2999), the fill (3000) and the outline
-        /// (3001). Values follow Energy Duel's hand materials (Safety Mill VR's Ghost / Skin looks).
+        /// (3001), all after the panels by the renderer's sorting order (<see cref="DemoSessionPanel.HandSortingOrder"/>).
+        /// Values follow Energy Duel's hand materials (Safety Mill VR's Ghost / Skin looks).
         /// </summary>
         private void CreateMaterials(Shader ghost, Shader skin, Shader outline)
         {

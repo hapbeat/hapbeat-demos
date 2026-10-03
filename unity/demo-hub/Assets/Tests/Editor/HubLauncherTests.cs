@@ -89,21 +89,21 @@ namespace Hapbeat.DemoHub.Tests
         }
 
         [Test]
-        public void LongPressFiresOnceAfterTwoSeconds()
+        public void LongPressFiresOnceAfterOneSecond()
         {
             var hold = new HubHoldGesture();
             Assert.That(hold.Update(false, 0f), Is.False);
             Assert.That(hold.Update(true, 10f), Is.False);
-            Assert.That(hold.Update(true, 11.9f), Is.False);
+            Assert.That(hold.Update(true, 10.95f), Is.False);
             Assert.That(hold.Progress, Is.EqualTo(0.95f).Within(1e-4));
-            Assert.That(hold.Update(true, 12f), Is.True);
-            Assert.That(hold.Update(true, 13f), Is.False, "Once per press.");
-            Assert.That(hold.Update(false, 13.1f), Is.False);
+            Assert.That(hold.Update(true, 11f), Is.True);
+            Assert.That(hold.Update(true, 12f), Is.False, "Once per press.");
+            Assert.That(hold.Update(false, 12.1f), Is.False);
             Assert.That(hold.Progress, Is.Zero);
             Assert.That(hold.Update(true, 14f), Is.False);
-            Assert.That(hold.Update(false, 15f), Is.False, "Released early.");
+            Assert.That(hold.Update(false, 14.5f), Is.False, "Released early.");
             Assert.That(hold.Update(true, 16f), Is.False);
-            Assert.That(hold.Update(true, 18f), Is.True);
+            Assert.That(hold.Update(true, 17f), Is.True);
             Assert.That(DemoHubController.HoldLabel(0f), Is.EqualTo(HubText.Manage));
             Assert.That(DemoHubController.HoldLabel(0.4f), Is.EqualTo("■■□□□"));
             Assert.That(DemoHubController.HoldLabel(1f), Is.EqualTo("■■■■■"));
