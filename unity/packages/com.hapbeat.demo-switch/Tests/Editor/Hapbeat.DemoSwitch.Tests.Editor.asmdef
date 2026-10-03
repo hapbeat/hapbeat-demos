@@ -4,6 +4,7 @@
   "references": [
     "Hapbeat.DemoSwitch",
     "Hapbeat.DemoSwitch.Editor",
+    "Unity.XR.Hands",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

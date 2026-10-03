@@ -43,6 +43,7 @@ namespace Hapbeat.DemoSwitch
             StartForegroundReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
+            if (settings.GhostHands) gameObject.AddComponent<DemoGhostHands>();
         }
 
         /// <summary>Demo Session launched the next runtime: release 7710 and run the usual switch cleanup.</summary>

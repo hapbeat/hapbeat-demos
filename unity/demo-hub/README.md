@@ -25,7 +25,7 @@ Unsigned switching is enabled to match the existing exhibition setup. Use an iso
 
 ## Demo Session (self-paced plan)
 
-The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared package's `DemoSession` API. Version 0.1.0-d3 (launcher; needs package 0.1.0-d7).
+The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared package's `DemoSession` API. Version 0.1.0-d4 (versionCode 4; ghost hands; needs package 0.1.0-d8).
 
 - **Catalog**: PackageManager launcher activities (`MAIN`/`LAUNCHER`; the build adds the matching `<queries>` element) whose APK assets contain a valid `hapbeat-demo-session.json`. Package and activity come from PackageManager, never from the descriptor. In the Editor a dummy catalog (Volley, Boxing, T-Rex) is used; tests and tools can set `HubCatalog.Override`.
 - **Top screen** (default, for participants): one large button per preset marked "トップに表示" in the manage screen ("プリセット n　約m分" over the installed step titles joined by →), then demo tiles (title and estimated minutes, 3 columns, 6 per page) for installed demos marked visible. A preset whose steps are all uninstalled is not shown. With nothing to show: "管理画面で表示するプリセット／デモを選んでください". Under the title, the device address line; bottom right, a small "管理" button that opens the manage screen after a **2 s long press** (the label turns into a ■□ progress bar while held). Launch errors appear left of it in a reserved line.
@@ -36,6 +36,7 @@ The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared packa
 - **Finish screen**: shown when launched with `index == len(steps)` for a session of two or more steps (a finished one-step tile session opens the top screen): "体験は以上です。ヘッドセットを外してください", "最初から（同じプラン）" (same steps, new session ID) and "トップへ".
 - **Placement**: every screen uses one world-space panel 0.6 m ahead and 0.18 m below eye height, placed when head tracking becomes valid. It follows the head's yaw lazily: once the heading is 35° or more away (or the distance/height is off by more than 0.25 m) it eases back in front over 0.5 s.
 - Input is the package panel: fingertip poke (hand tracking) and controller ray + trigger.
+- **Ghost hands**: the hub enables the package's ghost hands (`_ghostHands: 1` in `Assets/Resources/HapbeatDemoSwitchSettings.asset`), so tracked hands are drawn as translucent outlines whose index tip is the poke point. Controllers keep only the ray cursor.
 
 `Hapbeat Demo Hub > Add Demo Session Controller` adds the controller to the existing scene without regenerating it (already applied to the checked-in scene).
 

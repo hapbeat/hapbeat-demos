@@ -112,9 +112,10 @@ namespace Hapbeat.DemoSwitch
             });
         }
 
-        private static Vector3 ToWorld(Transform space, Vector3 position) => space != null ? space.TransformPoint(position) : position;
+        internal static Vector3 ToWorld(Transform space, Vector3 position) => space != null ? space.TransformPoint(position) : position;
 
-        private static Transform TrackingSpace()
+        /// <summary>Tracking-space parent shared with <see cref="DemoGhostHands"/> so drawn hands match the poke point.</summary>
+        internal static Transform TrackingSpace()
         {
             if (_origin == null && Time.realtimeSinceStartup >= _nextOriginSearch)
             {

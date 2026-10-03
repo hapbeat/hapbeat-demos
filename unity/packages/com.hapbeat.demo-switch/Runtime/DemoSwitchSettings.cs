@@ -48,11 +48,16 @@ namespace Hapbeat.DemoSwitch
         [Header("Local launch allowlist")]
         [SerializeField] private List<DemoSwitchTarget> _targets = new List<DemoSwitchTarget>();
 
+        [Header("Presentation")]
+        [Tooltip("Draws translucent hands from XR Hands joints (DemoGhostHands). Leave off in demos that render their own hands.")]
+        [SerializeField] private bool _ghostHands;
+
         public bool ReceiverEnabled => _receiverEnabled;
         public int Port => _port;
         public string CurrentDemoId => _currentDemoId;
         public string SharedSecret => _sharedSecret;
         public bool AllowUnsignedOnIsolatedLan => _allowUnsignedOnIsolatedLan;
+        public bool GhostHands => _ghostHands;
 
         public bool TryResolveTarget(string demoId, out DemoSwitchTarget target)
         {
