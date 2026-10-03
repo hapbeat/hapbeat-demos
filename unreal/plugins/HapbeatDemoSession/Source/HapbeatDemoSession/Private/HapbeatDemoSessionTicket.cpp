@@ -164,7 +164,7 @@ bool FHapbeatDemoSessionTicket::Parse(const FString& Json,FHapbeatDemoSessionTic
     if(!WithinBytes(Json)) return Fail(Error,TEXT("ticket exceeds 16384 bytes"));
     FObject O;
     if(!ParseObject(Json,O)) return Fail(Error,TEXT("ticket is not a JSON object"));
-    if(!OnlyKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish")})
+    if(!OnlyKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish"),TEXT("hand_style"),TEXT("recenter_ui")})
         ||!HasKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish")})) return Fail(Error,TEXT("ticket fields"));
     FHapbeatDemoSessionTicket T;double Version=0,Index=-1;
     if(!GetNumber(O,TEXT("version"),Version)||Version!=1) return Fail(Error,TEXT("ticket version"));
@@ -173,6 +173,9 @@ bool FHapbeatDemoSessionTicket::Parse(const FString& Json,FHapbeatDemoSessionTic
     if(!GetNumber(O,TEXT("index"),Index)||Index<0||Index>32||FMath::FloorToDouble(Index)!=Index) return Fail(Error,TEXT("ticket index"));
     T.Index=static_cast<int32>(Index);
     if(!GetBool(O,TEXT("haptics_ui"),T.bHapticsUi)) return Fail(Error,TEXT("ticket haptics_ui"));
+    if(O->Values.Contains(TEXT("recenter_ui"))&&!GetBool(O,TEXT("recenter_ui"),T.bRecenterUi)) return Fail(Error,TEXT("ticket recenter_ui"));
+    if(O->Values.Contains(TEXT("hand_style"))
+        &&(!GetString(O,TEXT("hand_style"),T.HandStyle)||(T.HandStyle!=TEXT("ghost")&&T.HandStyle!=TEXT("skin")))) return Fail(Error,TEXT("ticket hand_style"));
     FObject Finish;
     if(!GetObject(O,TEXT("finish"),Finish)||!ParseComponent(Finish,T.Finish)) return Fail(Error,TEXT("ticket finish"));
     const TArray<TSharedPtr<FJsonValue>>* Steps=nullptr;
@@ -198,10 +201,10 @@ bool FHapbeatDemoSessionTicket::Parse(const FString& Json,FHapbeatDemoSessionTic
     Out=MoveTemp(T);return true;
 }
 
-FHapbeatDemoSessionTicket FHapbeatDemoSessionTicket::MakeNext(bool bInHapticsUi) const
+FHapbeatDemoSessionTicket FHapbeatDemoSessionTicket::MakeNext(bool bInHapticsUi,bool bInRecenterUi) const
 {
     FHapbeatDemoSessionTicket Next=*this;
-    Next.Index=Index+1;Next.bHapticsUi=bInHapticsUi;
+    Next.Index=Index+1;Next.bHapticsUi=bInHapticsUi;Next.bRecenterUi=bInRecenterUi;
     return Next;
 }
 
@@ -224,6 +227,9 @@ FString FHapbeatDemoSessionTicket::ToJson() const
     }
     W->WriteArrayEnd();
     W->WriteObjectStart(TEXT("finish"));Component(Finish);W->WriteObjectEnd();
+    // Optional fields, written like the Unity runtimes: hand_style when present, recenter_ui only when true.
+    if(!HandStyle.IsEmpty()) W->WriteValue(TEXT("hand_style"),HandStyle);
+    if(bRecenterUi) W->WriteValue(TEXT("recenter_ui"),true);
     W->WriteObjectEnd();W->Close();
     return Json;
 }

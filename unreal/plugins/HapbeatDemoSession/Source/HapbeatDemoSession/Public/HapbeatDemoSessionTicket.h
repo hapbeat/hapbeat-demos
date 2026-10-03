@@ -46,6 +46,10 @@ struct HAPBEATDEMOSESSION_API FHapbeatDemoSessionTicket
     FString SessionId;
     int32 Index=0;
     bool bHapticsUi=false;
+    /** Optional `recenter_ui` (視線をリセット button shown); omitted = false. */
+    bool bRecenterUi=false;
+    /** Optional `hand_style` ("ghost" / "skin"), empty when omitted. This runtime draws its own hands and only passes it on. */
+    FString HandStyle;
     TArray<FHapbeatDemoSessionStep> Steps;
     FHapbeatDemoSessionComponent Finish;
     /** Schema validation only (does not check the demo_id of steps[index]). */
@@ -53,8 +57,8 @@ struct HAPBEATDEMOSESSION_API FHapbeatDemoSessionTicket
     bool HasNextStep() const {return Index+1<Steps.Num();}
     /** steps[index+1], or finish (the Hub) after the last step. */
     const FHapbeatDemoSessionComponent& NextTarget() const {return HasNextStep()?Steps[Index+1].Target:Finish;}
-    /** The ticket handed to the next runtime: index + 1 and the current haptics_ui. Other fields unchanged. */
-    FHapbeatDemoSessionTicket MakeNext(bool bInHapticsUi) const;
+    /** The ticket handed to the next runtime: index + 1, the current haptics_ui and recenter_ui. Other fields unchanged. */
+    FHapbeatDemoSessionTicket MakeNext(bool bInHapticsUi,bool bInRecenterUi) const;
     FString ToJson() const;
 };
 namespace HapbeatDemoSession

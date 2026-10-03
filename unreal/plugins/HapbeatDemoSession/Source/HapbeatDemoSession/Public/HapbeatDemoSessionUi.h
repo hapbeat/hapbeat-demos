@@ -5,6 +5,8 @@
 
 class UWidgetComponent;
 class UStaticMeshComponent;
+class UMaterialInterface;
+class USoundBase;
 class UHapbeatDemoSessionPanelAnchor;
 class SCanvas;
 
@@ -49,10 +51,25 @@ struct FHapbeatSessionCompletionView
 };
 
 /**
+ * Widget pixels of a panel (the Unity package's DemoSessionPanel layout: its millimetres x 2): the size, the
+ * title / sub line / reserved error line and the buttons, top to bottom.
+ */
+struct FHapbeatSessionPanelLayout
+{
+    FVector2D Size=FVector2D::ZeroVector;
+    FBox2D Title=FBox2D(ForceInit), SubLine=FBox2D(ForceInit), Error=FBox2D(ForceInit);
+    TArray<FBox2D> Buttons;
+};
+
+/**
  * World-space Demo Session UI, driven by UHapbeatDemoSessionSubsystem every frame: the completion panel
  * (in front of the user below eye level, or at the demo's UHapbeatDemoSessionPanelAnchor), the pause panel
- * (in front of the user), the in-view haptics ON/OFF button (lower left of the view), plus a thin ray from
- * each tracked controller while the UI is visible. Panels stay where they appeared.
+ * (in front of the user), the in-view haptics ON/OFF and 視線をリセット buttons (lower left of the view), plus a
+ * thin ray from each tracked controller while the UI is visible. Panels stay where they appeared.
+ *
+ * Looks like the Unity package's panels (DemoSessionUi.cs): the same colours, Noto Sans CJK JP, sizes and vertical
+ * button stacks, and the same short click on a press. Every panel draws on top of the scene (no depth test,
+ * PanelSortPriority); hands drawn with HandSortPriority or above stay in front of the panels.
  */
 UCLASS(NotPlaceable,Transient)
 class HAPBEATDEMOSESSION_API AHapbeatDemoSessionUi : public AActor
@@ -60,14 +77,26 @@ class HAPBEATDEMOSESSION_API AHapbeatDemoSessionUi : public AActor
     GENERATED_BODY()
 public:
     AHapbeatDemoSessionUi();
+    virtual void PostInitializeComponents() override;
     struct FEvents
     {
-        bool bRetry=false, bNext=false, bToggleHaptics=false;
+        bool bRetry=false, bNext=false, bToggleHaptics=false, bRecenter=false;
         /** Pause panel: 再開 / 最初からやり直す / 次へ or デモを終了 (bPauseNext) / Hub に戻る. */
         bool bResume=false, bRestart=false, bPauseNext=false, bHub=false;
     };
     /** Panel buttons ignore input for this long after the panel appears. */
     static constexpr float CompletionInputDelay=1.f;
+    /**
+     * Translucency sort priority of every panel. Panels are drawn after the scene without a depth test (on top of
+     * the models); a demo's translucent hand layers use HandSortPriority or above so that a hand in front of a panel
+     * is drawn over it (the Unity package's canvas sorting order 500 and hand renderers 501).
+     */
+    static constexpr int32 PanelSortPriority=500;
+    static constexpr int32 HandSortPriority=PanelSortPriority+1;
+    /** Widget scale: 2 px per Unity millimetre. */
+    static constexpr float PanelCmPerPixel=.05f;
+    static FHapbeatSessionPanelLayout CompletionLayout(int32 ButtonCount);
+    static FHapbeatSessionPanelLayout PauseLayout(int32 ButtonCount);
     /**
      * Where a panel appears. Without an anchor: 55 cm ahead of the eye (head yaw only), 12 cm below it, facing the
      * eye. With one: at the anchor, its yaw turned toward the eye (or the anchor's own rotation with bUseRotation,
@@ -89,45 +118,67 @@ public:
     bool IsPauseShown() const {return Pause.bShown;}
     bool IsPauseAccepting() const {return Pause.IsAccepting();}
     void SetPauseError(const FString& Text) {Pause.Error=Text;}
-    /** Moves the open panels to At (a recenter) without restarting their input delay; the haptics button snaps to the view again. */
+    /** Moves the open panels to At (a recenter) without restarting their input delay; the in-view buttons snap to the view again. */
     void Reposition(const FTransform& At);
     void SetHapticsButton(bool bVisible,bool bOn);
+    void SetRecenterButton(bool bVisible);
+    /**
+     * World yaw the in-view buttons are placed from. It follows the head only once it has turned more than a dead
+     * zone away, so it stays the user's facing while they glance down-left at a button.
+     */
+    float GetControlsYaw() const {return ControlsYaw;}
     FEvents Step(const FHapbeatSessionPointerInput& Input,const FVector& Eye,const FRotator& ViewRotation,float Dt);
 private:
-    /** One floating panel's input state; its widget is CompletionPanel / PausePanel. */
+    /** One floating panel's input and look state; its widget is CompletionPanel / PausePanel / HapticsButton / RecenterButton. */
     struct FPanel
     {
         FHapbeatSessionPressTracker Press;
+        FVector2D Size=FVector2D::ZeroVector;
         TArray<FBox2D> Buttons;
         int32 Hover=INDEX_NONE;
+        /** Pressed button and how long it still shows the pressed colour. */
+        int32 Flash=INDEX_NONE;
+        float FlashSeconds=0;
         bool bShown=false;
         float Seconds=0;
         FString Error;
         bool IsAccepting() const {return bShown&&Seconds>=CompletionInputDelay;}
     };
+    /** A head-following button (haptics, 視線をリセット) and where it is drawn. */
+    struct FInViewButton
+    {
+        FPanel Face;
+        FVector Location=FVector::ZeroVector;
+        bool bPlaced=false;
+    };
     void BuildCompletionWidget();
     void BuildPauseWidget(bool bHub,const FString& NextLabel);
-    void BuildHapticsWidget();
-    /** Title, sub line and the reserved error line; the buttons are added by the caller. */
-    TSharedRef<SCanvas> MakePanelCanvas(const FPanel& Panel,const FString& Title,TFunction<FText()> SubLine);
-    void AddPanelButton(SCanvas& Canvas,const FPanel& Panel,int32 Index,bool bPrimary,TFunction<FText()> Label,int32 FontSize=28);
+    void BuildInViewWidget(UWidgetComponent* Widget,FInViewButton& Button,TFunction<FText()> Label,TFunction<bool()> Highlighted);
+    /** Background, title, sub line and the reserved error line; the buttons are added by the caller. */
+    TSharedRef<SCanvas> MakePanelCanvas(const FPanel& Panel,const FHapbeatSessionPanelLayout& Layout,const FString& Title,TFunction<FText()> SubLine);
+    void AddPanelButton(SCanvas& Canvas,const FPanel& Panel,int32 Index,TFunction<FText()> Label,TFunction<bool()> Highlighted=nullptr);
     void ShowPanel(UWidgetComponent* Widget,FPanel& Panel,const FTransform& At);
     void HidePanel(UWidgetComponent* Widget,FPanel& Panel);
-    int32 StepPanel(UWidgetComponent* Widget,FPanel& Panel,const FHapbeatSessionPointerInput& Input,float Dt,float* RayHit);
-    void PlaceHapticsButton(const FVector& Eye,const FRotator& ViewRotation,float Dt);
-    FLinearColor ButtonColor(const FPanel& Panel,int32 Button,bool bPrimary) const;
+    int32 StepPanel(UWidgetComponent* Widget,FPanel& Panel,const FHapbeatSessionPointerInput& Input,float InputDelay,float Dt,float* RayHit);
+    void SetInViewVisible(UWidgetComponent* Widget,FInViewButton& Button,bool bVisible);
+    void PlaceInViewButtons(const FVector& Eye,const FRotator& ViewRotation,float Dt);
+    FLinearColor ButtonColor(const FPanel& Panel,int32 Button,bool bHighlighted) const;
+    /** The short click of a pressed button (game worlds only; plays while the world is paused). */
+    void PlayClick();
     UPROPERTY() TObjectPtr<UWidgetComponent> CompletionPanel;
     UPROPERTY() TObjectPtr<UWidgetComponent> PausePanel;
     UPROPERTY() TObjectPtr<UWidgetComponent> HapticsButton;
+    UPROPERTY() TObjectPtr<UWidgetComponent> RecenterButton;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Rays[2];
+    /** Plugin content (Scripts/create_content.py): the widget material without depth test, the ray material, the click. */
+    UPROPERTY() TObjectPtr<UMaterialInterface> PanelMaterial;
+    UPROPERTY() TObjectPtr<USoundBase> ClickSound;
     FPanel Completion, Pause;
-    FHapbeatSessionPressTracker HapticsPress;
+    FInViewButton Haptics, Recenter;
     FHapbeatSessionCompletionView CompletionView;
     int32 RetryButton=INDEX_NONE, NextButton=INDEX_NONE;
     int32 ResumeButton=INDEX_NONE, RestartButton=INDEX_NONE, PauseNextButton=INDEX_NONE, HubButton=INDEX_NONE;
     FString PauseNextLabel;
-    bool bHapticsBuilt=false;
-    bool bHapticsOn=true, bHapticsHover=false, bHapticsPlaced=false;
-    float HapticsYaw=0;
-    FVector HapticsLocation=FVector::ZeroVector;
+    bool bHapticsOn=true, bControlsPlaced=false;
+    float ControlsYaw=0;
 };

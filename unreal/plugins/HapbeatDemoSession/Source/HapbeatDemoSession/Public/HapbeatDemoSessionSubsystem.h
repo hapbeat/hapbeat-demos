@@ -10,6 +10,8 @@
 
 class AHapbeatDemoSessionUi;
 class APlayerController;
+class APawn;
+class UActorComponent;
 struct FHapbeatSessionPointerInput;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
@@ -25,12 +27,17 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
  * Haptics ON/OFF (OnHapticsChanged) starts ON. With descriptor supports.haptics_toggle, the in-view button
  * shows while IsHapticsUiVisible() (ticket haptics_ui, or Demo Switch CONTROL haptics_ui_show/hide).
  *
- * The demo registers its CONTROL actions (restart / menu_open / menu_close / recenter) with RegisterControl.
+ * The demo registers its CONTROL actions (restart / menu_open / menu_close) with RegisterControl.
+ *
+ * 視線をリセット: the in-view button (shown while IsRecenterUiVisible(): ticket recenter_ui, or CONTROL
+ * recenter_ui_show/hide) and CONTROL recenter call the demo's own start alignment (SetRecenterHandler), or else
+ * turn and move the player's pawn so that the head is at the pawn's start location, facing its start yaw.
  *
  * Shared pause (demos without a menu of their own, [HapbeatDemoSession.Pause] in DefaultGame.ini): the left menu
  * gesture / controller menu button (FHapbeatPauseDetector) opens a panel in front of the head with 再開 /
  * 最初からやり直す / 次へ (or デモを終了; session only) / Hub に戻る, with or without a session. The demo stops its
- * game, navigation voice and haptics on OnPauseChanged.
+ * game, navigation voice and haptics on OnPauseChanged. While the pause is open the posed hand meshes
+ * (UPoseableMeshComponent) of the player's pawn and of actors attached to it tick even when the world is paused.
  *
  * Starting the next runtime (or the Hub) ends this demo only once it has gone to the background
  * (FHapbeatLaunchHandoff); a system recenter (FCoreDelegates::VRHeadsetRecenter) puts open panels back in front
@@ -100,8 +107,29 @@ public:
     void SetHapticsEnabled(bool bEnabled);
     bool IsHapticsUiVisible() const {return bHapticsUiVisible;}
     void SetHapticsUiVisible(bool bVisible);
+    bool IsRecenterUiVisible() const {return bRecenterUiVisible;}
+    void SetRecenterUiVisible(bool bVisible);
 
-    /** Registers a Demo Switch CONTROL action handled by the demo; Handler returns false when it could not run. */
+    /**
+     * The demo's own start alignment for 視線をリセット (one per demo; the last one set wins). FacingYaw is the world yaw
+     * the user faces: the head's for CONTROL recenter, the in-view buttons' heading for the button (the head is then
+     * glancing down-left at it). The handler puts the head at the demo's start position facing its start direction,
+     * without changing the floor height, and returns false when it could not.
+     */
+    void SetRecenterHandler(const UObject* Owner,TFunction<bool(float FacingYaw)> Handler);
+    void ClearRecenterHandler(const UObject* Owner);
+    /**
+     * 視線をリセット: the recenter handler, or without one the player's pawn turned about the head by StartYaw - FacingYaw
+     * and moved so that the head is over its start location (RecenterPawn). Open panels are put in front of the head.
+     */
+    bool RecenterView(float FacingYaw,const TCHAR* Source);
+    /** The pawn transform after the default recenter (height unchanged). */
+    static FTransform RecenterPawn(const FTransform& Pawn,const FVector& Eye,float FacingYaw,const FVector& StartLocation,float StartYaw);
+
+    /**
+     * Registers a Demo Switch CONTROL action handled by the demo; Handler returns false when it could not run.
+     * recenter is the plugin's own (SetRecenterHandler) and is not registered here.
+     */
     void RegisterControl(const FString& Action,const UObject* Owner,TFunction<bool()> Handler);
     void UnregisterControls(const UObject* Owner);
 
@@ -120,7 +148,7 @@ public:
     /** The Demo Hub (the component Unity's Demo Switch settings also trust as demo_hub). */
     static const FHapbeatDemoSessionComponent& HubComponent();
 
-    /** The ticket LaunchNextOrFinish hands over (index + 1, current haptics_ui). */
+    /** The ticket LaunchNextOrFinish hands over (index + 1, current haptics_ui and recenter_ui). */
     FString MakeNextTicketJson() const;
 private:
     void Load(const FString& DescriptorJson,bool bDescriptorRead,const FString& TicketJson,bool bTicketPresent);
@@ -132,6 +160,8 @@ private:
     /** One frame of the pause gesture input; nothing while the application has no focus (system menu open). */
     FHapbeatPauseInput ReadPauseInput(APlayerController* PlayerController,const FVector& Eye) const;
     void SetPauseShown(bool bShown);
+    /** The player's pawn (and attached actors): poseable meshes tick while the world is paused under the pause panel, restored after. */
+    void KeepHandMeshesTicking(bool bPaused);
     /** "次へ：<title>" or "デモを終了" (session mode). */
     FString NextLabel() const;
     /** The next runtime (or the Hub) was started: wait for the background (FHapbeatLaunchHandoff). */
@@ -153,6 +183,14 @@ private:
         TFunction<bool()> Handler;
     };
     TArray<FControl> Controls;
+    TWeakObjectPtr<const UObject> RecenterOwner;
+    TFunction<bool(float)> RecenterHandler;
+    /** The player's pawn as it was first seen: the default recenter's start. */
+    TWeakObjectPtr<APawn> StartPawn;
+    FVector StartLocation=FVector::ZeroVector;
+    float StartYaw=0;
+    /** Components made to tick while paused by KeepHandMeshesTicking. */
+    TArray<TWeakObjectPtr<UActorComponent>> PausedTickers;
     FHapbeatDemoSessionDescriptor Descriptor;
     FHapbeatDemoSessionTicket Ticket;
     TMap<FString,FString> Options;
@@ -164,7 +202,7 @@ private:
     FDelegateHandle DeactivateHandle, RecenterHandle;
     /** Seconds left in which open panels are put back in front of the head after a recenter (-1: none). */
     float RecenterSeconds=-1;
-    bool bHasDescriptor=false, bSessionActive=false, bCompletionShown=false, bHapticsEnabled=true, bHapticsUiVisible=false;
+    bool bHasDescriptor=false, bSessionActive=false, bCompletionShown=false, bHapticsEnabled=true, bHapticsUiVisible=false, bRecenterUiVisible=false;
     bool bPauseShown=false, bHubInstalled=false;
     bool bInitialized=false, bExiting=false;
     /** The launch started with VR focus (OpenXR): losing it counts as going to the background. */

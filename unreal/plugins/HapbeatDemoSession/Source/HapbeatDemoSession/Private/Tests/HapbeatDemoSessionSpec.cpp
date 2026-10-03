@@ -11,6 +11,7 @@
 #include "HapbeatDemoSessionPanelAnchor.h"
 #include "HapbeatDemoSessionPause.h"
 #include "HapbeatDemoSessionHandoff.h"
+#include "HapbeatDemoSessionSubsystem.h"
 #include "HeadMountedDisplayTypes.h"
 #include "GameFramework/Actor.h"
 #include "HapbeatDemoSessionDeviceAddress.h"
@@ -31,6 +32,12 @@ namespace HapbeatDemoSessionSpecData
   {"demo_id":"trex-encounter","title":"T-Rex","package":"com.hapbeat.trexencounter","activity":"com.epicgames.unreal.GameActivity","options":{},"retry":false}],
  "finish":{"package":"jp.hapbeat.demohub","activity":"com.unity3d.player.UnityPlayerGameActivity"}})");
     FString With(const FString& From,const FString& To) {return FString(Ticket).Replace(*From,*To);}
+    /** World point of a widget pixel on a panel placed at At (+X toward the user), Depth cm in front of its face. */
+    FVector PanelPoint(const FTransform& At,const FVector2D& Size,const FVector2D& Pixel,float Depth)
+    {
+        const float Cm=AHapbeatDemoSessionUi::PanelCmPerPixel;
+        return At.GetLocation()+At.GetRotation().RotateVector(FVector(Depth,-(Pixel.X-Size.X*.5f)*Cm,-(Pixel.Y-Size.Y*.5f)*Cm));
+    }
     TArray<uint8> Bytes(const FString& Json) {const FTCHARToUTF8 U(*Json);return TArray<uint8>(reinterpret_cast<const uint8*>(U.Get()),U.Length());}
     TSharedPtr<FJsonObject> Object(const FString& Json) {TSharedPtr<FJsonObject> O;FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json),O);return O;}
 }
@@ -63,7 +70,7 @@ void FHapbeatDemoSessionSpec::Define()
             TestTrue(TEXT("accepted"),HapbeatDemoSession::AcceptTicket(Ticket,TEXT("trex-encounter"),T,Error));
             TestFalse(TEXT("last step"),T.HasNextStep());
             TestEqual(TEXT("next target is finish"),T.NextTarget().Package,FString(TEXT("jp.hapbeat.demohub")));
-            const FString Json=T.MakeNext(true).ToJson();
+            const FString Json=T.MakeNext(true,false).ToJson();
             FHapbeatDemoSessionTicket Next;
             TestTrue(TEXT("next ticket is schema-valid"),FHapbeatDemoSessionTicket::Parse(Json,Next,Error));
             TestEqual(TEXT("index advanced"),Next.Index,2);
@@ -81,9 +88,24 @@ void FHapbeatDemoSessionSpec::Define()
             TestTrue(TEXT("has next"),T.HasNextStep());
             TestEqual(TEXT("next package"),T.NextTarget().Package,FString(TEXT("com.hapbeat.trexencounter")));
             FHapbeatDemoSessionTicket Next;
-            TestTrue(TEXT("next parses"),FHapbeatDemoSessionTicket::Parse(T.MakeNext(false).ToJson(),Next,Error));
-            TestTrue(TEXT("next is accepted by the next demo"),HapbeatDemoSession::AcceptTicket(T.MakeNext(false).ToJson(),TEXT("trex-encounter"),Next,Error));
+            TestTrue(TEXT("next parses"),FHapbeatDemoSessionTicket::Parse(T.MakeNext(false,false).ToJson(),Next,Error));
+            TestTrue(TEXT("next is accepted by the next demo"),HapbeatDemoSession::AcceptTicket(T.MakeNext(false,false).ToJson(),TEXT("trex-encounter"),Next,Error));
             TestFalse(TEXT("haptics_ui false"),Next.bHapticsUi);
+            TestFalse(TEXT("recenter_ui omitted = false"),Next.bRecenterUi);
+            TestFalse(TEXT("recenter_ui false is not written"),T.MakeNext(false,false).ToJson().Contains(TEXT("recenter_ui")));
+        });
+        It(TEXT("reads the optional recenter_ui and hand_style and hands them on"),[this]()
+        {
+            FHapbeatDemoSessionTicket T;FString Error;
+            const FString Json=With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"hand_style\":\"skin\",\"recenter_ui\":true,"));
+            TestTrue(TEXT("accepted"),HapbeatDemoSession::AcceptTicket(Json,TEXT("trex-encounter"),T,Error));
+            TestTrue(TEXT("recenter_ui"),T.bRecenterUi);TestEqual(TEXT("hand_style"),T.HandStyle,FString(TEXT("skin")));
+            FHapbeatDemoSessionTicket Next;
+            TestTrue(TEXT("next parses"),FHapbeatDemoSessionTicket::Parse(T.MakeNext(false,true).ToJson(),Next,Error));
+            TestTrue(TEXT("recenter_ui carried"),Next.bRecenterUi);TestEqual(TEXT("hand_style kept"),Next.HandStyle,FString(TEXT("skin")));
+            TestTrue(TEXT("hidden on the way"),FHapbeatDemoSessionTicket::Parse(T.MakeNext(false,false).ToJson(),Next,Error)&&!Next.bRecenterUi);
+            TestFalse(TEXT("recenter_ui must be a boolean"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"recenter_ui\":1,")),T,Error));
+            TestFalse(TEXT("hand_style ghost or skin"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"hand_style\":\"robot\",")),T,Error));
         });
         It(TEXT("rejects tickets that break the schema"),[this]()
         {
@@ -325,6 +347,19 @@ void FHapbeatDemoSessionSpec::Define()
     });
     Describe(TEXT("CompletionPanel"),[this]()
     {
+        It(TEXT("stacks the buttons like the Unity panels"),[this]()
+        {
+            // DemoSessionCompletionPanel / DemoPausePanel in millimetres, x 2 px.
+            const FHapbeatSessionPanelLayout C=AHapbeatDemoSessionUi::CompletionLayout(2);
+            TestTrue(TEXT("completion size"),C.Size.Equals(FVector2D(880,2*(194+2*82))));
+            TestTrue(TEXT("first button"),C.Buttons[0].Min.Equals(FVector2D(60,252))&&C.Buttons[0].Max.Equals(FVector2D(820,388)));
+            TestTrue(TEXT("second button under it"),FMath::IsNearlyEqual(C.Buttons[1].Min.Y,252+164.f));
+            TestTrue(TEXT("error line 14 mm under the last button"),FMath::IsNearlyEqual(C.Error.Min.Y,C.Buttons[1].Max.Y+28.f));
+            const FHapbeatSessionPanelLayout P=AHapbeatDemoSessionUi::PauseLayout(4);
+            TestTrue(TEXT("pause size"),P.Size.Equals(FVector2D(880,2*(148+4*82))));
+            TestTrue(TEXT("pause first button"),FMath::IsNearlyEqual(P.Buttons[0].Min.Y,184.f));
+            for(int32 I=1;I<4;++I) TestTrue(TEXT("same column"),FMath::IsNearlyEqual(P.Buttons[I].Min.X,P.Buttons[0].Min.X)&&FMath::IsNearlyEqual(P.Buttons[I].Min.Y,P.Buttons[I-1].Max.Y+28.f));
+        });
         It(TEXT("ignores the buttons for the first second, then retries / goes next"),[this]()
         {
             UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
@@ -333,22 +368,23 @@ void FHapbeatDemoSessionSpec::Define()
             if(!TestNotNull(TEXT("ui"),Ui)) return;
             FHapbeatSessionCompletionView View;View.StepNumber=1;View.StepCount=2;View.bRetry=true;View.NextLabel=TEXT("次へ：T-Rex");
             const FVector Eye(0,0,160);
-            Ui->ShowCompletion(View,AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator));
-            // Panel 55 cm ahead, 12 cm down, facing the eye; 0.045 cm/px, 960 x 420 px. Retry button pixels 40..360 x 280..392,
-            // next 400..920 x 280..392 (layout in HapbeatDemoSessionUi.cpp).
-            const FVector Centre=Eye+FVector(55,0,-12);
-            const FQuat Q=(Eye-Centre).Rotation().Quaternion();
-            auto Point=[&](float Px,float Py,float Depth){return Centre+Q.RotateVector(FVector(Depth,-(Px-480)*.045f,-(Py-210)*.045f));};
-            auto Poke=[&](float Px,float Py,float Depth,float Dt){FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=Point(Px,Py,Depth);return Ui->Step(In,Eye,FRotator::ZeroRotator,Dt);};
-            Poke(200,336,8,.3f);
-            const auto Early=Poke(200,336,0,.3f);
+            const FTransform At=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator);
+            Ui->ShowCompletion(View,At);
+            const FHapbeatSessionPanelLayout L=AHapbeatDemoSessionUi::CompletionLayout(2);
+            auto Poke=[&](int32 Button,float Depth,float Dt)
+            {
+                FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=PanelPoint(At,L.Size,L.Buttons[Button].GetCenter(),Depth);
+                return Ui->Step(In,Eye,FRotator::ZeroRotator,Dt);
+            };
+            Poke(0,8,.3f);
+            const auto Early=Poke(0,0,.3f);
             TestFalse(TEXT("no retry within 1 s"),Early.bRetry);TestFalse(TEXT("not accepting yet"),Ui->IsCompletionAccepting());
-            Poke(200,336,8,.5f);
+            Poke(0,8,.5f);
             TestTrue(TEXT("accepting after 1 s"),Ui->IsCompletionAccepting());
-            TestTrue(TEXT("retry"),Poke(200,336,0,.1f).bRetry);
-            Poke(660,336,8,.1f);
-            const auto Next=Poke(660,336,0,.1f);
-            TestTrue(TEXT("next"),Next.bNext);TestFalse(TEXT("only next"),Next.bRetry);
+            TestTrue(TEXT("retry (top)"),Poke(0,0,.1f).bRetry);
+            Poke(1,8,.1f);
+            const auto Next=Poke(1,0,.1f);
+            TestTrue(TEXT("next (below)"),Next.bNext);TestFalse(TEXT("only next"),Next.bRetry);
             Ui->HideCompletion();
             TestFalse(TEXT("hidden"),Ui->IsCompletionShown());
         });
@@ -527,46 +563,51 @@ void FHapbeatDemoSessionSpec::Define()
             if(!TestNotNull(TEXT("ui"),Ui)) return;
             const FVector Eye(0,0,160);
             const FTransform At=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator);
-            const FVector Centre=At.GetLocation();const FQuat Q=At.GetRotation();
-            auto Point=[&](float Px,float Py,float Depth){return Centre+Q.RotateVector(FVector(Depth,-(Px-480)*.045f,-(Py-210)*.045f));};
-            auto Press=[&](float Px,float Py)
+            int32 Count=0;
+            auto Press=[&](int32 Button)
             {
-                FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=Point(Px,Py,8);Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
-                In.Finger[1]=Point(Px,Py,0);return Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
+                const FHapbeatSessionPanelLayout L=AHapbeatDemoSessionUi::PauseLayout(Count);
+                FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=PanelPoint(At,L.Size,L.Buttons[Button].GetCenter(),8);
+                Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
+                In.Finger[1]=PanelPoint(At,L.Size,L.Buttons[Button].GetCenter(),0);
+                return Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
             };
             auto Wait=[&](){FHapbeatSessionPointerInput None;for(int32 I=0;I<11;++I) Ui->Step(None,Eye,FRotator::ZeroRotator,.1f);};
-            // With the Hub: 再開 40..240, 最初からやり直す 260..600, Hub に戻る 620..920 (y 280..392).
-            Ui->ShowPause(true,FString(),At);
+            // Top to bottom: 再開 / 最初からやり直す / Hub に戻る.
+            Count=3;Ui->ShowPause(true,FString(),At);
             TestTrue(TEXT("shown"),Ui->IsPauseShown());
-            TestFalse(TEXT("not within 1 s"),Press(140,336).bResume);
+            TestFalse(TEXT("not within 1 s"),Press(0).bResume);
             Wait();
             TestTrue(TEXT("accepting"),Ui->IsPauseAccepting());
-            TestTrue(TEXT("resume"),Press(140,336).bResume);
-            TestTrue(TEXT("restart"),Press(430,336).bRestart);
-            const auto Hub=Press(770,336);
+            TestTrue(TEXT("resume"),Press(0).bResume);
+            TestTrue(TEXT("restart"),Press(1).bRestart);
+            const auto Hub=Press(2);
             TestTrue(TEXT("hub"),Hub.bHub);TestFalse(TEXT("only hub"),Hub.bResume||Hub.bRestart||Hub.bNext||Hub.bRetry);
             Ui->HidePause();
             TestFalse(TEXT("hidden"),Ui->IsPauseShown());
-            // Without the Hub: 再開 140..420, 最初からやり直す 440..820; nothing at the Hub's place.
-            Ui->ShowPause(false,FString(),At);Wait();
-            TestTrue(TEXT("resume (no hub)"),Press(280,336).bResume);
-            TestTrue(TEXT("restart (no hub)"),Press(630,336).bRestart);
-            const auto None=Press(880,336);
+            // Without the Hub: 再開 / 最初からやり直す only; nothing where the third button was.
+            Count=2;Ui->ShowPause(false,FString(),At);Wait();
+            TestTrue(TEXT("resume (no hub)"),Press(0).bResume);
+            TestTrue(TEXT("restart (no hub)"),Press(1).bRestart);
+            const FHapbeatSessionPanelLayout Three=AHapbeatDemoSessionUi::PauseLayout(3);
+            FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=PanelPoint(At,AHapbeatDemoSessionUi::PauseLayout(2).Size,Three.Buttons[2].GetCenter(),8);
+            Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);In.Finger[1].X-=8;
+            const auto None=Ui->Step(In,Eye,FRotator::ZeroRotator,.1f);
             TestFalse(TEXT("no hub button"),None.bHub||None.bResume||None.bRestart||None.bPauseNext);
             Ui->HidePause();
-            // Session with the Hub: 再開 40..150, 最初からやり直す 170..420, 次へ 440..730, Hub に戻る 750..920.
-            Ui->ShowPause(true,TEXT("次へ：T-Rex"),At);Wait();
-            TestTrue(TEXT("resume (4)"),Press(95,336).bResume);
-            TestTrue(TEXT("restart (4)"),Press(295,336).bRestart);
-            const auto Next=Press(585,336);
+            // Session with the Hub: 再開 / 最初からやり直す / 次へ / Hub に戻る.
+            Count=4;Ui->ShowPause(true,TEXT("次へ：T-Rex"),At);Wait();
+            TestTrue(TEXT("resume (4)"),Press(0).bResume);
+            TestTrue(TEXT("restart (4)"),Press(1).bRestart);
+            const auto Next=Press(2);
             TestTrue(TEXT("next (4)"),Next.bPauseNext);TestFalse(TEXT("only next"),Next.bNext||Next.bHub||Next.bResume||Next.bRestart);
-            TestTrue(TEXT("hub (4)"),Press(835,336).bHub);
+            TestTrue(TEXT("hub (4)"),Press(3).bHub);
             Ui->HidePause();
-            // Session without the Hub (last step: デモを終了): 再開 40..240, 最初からやり直す 260..600, デモを終了 620..920.
-            Ui->ShowPause(false,TEXT("デモを終了"),At);Wait();
-            TestTrue(TEXT("resume (3)"),Press(140,336).bResume);
-            TestTrue(TEXT("restart (3)"),Press(430,336).bRestart);
-            const auto Finish=Press(770,336);
+            // Session without the Hub (last step: デモを終了).
+            Count=3;Ui->ShowPause(false,TEXT("デモを終了"),At);Wait();
+            TestTrue(TEXT("resume (3)"),Press(0).bResume);
+            TestTrue(TEXT("restart (3)"),Press(1).bRestart);
+            const auto Finish=Press(2);
             TestTrue(TEXT("finish (3)"),Finish.bPauseNext);TestFalse(TEXT("no hub (3)"),Finish.bHub);
         });
         It(TEXT("a recenter moves the open panel in front of the head without restarting its input delay"),[this]()
@@ -584,15 +625,57 @@ void FHapbeatDemoSessionSpec::Define()
             const FTransform At=AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator(0,90,0));
             Ui->Reposition(At);
             TestTrue(TEXT("still accepting"),Ui->IsPauseAccepting());
-            const FVector Centre=At.GetLocation();const FQuat Q=At.GetRotation();
-            TestTrue(TEXT("in front of the new facing"),Centre.Equals(FVector(0,55,148),.01f));
-            auto Point=[&](float Px,float Py,float Depth){return Centre+Q.RotateVector(FVector(Depth,-(Px-480)*.045f,-(Py-210)*.045f));};
-            FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=Point(280,336,8);Ui->Step(In,Eye,FRotator(0,90,0),.1f);
-            In.Finger[1]=Point(280,336,0);
+            TestTrue(TEXT("in front of the new facing"),At.GetLocation().Equals(FVector(0,55,148),.01f));
+            const FHapbeatSessionPanelLayout L=AHapbeatDemoSessionUi::PauseLayout(2);
+            FHapbeatSessionPointerInput In;In.bFinger[1]=true;In.Finger[1]=PanelPoint(At,L.Size,L.Buttons[0].GetCenter(),8);Ui->Step(In,Eye,FRotator(0,90,0),.1f);
+            In.Finger[1]=PanelPoint(At,L.Size,L.Buttons[0].GetCenter(),0);
             TestTrue(TEXT("pressed at the new place"),Ui->Step(In,Eye,FRotator(0,90,0),.1f).bResume);
             Ui->HidePause();
             Ui->Reposition(AHapbeatDemoSessionUi::PlacePanel(Eye,FRotator::ZeroRotator));
             TestFalse(TEXT("a closed panel stays closed"),Ui->IsPauseShown());
+        });
+    });
+    Describe(TEXT("Recenter"),[this]()
+    {
+        It(TEXT("the default recenter puts the head over the pawn's start, facing its start yaw, at the same height"),[this]()
+        {
+            // Pawn at (100, 0, 0) turned 90 deg; the head 30 cm in front of it (+Y) and 160 cm up, looking 20 deg further.
+            const FTransform Pawn(FRotator(0,90,0),FVector(100,0,0));
+            const FVector Eye(100,30,160);
+            const FTransform T=UHapbeatDemoSessionSubsystem::RecenterPawn(Pawn,Eye,110,FVector(0,0,0),0);
+            const FVector NewEye=T.TransformPosition(Pawn.InverseTransformPosition(Eye));
+            TestTrue(TEXT("head over the start"),FVector2D(NewEye).IsNearlyZero(.01f));
+            TestTrue(TEXT("height unchanged"),FMath::IsNearlyEqual(NewEye.Z,160.f,.01f));
+            const float NewFacing=T.GetRotation().Rotator().Yaw+(110-90);
+            TestTrue(TEXT("facing the start yaw"),FMath::IsNearlyZero(FRotator::NormalizeAxis(NewFacing),.01f));
+        });
+        It(TEXT("the 視線をリセット button presses like the haptics button and reports the controls' heading"),[this]()
+        {
+            UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
+            ON_SCOPE_EXIT { World->DestroyWorld(false); };
+            AHapbeatDemoSessionUi* Ui=World->SpawnActor<AHapbeatDemoSessionUi>();
+            if(!TestNotNull(TEXT("ui"),Ui)) return;
+            const FVector Eye(0,0,160);
+            Ui->SetRecenterButton(true);
+            FHapbeatSessionPointerInput None;
+            Ui->Step(None,Eye,FRotator(0,40,0),.1f);
+            TestTrue(TEXT("heading from the head"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
+            // A glance 20 deg down-left (inside the dead zone) keeps the heading.
+            Ui->Step(None,Eye,FRotator(-30,20,0),.1f);
+            TestTrue(TEXT("a glance keeps it"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
+            // Button: 45 cm away, 30 deg left of the heading, 27 deg down, facing the eye; 172 x 54 mm plate.
+            const FVector Centre=Eye+FRotator(-27,40-30,0).Vector()*45.f;
+            const FTransform At((Eye-Centre).Rotation(),Centre);
+            const FVector2D Plate(344,108);
+            FHapbeatSessionPointerInput In;In.bFinger[0]=true;In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);
+            TestFalse(TEXT("approach"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
+            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
+            const auto E=Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            TestTrue(TEXT("pressed"),E.bRecenter);TestFalse(TEXT("not haptics"),E.bToggleHaptics);
+            Ui->SetRecenterButton(false);
+            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
+            TestFalse(TEXT("hidden: nothing"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
         });
     });
     Describe(TEXT("Handoff"),[this]()

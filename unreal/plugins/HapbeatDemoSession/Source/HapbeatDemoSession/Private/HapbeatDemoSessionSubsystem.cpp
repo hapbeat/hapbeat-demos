@@ -8,9 +8,11 @@
 #include "HapbeatSubsystem.h"
 #include "AudioDevice.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "HeadMountedDisplayFunctionLibrary.h"
 #include "HeadMountedDisplayTypes.h"
@@ -72,8 +74,9 @@ void UHapbeatDemoSessionSubsystem::Load(const FString& DescriptorJson,bool bDesc
     // Every step starts with haptics on; the button's visibility carries over the session.
     bHapticsEnabled=true;
     bHapticsUiVisible=bSessionActive&&Ticket.bHapticsUi;
-    if(bSessionActive) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_ACTIVE demo=%s session=%s step=%d/%d haptics_ui=%d"),
-        *Descriptor.DemoId,*Ticket.SessionId,Ticket.Index+1,Ticket.Steps.Num(),bHapticsUiVisible);
+    bRecenterUiVisible=bSessionActive&&Ticket.bRecenterUi;
+    if(bSessionActive) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_ACTIVE demo=%s session=%s step=%d/%d haptics_ui=%d recenter_ui=%d"),
+        *Descriptor.DemoId,*Ticket.SessionId,Ticket.Index+1,Ticket.Steps.Num(),bHapticsUiVisible,bRecenterUiVisible);
     if(bHasDescriptor) {
         Receiver.IsAllowed=[this](const FString& Action){return IsControlAllowed(Action);};
         Receiver.Execute=[this](const FString& Action){return ExecuteControl(Action);};
@@ -98,7 +101,7 @@ void UHapbeatDemoSessionSubsystem::ApplyDeviceAddress()
 
 void UHapbeatDemoSessionSubsystem::Deinitialize()
 {
-    bInitialized=false;Receiver.Stop();Controls.Reset();
+    bInitialized=false;Receiver.Stop();Controls.Reset();RecenterHandler=nullptr;
     FCoreDelegates::ApplicationWillDeactivateDelegate.Remove(DeactivateHandle);
     FCoreDelegates::VRHeadsetRecenter.Remove(RecenterHandle);
     if(Ui.IsValid()) Ui->Destroy();
@@ -117,6 +120,10 @@ UWorld* UHapbeatDemoSessionSubsystem::GetTickableGameObjectWorld() const
 
 void UHapbeatDemoSessionSubsystem::RegisterControl(const FString& Action,const UObject* Owner,TFunction<bool()> Handler)
 {
+    if(Action==TEXT("recenter")) {
+        UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SESSION_RECENTER_CONTROL ignored: CONTROL recenter is the plugin's 視線をリセット; use SetRecenterHandler"));
+        return;
+    }
     Controls.RemoveAll([&](const FControl& C){return C.Action==Action;});
     Controls.Add({Action,Owner,MoveTemp(Handler)});
 }
@@ -128,6 +135,8 @@ void UHapbeatDemoSessionSubsystem::UnregisterControls(const UObject* Owner)
 
 bool UHapbeatDemoSessionSubsystem::IsControlAllowed(const FString& Action) const
 {
+    // 視線をリセット is common to every Session runtime (with or without a handler of the demo's own).
+    if(Action==TEXT("recenter")||Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) return true;
     if(Action.StartsWith(TEXT("haptics_"))) return Descriptor.bHapticsToggle
         &&(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")||Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide"));
     return Controls.ContainsByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
@@ -137,6 +146,13 @@ bool UHapbeatDemoSessionSubsystem::ExecuteControl(const FString& Action)
 {
     if(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")) {SetHapticsEnabled(Action==TEXT("haptics_on"));return true;}
     if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return true;}
+    if(Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) {SetRecenterUiVisible(Action==TEXT("recenter_ui_show"));return true;}
+    if(Action==TEXT("recenter")) {
+        // The user is asked to look ahead: the head's yaw is the facing.
+        const UWorld* World=GetTickableGameObjectWorld();
+        const APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
+        return PC&&PC->PlayerCameraManager&&RecenterView(PC->PlayerCameraManager->GetCameraRotation().Yaw,TEXT("control"));
+    }
     const FControl* Control=Controls.FindByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
     if(!Control||!Control->Handler()) return false;
     // restart reloads the experience: an open completion or pause panel belongs to the previous run.
@@ -156,6 +172,52 @@ void UHapbeatDemoSessionSubsystem::SetHapticsUiVisible(bool bVisible)
 {
     bHapticsUiVisible=bVisible;
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_HAPTICS_UI visible=%d"),bHapticsUiVisible);
+}
+
+void UHapbeatDemoSessionSubsystem::SetRecenterUiVisible(bool bVisible)
+{
+    bRecenterUiVisible=bVisible;
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RECENTER_UI visible=%d"),bRecenterUiVisible);
+}
+
+void UHapbeatDemoSessionSubsystem::SetRecenterHandler(const UObject* Owner,TFunction<bool(float)> Handler)
+{
+    RecenterOwner=Owner;RecenterHandler=MoveTemp(Handler);
+}
+
+void UHapbeatDemoSessionSubsystem::ClearRecenterHandler(const UObject* Owner)
+{
+    if(RecenterOwner.IsValid()&&RecenterOwner.Get()!=Owner) return;
+    RecenterOwner.Reset();RecenterHandler=nullptr;
+}
+
+FTransform UHapbeatDemoSessionSubsystem::RecenterPawn(const FTransform& Pawn,const FVector& Eye,float FacingYaw,const FVector& Start,float StartYawDegrees)
+{
+    // Turn about the eye so that the facing becomes the start yaw, then move the eye over the start location.
+    const FQuat Turn(FVector::UpVector,FMath::DegreesToRadians(FRotator::NormalizeAxis(StartYawDegrees-FacingYaw)));
+    const FVector Location=Eye+Turn.RotateVector(Pawn.GetLocation()-Eye)+FVector(Start.X-Eye.X,Start.Y-Eye.Y,0);
+    return FTransform(Turn*Pawn.GetRotation(),Location,Pawn.GetScale3D());
+}
+
+bool UHapbeatDemoSessionSubsystem::RecenterView(float FacingYaw,const TCHAR* Source)
+{
+    bool bDone=false;
+    const bool bHost=RecenterHandler&&RecenterOwner.IsValid();
+    if(bHost) bDone=RecenterHandler(FacingYaw);
+    else {
+        const UWorld* World=GetTickableGameObjectWorld();
+        APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
+        APawn* Pawn=PC?PC->GetPawn():nullptr;
+        if(Pawn&&PC->PlayerCameraManager&&StartPawn.Get()==Pawn) {
+            const FTransform T=RecenterPawn(Pawn->GetActorTransform(),PC->PlayerCameraManager->GetCameraLocation(),FacingYaw,StartLocation,StartYaw);
+            Pawn->SetActorLocationAndRotation(T.GetLocation(),T.GetRotation());
+            bDone=true;
+        }
+    }
+    // The open panels follow (as after a system recenter: the camera reaches its new place within a frame).
+    if(bDone) RecenterSeconds=.3f;
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RECENTER source=%s handler=%s facing=%.1f done=%d"),Source,bHost?TEXT("demo"):TEXT("pawn"),FacingYaw,bDone);
+    return bDone;
 }
 
 const FHapbeatDemoSessionComponent& UHapbeatDemoSessionSubsystem::HubComponent()
@@ -198,9 +260,31 @@ void UHapbeatDemoSessionSubsystem::SetPauseShown(bool bShown)
 {
     bPauseShown=bShown;
     if(!bShown&&Ui.IsValid()) Ui->HidePause();
+    // Before OnPauseChanged: a demo pauses its world there (UGameplayStatics::SetGamePaused).
+    KeepHandMeshesTicking(bShown);
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE %s"),bShown?TEXT("shown"):TEXT("hidden"));
     OnPauseChanged.Broadcast(bShown);
     OnGameplayPausedChanged.Broadcast(bShown);
+}
+
+void UHapbeatDemoSessionSubsystem::KeepHandMeshesTicking(bool bPaused)
+{
+    // A posed mesh refreshes its bones in its own tick (USkinnedMeshComponent::TickComponent), which stops while the
+    // world is paused: the drawn hands froze under the pause panel although the demo kept setting their bones.
+    for(const TWeakObjectPtr<UActorComponent>& C:PausedTickers) if(C.IsValid()) C->SetTickableWhenPaused(false);
+    PausedTickers.Reset();
+    if(!bPaused) return;
+    const UWorld* World=GetTickableGameObjectWorld();
+    const APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
+    APawn* Pawn=PC?PC->GetPawn():nullptr;
+    if(!Pawn) return;
+    TArray<AActor*> Actors;
+    Pawn->GetAttachedActors(Actors,true,true);
+    Actors.Add(Pawn);
+    for(const AActor* Actor:Actors) {
+        TInlineComponentArray<UPoseableMeshComponent*> Meshes(Actor);
+        for(UPoseableMeshComponent* Mesh:Meshes) if(!Mesh->PrimaryComponentTick.bTickEvenWhenPaused) {Mesh->SetTickableWhenPaused(true);PausedTickers.Add(Mesh);}
+    }
 }
 
 void UHapbeatDemoSessionSubsystem::ReturnToHub()
@@ -218,7 +302,7 @@ void UHapbeatDemoSessionSubsystem::ReturnToHub()
 
 FString UHapbeatDemoSessionSubsystem::MakeNextTicketJson() const
 {
-    return bSessionActive?Ticket.MakeNext(bHapticsUiVisible).ToJson():FString();
+    return bSessionActive?Ticket.MakeNext(bHapticsUiVisible,bRecenterUiVisible).ToJson():FString();
 }
 
 void UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
@@ -226,7 +310,7 @@ void UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
     if(!bSessionActive||IsLeaving()) return;
     const FHapbeatDemoSessionComponent& Target=Ticket.NextTarget();
     const FString Json=MakeNextTicketJson();
-    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_LAUNCH target=%s/%s index=%d haptics_ui=%d"),*Target.Package,*Target.Activity,Ticket.Index+1,bHapticsUiVisible);
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_LAUNCH target=%s/%s index=%d haptics_ui=%d recenter_ui=%d"),*Target.Package,*Target.Activity,Ticket.Index+1,bHapticsUiVisible,bRecenterUiVisible);
     if(!HapbeatDemoSessionPlatform::CanLaunch()) {
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_LAUNCH_SKIPPED not Android; ticket=%s"),*Json);
         return;
@@ -370,6 +454,8 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     if(!PC||!PC->PlayerCameraManager) return;
     const FVector Eye=PC->PlayerCameraManager->GetCameraLocation();
     const FRotator Rotation=PC->PlayerCameraManager->GetCameraRotation();
+    // The default 視線をリセット puts the head back where the pawn started.
+    if(APawn* Pawn=PC->GetPawn(); Pawn&&StartPawn.Get()!=Pawn) {StartPawn=Pawn;StartLocation=Pawn->GetActorLocation();StartYaw=Pawn->GetActorRotation().Yaw;}
     if(PauseSettings.bEnabled&&!bCompletionShown&&!IsLeaving()&&PauseDetector.Update(ReadPauseInput(PC,Eye),Dt)) {
         // The same gesture / button closes it again (= 再開).
         if(bPauseShown) HidePause(); else ShowPause();
@@ -378,7 +464,8 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     const bool bRecentering=RecenterSeconds>=0;
     if(bRecentering) RecenterSeconds-=Dt;
     const bool bHapticsButton=bHasDescriptor&&Descriptor.bHapticsToggle&&bHapticsUiVisible&&!bExiting;
-    if(!bCompletionShown&&!bPauseShown&&!bHapticsButton&&!Ui.IsValid()) return;
+    const bool bRecenterButton=bRecenterUiVisible&&!bExiting;
+    if(!bCompletionShown&&!bPauseShown&&!bHapticsButton&&!bRecenterButton&&!Ui.IsValid()) return;
     AHapbeatDemoSessionUi* View=EnsureUi(World);
     if(!View) return;
     if(bCompletionShown&&!View->IsCompletionShown()) {
@@ -391,10 +478,12 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     else if(!bPauseShown&&View->IsPauseShown()) View->HidePause();
     if(bRecentering) View->Reposition(AHapbeatDemoSessionUi::PlacePanel(Eye,Rotation));
     View->SetHapticsButton(bHapticsButton,bHapticsEnabled);
+    View->SetRecenterButton(bRecenterButton);
     const AHapbeatDemoSessionUi::FEvents E=View->Step(ReadPointers(PC),Eye,Rotation,Dt);
     // While a launch waits for the background the panels stay up, but nothing else is started from them.
     if(IsLeaving()) return;
     if(E.bToggleHaptics) SetHapticsEnabled(!bHapticsEnabled);
+    if(E.bRecenter) RecenterView(View->GetControlsYaw(),TEXT("button"));
     if(E.bRetry) {
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RETRY step=%d"),Ticket.Index+1);
         HideCompletion();OnRestartRequested.Broadcast();
