@@ -13,6 +13,12 @@ namespace HapbeatDemoSessionPlatform
      * -HapbeatSessionTicketFile=<path>. True when a ticket was present.
      */
     bool TakeTicket(FString& OutJson);
+    /**
+     * Android: getExternalFilesDir(null)/hapbeat-device.json (absent when missing or over 1024 bytes; the Java
+     * side logs the latter). Non-Shipping elsewhere: -HapbeatDeviceAddressFile=<path>. True when a file was
+     * present; OutSource is its path for the log.
+     */
+    bool ReadDeviceAddress(FString& OutJson,FString& OutSource);
     /** Whether another runtime can be started from here (Android only). */
     bool CanLaunch();
     bool Launch(const FHapbeatDemoSessionComponent& Target,const FString& TicketJson);

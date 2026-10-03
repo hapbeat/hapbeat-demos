@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Demo Session (repos-core/hapbeat-contracts/specs/demo-session.md): session ticket Intent extra,
-     launching the next runtime and the descriptor in the APK assets. -->
+     launching the next runtime, the descriptor in the APK assets and the per-device address file. -->
 <root xmlns:android="http://schemas.android.com/apk/res/android">
   <!-- The descriptor goes to the root of the APK assets, where the Hub reads it through
        createPackageContext(pkg).getAssets(). Source: <project>/Config/HapbeatDemoSession/. -->
@@ -59,6 +59,49 @@
         catch (Exception e)
         {
             Log.debug("HapbeatDemoSession: descriptor unreadable: " + e);
+            return null;
+        }
+    }
+
+    /** getExternalFilesDir(null)/hapbeat-device.json (the per-device Hapbeat address), or null without that directory. */
+    public String AndroidThunkJava_HapbeatSession_DeviceAddressPath()
+    {
+        java.io.File dir = getExternalFilesDir(null);
+        return dir == null ? null : new java.io.File(dir, "hapbeat-device.json").getAbsolutePath();
+    }
+
+    /** hapbeat-device.json as UTF-8, or null when it is absent, unreadable or larger than 1024 bytes. */
+    public String AndroidThunkJava_HapbeatSession_ReadDeviceAddress()
+    {
+        String path = AndroidThunkJava_HapbeatSession_DeviceAddressPath();
+        if (path == null)
+        {
+            return null;
+        }
+        java.io.File file = new java.io.File(path);
+        if (!file.isFile())
+        {
+            return null;
+        }
+        try (java.io.InputStream input = new java.io.FileInputStream(file))
+        {
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[1025];
+            int count;
+            while ((count = input.read(buffer)) > 0)
+            {
+                output.write(buffer, 0, count);
+                if (output.size() > 1024)
+                {
+                    Log.warn("HAPBEAT_DEVICE_ADDRESS_REJECTED larger than 1024 bytes source=" + path);
+                    return null;
+                }
+            }
+            return new String(output.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        catch (Exception e)
+        {
+            Log.warn("HAPBEAT_DEVICE_ADDRESS_REJECTED unreadable source=" + path + ": " + e);
             return null;
         }
     }

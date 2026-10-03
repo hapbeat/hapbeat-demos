@@ -6,7 +6,7 @@ public class HapbeatDemoSession : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine" });
-        PrivateDependencyModuleNames.AddRange(new string[] { "InputCore", "Json", "Sockets", "Networking", "Slate", "SlateCore", "UMG", "HeadMountedDisplay", "XRBase" });
+        PrivateDependencyModuleNames.AddRange(new string[] { "InputCore", "Json", "Sockets", "Networking", "Slate", "SlateCore", "UMG", "HeadMountedDisplay", "XRBase", "HapbeatSDK" });
         // HMAC-SHA256 for Demo Switch authentication (the engine's OpenSSL also links on Android).
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
         if (Target.Platform == UnrealTargetPlatform.Android)

@@ -1,5 +1,6 @@
 #include "HapbeatDemoSessionPlatform.h"
 #include "HapbeatDemoSessionTicket.h"
+#include "HapbeatDemoSessionDeviceAddress.h"
 #include "HapbeatDemoSessionLog.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
@@ -15,9 +16,9 @@
 namespace
 {
 #if !PLATFORM_ANDROID
-    bool LoadSmallFile(const FString& Path,FString& Out)
+    bool LoadSmallFile(const FString& Path,FString& Out,int64 MaxBytes=HapbeatDemoSession::MaxJsonBytes)
     {
-        return FPaths::FileExists(Path)&&IFileManager::Get().FileSize(*Path)<=HapbeatDemoSession::MaxJsonBytes&&FFileHelper::LoadFileToString(Out,*Path);
+        return FPaths::FileExists(Path)&&IFileManager::Get().FileSize(*Path)<=MaxBytes&&FFileHelper::LoadFileToString(Out,*Path);
     }
 #else
     jmethodID Method(JNIEnv* Env,const ANSICHAR* Name,const ANSICHAR* Signature)
@@ -56,6 +57,24 @@ bool HapbeatDemoSessionPlatform::TakeTicket(FString& Out)
     FString File;
     if(!FParse::Value(FCommandLine::Get(),TEXT("HapbeatSessionTicketFile="),File)) return false;
     if(!LoadSmallFile(File,Out)) {UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SESSION_TICKET unreadable file %s"),*File);Out.Empty();}
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool HapbeatDemoSessionPlatform::ReadDeviceAddress(FString& Out,FString& Source)
+{
+#if PLATFORM_ANDROID
+    if(!CallString("AndroidThunkJava_HapbeatSession_ReadDeviceAddress",Out)) return false;
+    if(!CallString("AndroidThunkJava_HapbeatSession_DeviceAddressPath",Source)) Source=TEXT("hapbeat-device.json");
+    return true;
+#elif !UE_BUILD_SHIPPING
+    // Desktop verification only: the file install-demos.ps1 pushes to a Quest.
+    if(!FParse::Value(FCommandLine::Get(),TEXT("HapbeatDeviceAddressFile="),Source)) return false;
+    if(!FPaths::FileExists(Source)) return false;
+    // An oversized or unreadable file stays present with no content, so the caller rejects it with a warning.
+    if(!LoadSmallFile(Source,Out,FHapbeatDeviceAddress::MaxJsonBytes)) Out.Empty();
     return true;
 #else
     return false;

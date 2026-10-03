@@ -1,7 +1,9 @@
 #include "HapbeatDemoSessionSubsystem.h"
 #include "HapbeatDemoSessionLog.h"
+#include "HapbeatDemoSessionDeviceAddress.h"
 #include "HapbeatDemoSessionPlatform.h"
 #include "HapbeatDemoSessionUi.h"
+#include "HapbeatSubsystem.h"
 #include "AudioDevice.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
@@ -25,6 +27,9 @@ UHapbeatDemoSessionSubsystem* UHapbeatDemoSessionSubsystem::Get(const UObject* W
 void UHapbeatDemoSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
+    // The address file is applied on top of what the SDK restored at its own start (saved override, pinned axes).
+    Collection.InitializeDependency<UHapbeatSubsystem>();
+    ApplyDeviceAddress();
     FString DescriptorJson,TicketJson;
     const bool bDescriptorRead=HapbeatDemoSessionPlatform::ReadDescriptor(DescriptorJson);
     const bool bTicketPresent=HapbeatDemoSessionPlatform::TakeTicket(TicketJson);
@@ -59,6 +64,21 @@ void UHapbeatDemoSessionSubsystem::Load(const FString& DescriptorJson,bool bDesc
         Receiver.Execute=[this](const FString& Action){return ExecuteControl(Action);};
         Receiver.Configure(Descriptor.DemoId);
     }
+}
+
+void UHapbeatDemoSessionSubsystem::ApplyDeviceAddress()
+{
+    FString Json,Source,Error;
+    if(!HapbeatDemoSessionPlatform::ReadDeviceAddress(Json,Source)) return;
+    FHapbeatDeviceAddress Address;
+    if(!FHapbeatDeviceAddress::Parse(Json,Address,Error)) {UE_LOG(LogHapbeatDemoSession,Warning,TEXT("HAPBEAT_DEVICE_ADDRESS_REJECTED %s source=%s"),*Error,*Source);return;}
+    UHapbeatSubsystem* Hapbeat=GetGameInstance()?GetGameInstance()->GetSubsystem<UHapbeatSubsystem>():nullptr;
+    if(!Hapbeat) {UE_LOG(LogHapbeatDemoSession,Warning,TEXT("HAPBEAT_DEVICE_ADDRESS_REJECTED no Hapbeat subsystem source=%s"),*Source);return;}
+    // -1 in SetAddressOverride clears that axis, so an unchanged axis passes the current override. Build-pinned
+    // axes (UHapbeatConfig::ForcedOverride*) are kept by the SDK itself.
+    Hapbeat->SetAddressOverride(FHapbeatDeviceAddress::ResolveAxis(Address.Player,Hapbeat->GetOverridePlayer()),
+        FHapbeatDeviceAddress::ResolveAxis(Address.Group,Hapbeat->GetOverrideGroup()),false);
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("HAPBEAT_DEVICE_ADDRESS player=%d group=%d source=%s"),Hapbeat->GetOverridePlayer(),Hapbeat->GetOverrideGroup(),*Source);
 }
 
 void UHapbeatDemoSessionSubsystem::Deinitialize()

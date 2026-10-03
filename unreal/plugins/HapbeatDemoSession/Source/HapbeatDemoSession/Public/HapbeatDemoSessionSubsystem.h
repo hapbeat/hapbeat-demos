@@ -24,6 +24,9 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
  * shows while IsHapticsUiVisible() (ticket haptics_ui, or Demo Switch CONTROL haptics_ui_show/hide).
  *
  * The demo registers its CONTROL actions (restart / menu_open / menu_close / recenter) with RegisterControl.
+ *
+ * After the Hapbeat SDK subsystem has initialized, the per-device address file (hapbeat-device.json in the app's
+ * external files directory) is read once and its axes are set as the SDK's address override (not persisted).
  */
 UCLASS()
 class HAPBEATDEMOSESSION_API UHapbeatDemoSessionSubsystem : public UGameInstanceSubsystem, public FTickableGameObject
@@ -81,6 +84,8 @@ public:
     FString MakeNextTicketJson() const;
 private:
     void Load(const FString& DescriptorJson,bool bDescriptorRead,const FString& TicketJson,bool bTicketPresent);
+    /** hapbeat-device.json -> UHapbeatSubsystem::SetAddressOverride(persist: false). Nothing without a file. */
+    void ApplyDeviceAddress();
     bool IsControlAllowed(const FString& Action) const;
     bool ExecuteControl(const FString& Action);
     FHapbeatSessionPointerInput ReadPointers(APlayerController* PlayerController) const;

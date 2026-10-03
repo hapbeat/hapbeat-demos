@@ -8,6 +8,10 @@
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionUi.h"
+#include "HapbeatDemoSessionDeviceAddress.h"
+#include "HapbeatConfig.h"
+#include "HapbeatSubsystem.h"
+#include "Engine/GameInstance.h"
 
 namespace HapbeatDemoSessionSpecData
 {
@@ -112,6 +116,56 @@ void FHapbeatDemoSessionSpec::Define()
             TestFalse(TEXT("over 16384 bytes rejected"),FHapbeatDemoSessionTicket::Parse(Padded,T,Error));
             const FString Small=FString(Ticket).Replace(TEXT("{\"version\""),*(TEXT("{")+FString::ChrN(1000,TEXT(' '))+TEXT("\"version\"")));
             TestTrue(TEXT("whitespace under the limit accepted"),FHapbeatDemoSessionTicket::Parse(Small,T,Error));
+        });
+    });
+    Describe(TEXT("DeviceAddress"),[this]()
+    {
+        It(TEXT("parses what install-demos.ps1 writes"),[this]()
+        {
+            FHapbeatDeviceAddress A;FString Error;
+            TestTrue(TEXT("player and group"),FHapbeatDeviceAddress::Parse(TEXT(R"({"version":1,"player":2,"group":7})"),A,Error));
+            TestEqual(TEXT("player"),A.Player,2);TestEqual(TEXT("group"),A.Group,7);
+            TestTrue(TEXT("bounds and -1"),FHapbeatDeviceAddress::Parse(TEXT(R"({"group":99,"player":-1,"version":1})"),A,Error));
+            TestEqual(TEXT("player unchanged"),A.Player,FHapbeatDeviceAddress::Unchanged);TestEqual(TEXT("group 99"),A.Group,99);
+            TestTrue(TEXT("both -1"),FHapbeatDeviceAddress::Parse(TEXT(R"({"version":1,"player":-1,"group":-1})"),A,Error));
+            TestTrue(TEXT("1"),FHapbeatDeviceAddress::Parse(TEXT(R"({"version":1,"player":1,"group":1})"),A,Error));
+        });
+        It(TEXT("rejects anything outside the schema and keeps the output untouched"),[this]()
+        {
+            const TCHAR* Bad[]={
+                TEXT(""),TEXT("not json"),TEXT("[1,2]"),TEXT(R"({"version":1,"player":2})"),TEXT(R"({"version":1,"group":2})"),
+                TEXT(R"({"player":2,"group":2})"),TEXT(R"({"version":2,"player":2,"group":2})"),TEXT(R"({"version":"1","player":2,"group":2})"),
+                TEXT(R"({"version":1,"player":0,"group":2})"),TEXT(R"({"version":1,"player":100,"group":2})"),TEXT(R"({"version":1,"player":2,"group":-2})"),
+                TEXT(R"({"version":1,"player":2.5,"group":2})"),TEXT(R"({"version":1,"player":"2","group":2})"),TEXT(R"({"version":1,"player":null,"group":2})"),
+                TEXT(R"({"version":1,"player":2,"group":2,"extra":1})"),TEXT(R"({"version":1,"player":2,"group":1e9})")};
+            for(const TCHAR* Json:Bad) {
+                FHapbeatDeviceAddress A;A.Player=5;A.Group=6;FString Error;
+                TestFalse(FString::Printf(TEXT("rejects %s"),Json),FHapbeatDeviceAddress::Parse(Json,A,Error));
+                TestTrue(FString::Printf(TEXT("untouched by %s"),Json),A.Player==5&&A.Group==6);
+            }
+            FHapbeatDeviceAddress A;FString Error;
+            const FString Padded=FString(TEXT(R"({"version":1,"player":2,"group":2)"))+FString::ChrN(1024,' ')+TEXT("}");
+            TestFalse(TEXT("over 1024 bytes"),FHapbeatDeviceAddress::Parse(Padded,A,Error));
+        });
+        It(TEXT("leaves a -1 axis at the SDK's current override and sets the other"),[this]()
+        {
+            const UHapbeatConfig* Config=GetDefault<UHapbeatConfig>();
+            if(UHapbeatSubsystem::NormalizeAddressOverride(Config->ForcedOverridePlayer)>=1||UHapbeatSubsystem::NormalizeAddressOverride(Config->ForcedOverrideGroup)>=1) {
+                AddInfo(TEXT("this project pins an address axis; the SDK keeps it, nothing to check here"));return;
+            }
+            UHapbeatSubsystem* Hapbeat=NewObject<UHapbeatSubsystem>(NewObject<UGameInstance>());
+            Hapbeat->SetAddressOverride(3,5,false);
+            FHapbeatDeviceAddress A;FString Error;
+            TestTrue(TEXT("parsed"),FHapbeatDeviceAddress::Parse(TEXT(R"({"version":1,"player":-1,"group":2})"),A,Error));
+            Hapbeat->SetAddressOverride(FHapbeatDeviceAddress::ResolveAxis(A.Player,Hapbeat->GetOverridePlayer()),FHapbeatDeviceAddress::ResolveAxis(A.Group,Hapbeat->GetOverrideGroup()),false);
+            TestEqual(TEXT("player kept"),Hapbeat->GetOverridePlayer(),3);TestEqual(TEXT("group set"),Hapbeat->GetOverrideGroup(),2);
+            TestTrue(TEXT("parsed"),FHapbeatDeviceAddress::Parse(TEXT(R"({"version":1,"player":-1,"group":-1})"),A,Error));
+            Hapbeat->SetAddressOverride(FHapbeatDeviceAddress::ResolveAxis(A.Player,Hapbeat->GetOverridePlayer()),FHapbeatDeviceAddress::ResolveAxis(A.Group,Hapbeat->GetOverrideGroup()),false);
+            TestEqual(TEXT("both kept: player"),Hapbeat->GetOverridePlayer(),3);TestEqual(TEXT("both kept: group"),Hapbeat->GetOverrideGroup(),2);
+            // Why ResolveAxis exists: -1 handed to the SDK directly clears that axis.
+            Hapbeat->SetAddressOverride(UHapbeatSubsystem::AddressOverrideDisabled,2,false);
+            TestEqual(TEXT("-1 clears the axis in the SDK"),Hapbeat->GetOverridePlayer(),int32(UHapbeatSubsystem::AddressOverrideDisabled));
+            TestEqual(TEXT("ResolveAxis keeps a value"),FHapbeatDeviceAddress::ResolveAxis(7,3),7);
         });
     });
     Describe(TEXT("Descriptor"),[this]()
