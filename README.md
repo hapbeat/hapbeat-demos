@@ -40,7 +40,7 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 
 このリポジトリには、デモ共通の [Demo Switch package](unity/packages/com.hapbeat.demo-switch/README.md)、APK を切り替える [Demo Hub](unity/demo-hub/README.md)、補助スクリプト（`tools/`）と、ビルド済みアプリの Releases を置く。
 
-デモ一式の Quest へのインストールは `tools/install-demos.cmd -Group 1` のように行う。`-Group` / `-Player` を付けると、その Quest の全デモの触覚の宛先（`hapbeat-device.json`）も同時に書き込む。2 台目は `-Group 2`。
+デモ一式の Quest へのインストールは `tools/install-demos.cmd -Group 1` のように行う。Quest に入れる APK は最新のビルドから `quest-apks/`（git 対象外、アプリ名のファイル名で 1 デモ 1 ファイル）に集めてからそこを入れる（`-CollectOnly` で集めるだけ、`-NoCollect` で集めずに入れる）。`-Group` / `-Player` を付けると、その Quest の全デモの触覚の宛先（`hapbeat-device.json`）も同時に書き込む。2 台目は `-Group 2`。
 
 Quest の画面を PC に映すには `tools/quest-mirror.cmd` をダブルクリックする（同じ LAN 内の Wi-Fi adb + [scrcpy](https://github.com/Genymobile/scrcpy)。インターネット不要、表示のみ・音声なし。接続中の Quest ごとに「Quest 1 / Quest 2」のウィンドウを並べる）。Quest を再起動した直後は USB を挿した状態で `tools/enable-quest-wifi-adb.cmd`（または quest-mirror.cmd）をダブルクリックすると Wi-Fi adb に切り替わり、ケーブルを抜いてよい。
 

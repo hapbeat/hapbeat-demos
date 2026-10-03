@@ -89,3 +89,6 @@ CLAUDE.md
 instructions/
 .claude/
 AGENTS.md
+
+# APKs gathered for installing on the Quest (tools/install-demos.ps1)
+quest-apks/
