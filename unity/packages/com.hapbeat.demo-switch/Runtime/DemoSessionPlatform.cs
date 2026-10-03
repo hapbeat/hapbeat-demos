@@ -49,6 +49,8 @@ namespace Hapbeat.DemoSwitch
         bool TryGetOwnComponent(out DemoSessionComponent component);
         IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities();
         bool TryReadPackageAsset(string packageName, string name, out string text, out string error);
+        /// <summary>Whether PackageManager can see <paramref name="packageName"/> (Android 11+ needs a matching manifest query).</summary>
+        bool IsPackageInstalled(string packageName);
     }
 
     internal static class DemoSessionPlatform
@@ -116,6 +118,8 @@ namespace Hapbeat.DemoSwitch
             error = "Reading another package is supported only by an Android player build.";
             return false;
         }
+
+        public bool IsPackageInstalled(string packageName) => false;
     }
 
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -250,6 +254,22 @@ namespace Hapbeat.DemoSwitch
             {
                 text = null;
                 error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool IsPackageInstalled(string packageName)
+        {
+            try
+            {
+                using (var activity = CurrentActivity())
+                using (var manager = activity.Call<AndroidJavaObject>("getPackageManager"))
+                using (manager.Call<AndroidJavaObject>("getPackageInfo", packageName, 0))
+                    return true;
+            }
+            catch (AndroidJavaException)
+            {
+                // PackageManager.NameNotFoundException: not installed, or not visible to this package.
                 return false;
             }
         }

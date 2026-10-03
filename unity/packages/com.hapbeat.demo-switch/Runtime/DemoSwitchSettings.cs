@@ -54,6 +54,12 @@ namespace Hapbeat.DemoSwitch
         [Tooltip("Look of the shared hands when the session ticket has no hand_style.")]
         [SerializeField] private DemoHandStyle _handStyle = DemoHandStyle.Ghost;
 
+        [Header("Pause")]
+        [Tooltip("Shared pause menu (再開 / 最初からやり直す / Hub に戻る) on the left-hand menu gesture or the controller's menu button. Enable only in demos without their own menu; never in the Hub.")]
+        [SerializeField] private bool _pauseMenu;
+        [Tooltip("Hand input for the pause menu. System Menu needs the OpenXR feature Meta Hand Tracking Aim.")]
+        [SerializeField] private DemoPauseGesture _pauseGesture = DemoPauseGesture.SystemMenu;
+
         public bool ReceiverEnabled => _receiverEnabled;
         public int Port => _port;
         public string CurrentDemoId => _currentDemoId;
@@ -61,6 +67,8 @@ namespace Hapbeat.DemoSwitch
         public bool AllowUnsignedOnIsolatedLan => _allowUnsignedOnIsolatedLan;
         public bool Hands => _hands;
         public DemoHandStyle HandStyle => _handStyle;
+        public bool PauseMenu => _pauseMenu;
+        public DemoPauseGesture PauseGesture => _pauseGesture;
 
         public bool TryResolveTarget(string demoId, out DemoSwitchTarget target)
         {

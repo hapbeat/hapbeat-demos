@@ -44,6 +44,11 @@ namespace Hapbeat.DemoSwitch
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
             if (settings.Hands) gameObject.AddComponent<DemoHands>().SetStyle(DemoHands.ResolveStyle(DemoSession.Ticket, settings.HandStyle));
+            if (settings.PauseMenu && settings.CurrentDemoId != DemoSwitchSettings.HubDemoId)
+            {
+                DemoPause.Configure(settings.TryResolveTarget(DemoSwitchSettings.HubDemoId, out var hub) ? hub.PackageName : null);
+                gameObject.AddComponent<DemoPauseInput>().Gesture = settings.PauseGesture;
+            }
         }
 
         /// <summary>Demo Session launched the next runtime: release 7710 and run the usual switch cleanup.</summary>

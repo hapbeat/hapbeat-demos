@@ -114,6 +114,20 @@ namespace Hapbeat.DemoSwitch
 
         internal static Vector3 ToWorld(Transform space, Vector3 position) => space != null ? space.TransformPoint(position) : position;
 
+        /// <summary>The tracked left hand of the first running hand subsystem (same source as the pokes).</summary>
+        internal static bool TryGetLeftHand(out XRHand hand)
+        {
+            SubsystemManager.GetSubsystems(Hands);
+            foreach (var subsystem in Hands)
+            {
+                if (!subsystem.running) continue;
+                hand = subsystem.leftHand;
+                return hand.isTracked;
+            }
+            hand = default;
+            return false;
+        }
+
         /// <summary>Tracking-space parent shared with <see cref="DemoGhostHands"/> so drawn hands match the poke point.</summary>
         internal static Transform TrackingSpace()
         {
@@ -321,6 +335,13 @@ namespace Hapbeat.DemoSwitch
             transform.SetPositionAndRotation(position, Quaternion.LookRotation(position - head.position, Vector3.up));
         }
 
+        /// <summary>Places the panel at a scene <paramref name="anchor"/>, facing a viewer at <paramref name="headPosition"/> when the anchor asks for it.</summary>
+        public void PlaceAt(DemoSessionPanelAnchor anchor, Vector3 headPosition)
+        {
+            var pose = anchor.ResolvePose(headPosition);
+            transform.SetPositionAndRotation(pose.position, pose.rotation);
+        }
+
         private void Update()
         {
             ProcessPointers(DemoSessionPointers.Current, Time.realtimeSinceStartup);
@@ -400,7 +421,7 @@ namespace Hapbeat.DemoSwitch
         }
     }
 
-    /// <summary>"体験完了" panel shown by <see cref="DemoSession.ShowCompletion"/>.</summary>
+    /// <summary>"体験完了" panel shown by <see cref="DemoSession.ShowCompletion"/>, at the scene's <see cref="DemoSessionPanelAnchor"/> or in front of the HMD.</summary>
     internal sealed class DemoSessionCompletionPanel : MonoBehaviour
     {
         public const float InputDelaySeconds = 1f;
@@ -442,7 +463,10 @@ namespace Hapbeat.DemoSwitch
             y -= ButtonHeight * 0.5f + ButtonGap + 26f;
             completion._error = panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 52), string.Empty, 17, new Color(1f, 0.55f, 0.45f));
             var camera = Camera.main;
-            if (camera != null) panel.PlaceInFront(camera.transform, Distance, Drop);
+            // A scene's DemoSessionPanelAnchor wins; otherwise in front of the HMD. Fixed after this.
+            var anchor = DemoSessionPanelAnchor.FindActive();
+            if (anchor != null) panel.PlaceAt(anchor, camera != null ? camera.transform.position : anchor.transform.position - anchor.transform.forward);
+            else if (camera != null) panel.PlaceInFront(camera.transform, Distance, Drop);
             panel.EnableInputAfter(InputDelaySeconds);
             return completion;
         }

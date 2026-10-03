@@ -142,6 +142,7 @@ namespace Hapbeat.DemoSwitch
         internal static void ResetForTests(IDemoSessionPlatform platform = null, string currentDemoId = "", DemoSessionDescriptor descriptor = null)
         {
             CloseCompletion(false);
+            DemoPause.ResetForTests();
             _platform = platform ?? new SafeDemoSessionPlatform();
             _currentDemoId = currentDemoId;
             Descriptor = descriptor;
@@ -175,10 +176,14 @@ namespace Hapbeat.DemoSwitch
 
         private static IDemoSessionHost Host => _host is UnityEngine.Object o && o == null ? null : _host;
 
+        /// <summary>The registered scene host, or null (also used by <see cref="DemoPause"/>).</summary>
+        internal static IDemoSessionHost CurrentHost => Host;
+
         public static void SetHapticsEnabled(bool enabled)
         {
             HapticsEnabled = enabled;
-            Host?.SetHapticsEnabled(enabled);
+            // While paused the host stays silent; DemoPause.Resume applies this state.
+            if (!DemoPause.IsPaused) Host?.SetHapticsEnabled(enabled);
             HapticsEnabledChanged?.Invoke(enabled);
         }
 
@@ -189,7 +194,7 @@ namespace Hapbeat.DemoSwitch
             HapticsUiVisibleChanged?.Invoke(visible);
         }
 
-        /// <summary>Shows the completion panel in front of the user. Session mode only.</summary>
+        /// <summary>Shows the completion panel (scene anchor, else in front of the user). Session mode only; closes a shown pause first.</summary>
         public static bool ShowCompletion()
         {
             if (!IsActive)
@@ -198,6 +203,7 @@ namespace Hapbeat.DemoSwitch
                 return false;
             }
             if (_completion != null) return true;
+            DemoPause.Resume();
             _completion = DemoSessionCompletionPanel.Create(Ticket, Next);
             Host?.SetGameplayPaused(true);
             CompletionShown?.Invoke();

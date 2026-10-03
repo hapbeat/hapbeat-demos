@@ -46,6 +46,7 @@ namespace Hapbeat.DemoSwitch.Tests
             public bool TryGetOwnComponent(out DemoSessionComponent component) { component = null; return false; }
             public IReadOnlyList<DemoSessionLauncherActivity> ListLauncherActivities() => new DemoSessionLauncherActivity[0];
             public bool TryReadPackageAsset(string packageName, string name, out string text, out string error) { text = null; error = "none"; return false; }
+            public bool IsPackageInstalled(string packageName) => packageName == "jp.hapbeat.demohub";
         }
 
         sealed class Host : IDemoSessionHost
@@ -480,12 +481,212 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSessionHapticsButton.Label(false), Is.EqualTo("触覚 OFF"));
         }
 
+        static GameObject MainCamera(Vector3 position, Vector3 forward)
+        {
+            var go = new GameObject("test camera", typeof(Camera)) { tag = "MainCamera" };
+            go.transform.SetPositionAndRotation(position, Quaternion.LookRotation(forward, Vector3.up));
+            return go;
+        }
+
+        /// <summary>Asserts the HMD-front placement relative to whichever camera Camera.main returns (an open scene may have its own).</summary>
+        static void AssertInFrontOfHead(Transform panel, float distance, float drop, string message)
+        {
+            var head = Camera.main.transform;
+            var forward = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
+            var expected = head.position + forward * distance + Vector3.down * drop;
+            Assert.That(Vector3.Distance(panel.position, expected), Is.LessThan(1e-3f), message);
+        }
+
+        [Test]
+        public void CompletionPanelUsesTheSceneAnchorElseTheHmdFront()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            var anchorObject = new GameObject("test anchor");
+            try
+            {
+                Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+                DemoSession.ShowCompletion();
+                var front = Object.FindAnyObjectByType<DemoSessionCompletionPanel>().transform;
+                AssertInFrontOfHead(front, DemoSessionCompletionPanel.Distance, DemoSessionCompletionPanel.Drop, "No anchor: in front of the HMD.");
+                DemoSession.CloseCompletion();
+
+                anchorObject.transform.SetPositionAndRotation(new Vector3(1f, 1.2f, 1f), Quaternion.Euler(0, 180, 0));
+                var anchor = anchorObject.AddComponent<DemoSessionPanelAnchor>();
+                Assert.That(anchor.FaceUser, Is.True, "Default: yaw toward the participant.");
+                DemoSession.ShowCompletion();
+                var placed = Object.FindAnyObjectByType<DemoSessionCompletionPanel>().transform;
+                Assert.That(Vector3.Distance(placed.position, anchorObject.transform.position), Is.LessThan(1e-4f));
+                var expected = Vector3.ProjectOnPlane(anchorObject.transform.position - Camera.main.transform.position, Vector3.up).normalized;
+                Assert.That(Vector3.Dot(placed.forward, expected), Is.GreaterThan(0.9999f), "+Z points away from the viewer, level.");
+                DemoSession.CloseCompletion();
+
+                anchor.FaceUser = false;
+                DemoSession.ShowCompletion();
+                placed = Object.FindAnyObjectByType<DemoSessionCompletionPanel>().transform;
+                Assert.That(Quaternion.Angle(placed.rotation, anchorObject.transform.rotation), Is.LessThan(0.01f), "The anchor's own rotation.");
+                DemoSession.CloseCompletion();
+
+                anchor.enabled = false;
+                DemoSession.ShowCompletion();
+                AssertInFrontOfHead(Object.FindAnyObjectByType<DemoSessionCompletionPanel>().transform,
+                    DemoSessionCompletionPanel.Distance, DemoSessionCompletionPanel.Drop, "A disabled anchor is ignored.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(anchorObject);
+                Object.DestroyImmediate(camera);
+            }
+        }
+
+        [Test]
+        public void PauseStopsGameplayHapticsAndAudioAndResumeRestoresThem()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.right);
+            try
+            {
+                var host = new Host();
+                DemoSession.RegisterHost(host);
+                var changes = new List<bool>();
+                DemoPause.PausedChanged += paused => changes.Add(paused);
+                Assert.That(DemoPause.Pause(), Is.True, "Works without a session.");
+                Assert.That(DemoPause.IsPaused, Is.True);
+                Assert.That(host.Paused, Is.True);
+                Assert.That(host.Haptics, Is.False);
+                Assert.That(AudioListener.pause, Is.True);
+                var panel = DemoPause.Panel;
+                AssertInFrontOfHead(panel.transform, DemoPausePanel.Distance, DemoPausePanel.Drop, "In front of the HMD.");
+                Assert.That(panel.Panel.AcceptsInputAt(Time.realtimeSinceStartup + DemoPausePanel.InputDelaySeconds + 0.01f), Is.True);
+
+                host.Haptics = null;
+                DemoSession.SetHapticsEnabled(true);
+                Assert.That(host.Haptics, Is.Null, "The host stays silent while paused.");
+                DemoSession.SetHapticsEnabled(false);
+                Assert.That(host.Haptics, Is.Null);
+
+                panel.ResumeButton.Press();
+                Assert.That(DemoPause.IsPaused, Is.False);
+                Assert.That(host.Paused, Is.False);
+                Assert.That(host.Haptics, Is.False, "Resume applies the session's haptics switch.");
+                Assert.That(AudioListener.pause, Is.False);
+                Assert.That(changes, Is.EqualTo(new[] { true, false }));
+
+                DemoSession.SetHapticsEnabled(true);
+                DemoPause.Toggle();
+                Assert.That(DemoPause.IsPaused, Is.True);
+                DemoPause.Toggle();
+                Assert.That(DemoPause.IsPaused, Is.False, "The menu input toggles.");
+                Assert.That(host.Haptics, Is.True);
+            }
+            finally { Object.DestroyImmediate(camera); }
+        }
+
+        [Test]
+        public void PauseRestartAndHubButtons()
+        {
+            var host = new Host();
+            DemoSession.RegisterHost(host);
+            DemoPause.Pause();
+            Assert.That(DemoPause.Panel.HubButton, Is.Null, "No Hub configured.");
+            DemoPause.Panel.RestartButton.Press();
+            Assert.That(host.Restarts, Is.EqualTo(1));
+            Assert.That(DemoPause.IsPaused, Is.False);
+            Assert.That(host.Paused, Is.False);
+
+            DemoPause.ResetForTests("com.example.missinghub");
+            DemoPause.Pause();
+            Assert.That(DemoPause.Panel.HubButton, Is.Null, "Hub not installed: no button.");
+            DemoPause.Resume();
+
+            DemoPause.ResetForTests("jp.hapbeat.demohub");
+            var launches = 0;
+            DemoPause.HubLauncher = () => { launches++; return false; };
+            DemoPause.Pause();
+            Assert.That(DemoPause.Panel.HubButton.Label, Is.EqualTo("Hub に戻る"));
+            DemoPause.Panel.HubButton.Press();
+            Assert.That(launches, Is.EqualTo(1));
+            Assert.That(DemoPause.Panel.ErrorText, Is.Not.Empty, "A failed launch keeps the panel with an error.");
+            Assert.That(_platform.Finishes, Is.Zero);
+
+            DemoPause.HubLauncher = () => { launches++; return true; };
+            DemoPause.Panel.HubButton.Press();
+            Assert.That(_platform.Finishes, Is.EqualTo(1), "Hub launched: this runtime finishes.");
+            Assert.That(host.Haptics, Is.False);
+            Assert.That(AudioListener.pause, Is.True);
+        }
+
+        [Test]
+        public void PauseAndCompletionNeverStack()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var host = new Host();
+            DemoSession.RegisterHost(host);
+            DemoPause.Pause();
+            DemoSession.ShowCompletion();
+            Assert.That(DemoPause.IsPaused, Is.False, "Completion closes the pause first.");
+            Assert.That(DemoSession.IsCompletionShown, Is.True);
+            Assert.That(host.Paused, Is.True);
+            Assert.That(AudioListener.pause, Is.False);
+            Assert.That(DemoPause.Pause(), Is.False, "No pause over the completion panel.");
+            Assert.That(DemoPause.IsPaused, Is.False);
+        }
+
+        // Left hand, fingers up, palm toward -Z (thumb/index side at -X).
+        static readonly Vector3 Wrist = new Vector3(0, 1.1f, 0.3f), MiddleProximal = new Vector3(0, 1.19f, 0.3f),
+            IndexProximal = new Vector3(-0.02f, 1.18f, 0.3f), LittleProximal = new Vector3(0.03f, 1.17f, 0.3f), Palm = new Vector3(0, 1.15f, 0.3f);
+
+        [Test]
+        public void PalmPinchHoldNeedsTheLeftPalmTowardTheFaceForTwoSeconds()
+        {
+            Assert.That(DemoPalmPinchHold.PalmFacesHead(Wrist, MiddleProximal, IndexProximal, LittleProximal, Palm, new Vector3(0, 1.3f, 0)), Is.True);
+            Assert.That(DemoPalmPinchHold.PalmFacesHead(Wrist, MiddleProximal, IndexProximal, LittleProximal, Palm, new Vector3(0, 1.3f, 0.6f)), Is.False, "Back of the hand toward the face.");
+
+            var hold = new DemoPalmPinchHold();
+            var fired = 0;
+            for (var frame = 0; frame < 18; frame++) fired += hold.Update(true, 0.01f, 0.1f) ? 1 : 0;
+            Assert.That(fired, Is.Zero, "1.8 s");
+            Assert.That(hold.Update(true, 0.025f, 0.1f), Is.False, "Holding tolerates up to 3 cm.");
+            Assert.That(hold.Update(true, 0.01f, 0.1001f), Is.True, "2 s");
+            for (var frame = 0; frame < 30; frame++) Assert.That(hold.Update(true, 0.01f, 0.1f), Is.False, "Once per hold.");
+            hold.Update(true, 0.05f, 0.1f);
+            Assert.That(hold.Update(true, 0.02f, 0.1f), Is.False, "Starting needs a pinch under 1.5 cm.");
+            Assert.That(hold.Held, Is.Zero);
+            for (var frame = 0; frame < 25; frame++) Assert.That(hold.Update(false, 0.01f, 0.1f), Is.False, "Not facing.");
+            for (var frame = 0; frame < 19; frame++) hold.Update(true, 0.01f, 0.1f);
+            hold.Update(false, 0.01f, 0.1f);
+            Assert.That(hold.Update(true, 0.01f, 0.1f), Is.False, "Breaking the sign restarts the 2 s.");
+        }
+
+        [Test]
+        public void PauseInputWithoutDevicesNeverFires()
+        {
+            var go = new GameObject("pause input");
+            try
+            {
+                var input = go.AddComponent<DemoPauseInput>();
+                input.Gesture = DemoPauseGesture.PalmPinchHold;
+                Assert.That(input.Sample(0.1f), Is.False, "No controller or hand in the Editor.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+#if UNITY_ANDROID
+        [Test]
+        public void ManifestQueryForTheHubIsAddedOnce()
+        {
+            const string manifest = "<manifest>\n  <application android:label=\"x\" />\n</manifest>";
+            var once = Editor.DemoSwitchAndroidManifest.AddPackageQuery(manifest, "jp.hapbeat.demohub");
+            Assert.That(once, Does.Contain("<queries><package android:name=\"jp.hapbeat.demohub\" /></queries>"));
+            Assert.That(once.IndexOf("<queries>"), Is.LessThan(once.IndexOf("<application")));
+            Assert.That(Editor.DemoSwitchAndroidManifest.AddPackageQuery(once, "jp.hapbeat.demohub"), Is.EqualTo(once));
+        }
+#endif
+
         [Test]
         public void BundledFontHasEveryFixedGlyph()
         {
             var font = DemoSessionFont.Get();
             Assert.That(font.name, Does.Contain("Noto"));
-            foreach (var character in "体験完了もう一度次へ：デモを終了触覚ONOFF起動できませんでした/0123456789")
+            foreach (var character in "体験完了もう一度次へ：デモを終了触覚ONOFF起動できませんでした/0123456789一時停止再開最初からやり直すHubに戻る")
                 Assert.That(font.HasCharacter(character), Is.True, character.ToString());
         }
     }
