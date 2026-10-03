@@ -70,6 +70,16 @@ namespace Hapbeat.DemoHub
             return true;
         }
 
+        /// <summary>Takes the step at <paramref name="from"/> out and inserts it so that it ends at <paramref name="to"/>.</summary>
+        public bool Move(int from, int to)
+        {
+            if (from < 0 || from >= Steps.Count || to < 0 || to >= Steps.Count || from == to) return false;
+            var step = Steps[from];
+            Steps.RemoveAt(from);
+            Steps.Insert(to, step);
+            return true;
+        }
+
         public bool Remove(int index)
         {
             if (index < 0 || index >= Steps.Count) return false;

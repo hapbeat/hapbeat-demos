@@ -19,7 +19,8 @@ namespace Hapbeat.DemoSwitch
     /// <summary>
     /// Shared pause for demos without their own menu (settings: Pause Menu). While paused the host's
     /// gameplay is paused, its haptics are off and Unity audio is paused; the panel offers
-    /// "再開", "最初からやり直す" and, when the Hub is installed, "Hub に戻る". Works with or without a session.
+    /// "再開", "最初からやり直す", in a session "次へ：<title>" or "デモを終了", and, when the Hub is
+    /// installed, "Hub に戻る". Works with or without a session.
     /// </summary>
     public static class DemoPause
     {
@@ -32,8 +33,11 @@ namespace Hapbeat.DemoSwitch
 
         public static bool IsPaused => _panel != null;
 
-        /// <summary>Replaces <see cref="DemoSwitch.ReturnToHub"/> in tests.</summary>
-        internal static Func<bool> HubLauncher = DemoSwitch.ReturnToHub;
+        public const string HubFailed = "Hub を起動できませんでした";
+        public const string LaunchFailed = "起動できませんでした: ";
+
+        /// <summary>Starts the Hub; the argument receives the error of a start that did not come to the front. Replaced in tests.</summary>
+        internal static Func<Action<string>, bool> HubLauncher = StartHub;
 
         /// <summary>Called by the bootstrap; null disables "Hub に戻る".</summary>
         internal static void Configure(string hubPackage) => _hubPackage = string.IsNullOrWhiteSpace(hubPackage) ? null : hubPackage;
@@ -47,7 +51,7 @@ namespace Hapbeat.DemoSwitch
             if (_panel != null) DestroyPanel();
             _hubPackage = hubPackage;
             _audioWasPaused = false;
-            HubLauncher = DemoSwitch.ReturnToHub;
+            HubLauncher = StartHub;
             PausedChanged = null;
         }
 
@@ -68,7 +72,7 @@ namespace Hapbeat.DemoSwitch
             host?.SetHapticsEnabled(false);
             _audioWasPaused = AudioListener.pause;
             AudioListener.pause = true;
-            _panel = DemoPausePanel.Create(CanReturnToHub);
+            _panel = DemoPausePanel.Create(CanReturnToHub, DemoSession.IsActive ? DemoSession.Next : (DemoSessionNext?)null);
             Debug.Log("[Demo Pause] Paused.");
             PausedChanged?.Invoke(true);
             return true;
@@ -93,18 +97,36 @@ namespace Hapbeat.DemoSwitch
             DemoSession.CurrentHost?.Restart();
         }
 
-        /// <summary>Launches the Hub; on success this runtime stops haptics and sound and removes its task.</summary>
+        private static bool StartHub(Action<string> onFailed) => DemoSwitch.SwitchTo(DemoSwitchSettings.HubDemoId, onFailed);
+
+        /// <summary>
+        /// Starts the Hub. Once the Hub is in front this runtime stops haptics and sound and removes its
+        /// task (<see cref="DemoAppHandoff"/>); a failure shows an error on the panel.
+        /// </summary>
         internal static bool ReturnToHubFromPause()
         {
-            if (!HubLauncher())
-            {
-                if (_panel != null) _panel.ShowError("Hub を起動できませんでした");
-                return false;
-            }
-            DemoSession.CurrentHost?.SetHapticsEnabled(false);
-            AudioListener.pause = true;
-            DemoSession.Platform.FinishTask();
-            return true;
+            if (HubLauncher(_ => ShowError(HubFailed))) return true;
+            ShowError(HubFailed);
+            return false;
+        }
+
+        /// <summary>The session's next step (or the finish runtime), like the completion panel's forward button.</summary>
+        internal static bool NextFromPause()
+        {
+            if (DemoSession.LaunchNext(out var error, failure => ShowError(LaunchFailed + failure))) return true;
+            ShowError(LaunchFailed + error);
+            return false;
+        }
+
+        private static void ShowError(string message)
+        {
+            if (_panel != null) _panel.ShowError(message);
+        }
+
+        /// <summary>A system recenter: the open panel goes in front of the HMD again.</summary>
+        internal static void OnRecenter()
+        {
+            if (_panel != null) _panel.PlaceInFront();
         }
 
         private static void DestroyPanel()
@@ -188,8 +210,8 @@ namespace Hapbeat.DemoSwitch
                 _systemMenuWas = system;
             }
             else fired |= SamplePalmPinch(deltaTime);
-            // The completion panel owns input; never stack the pause on it.
-            return fired && !DemoSession.IsCompletionShown;
+            // The completion panel owns input; never stack the pause on it, nor toggle it while leaving.
+            return fired && !DemoSession.IsCompletionShown && !DemoAppHandoff.IsPending;
         }
 
         private static bool ControllerMenuHeld()
@@ -230,7 +252,10 @@ namespace Hapbeat.DemoSwitch
         }
     }
 
-    /// <summary>"一時停止" panel: 0.55 m in front of the HMD when opened, then fixed in place.</summary>
+    /// <summary>
+    /// "一時停止" panel: 0.55 m in front of the HMD when opened, then fixed in place (a system recenter
+    /// places it in front again). Buttons: 再開 / 最初からやり直す / 次へ (or デモを終了, in a session) / Hub に戻る.
+    /// </summary>
     internal sealed class DemoPausePanel : MonoBehaviour
     {
         public const float InputDelaySeconds = 0.5f;
@@ -245,13 +270,15 @@ namespace Hapbeat.DemoSwitch
         internal DemoSessionPanel Panel => _panel;
         internal DemoSessionButton ResumeButton { get; private set; }
         internal DemoSessionButton RestartButton { get; private set; }
+        /// <summary>"次へ：<title>" or "デモを終了"; null outside a session.</summary>
+        internal DemoSessionButton NextButton { get; private set; }
         /// <summary>Null when the Hub is not installed.</summary>
         internal DemoSessionButton HubButton { get; private set; }
         internal string ErrorText => _error.text;
 
-        public static DemoPausePanel Create(bool withHub)
+        public static DemoPausePanel Create(bool withHub, DemoSessionNext? next)
         {
-            var buttons = withHub ? 3 : 2;
+            var buttons = 2 + (next.HasValue ? 1 : 0) + (withHub ? 1 : 0);
             // Fixed slots: heading, buttons, and a reserved error line (no layout shift).
             var height = 28f + 46f + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Pause", new Vector2(Width, height));
@@ -264,6 +291,12 @@ namespace Hapbeat.DemoSwitch
             pause.ResumeButton = panel.AddButton(new Vector2(0, y), size, "再開", 24, DemoPause.Resume);
             y -= ButtonHeight + ButtonGap;
             pause.RestartButton = panel.AddButton(new Vector2(0, y), size, "最初からやり直す", 24, DemoPause.RestartFromPause);
+            if (next.HasValue)
+            {
+                y -= ButtonHeight + ButtonGap;
+                var label = next.Value.IsFinish ? "デモを終了" : "次へ：" + next.Value.Step.Title;
+                pause.NextButton = panel.AddButton(new Vector2(0, y), size, label, 24, () => DemoPause.NextFromPause());
+            }
             if (withHub)
             {
                 y -= ButtonHeight + ButtonGap;
@@ -271,10 +304,16 @@ namespace Hapbeat.DemoSwitch
             }
             y -= ButtonHeight * 0.5f + ButtonGap + 20f;
             pause._error = panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 40), string.Empty, 17, new Color(1f, 0.55f, 0.45f));
-            var camera = Camera.main;
-            if (camera != null) panel.PlaceInFront(camera.transform, Distance, Drop);
+            pause.PlaceInFront();
             panel.EnableInputAfter(InputDelaySeconds);
             return pause;
+        }
+
+        /// <summary>In front of the HMD: when opened and after a system recenter.</summary>
+        internal void PlaceInFront()
+        {
+            var camera = Camera.main;
+            if (camera != null) _panel.PlaceInFront(camera.transform, Distance, Drop);
         }
 
         internal void ShowError(string message)

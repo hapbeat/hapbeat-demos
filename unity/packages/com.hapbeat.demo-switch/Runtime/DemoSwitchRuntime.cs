@@ -43,6 +43,7 @@ namespace Hapbeat.DemoSwitch
             StartForegroundReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
+            gameObject.AddComponent<DemoRecenterWatch>();
             if (settings.Hands) gameObject.AddComponent<DemoHands>().SetStyle(DemoHands.ResolveStyle(DemoSession.Ticket, settings.HandStyle));
             if (settings.PauseMenu && settings.CurrentDemoId != DemoSwitchSettings.HubDemoId)
             {
@@ -51,28 +52,33 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
-        /// <summary>Demo Session launched the next runtime: release 7710 and run the usual switch cleanup.</summary>
-        internal void StopForSessionLaunch(string nextDemoId)
+        /// <summary>The started application is in front (<see cref="DemoAppHandoff"/>): release 7710 and run the usual switch cleanup.</summary>
+        internal void StopForHandoff(string nextDemoId)
         {
             StopListener();
             DemoSwitch.NotifyBeforeSwitch(nextDemoId);
         }
 
-        public bool SwitchLocal(string demoId)
+        /// <summary>
+        /// Starts an allowlisted application; this one finishes once it has gone to the background
+        /// (<see cref="DemoAppHandoff"/>). <paramref name="onFailed"/> receives the error when it is still in front after the timeout.
+        /// </summary>
+        public bool SwitchLocal(string demoId, Action<string> onFailed = null)
         {
-            if (_controlBusy) return false;
+            if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished) return false;
             if (!_settings.TryResolveTarget(demoId, out var target))
             {
                 Debug.LogError("[Demo Switch] Demo ID is not in the local allowlist: " + demoId);
                 return false;
             }
 
-            StopListener();
-            DemoSwitch.NotifyBeforeSwitch(demoId);
-            if (_launcher.TryLaunch(target, null, out var error)) return true;
-            Debug.LogError("[Demo Switch] " + error);
-            TryStartListener(out _);
-            return false;
+            if (!_launcher.TryLaunch(target, null, out var error))
+            {
+                Debug.LogError("[Demo Switch] " + error);
+                return false;
+            }
+            DemoAppHandoff.Begin(demoId, onFailed, Time.realtimeSinceStartup);
+            return true;
         }
 
         private void Update()
@@ -125,7 +131,7 @@ namespace Hapbeat.DemoSwitch
                 SendFailure(datagram.Source, command, "unsigned_disabled", "Unsigned command mode is disabled.");
                 return;
             }
-            if (_controlBusy)
+            if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished)
             {
                 SendFailure(datagram.Source, command, "not_allowed", "An operation is in progress.");
                 return;
@@ -148,15 +154,18 @@ namespace Hapbeat.DemoSwitch
 
             SendStatus(datagram.Source, new DemoSwitchStatus("ACK", command.ControllerId, command.Sequence,
                 command.DemoId, _settings.CurrentDemoId, "ok", string.Empty));
-            StopListener();
-            DemoSwitch.NotifyBeforeSwitch(command.DemoId);
             var context = new DemoSwitchLaunchContext(command.ControllerId, command.Sequence, command.DemoId,
                 datagram.Source.Address.ToString(), datagram.Source.Port);
-            if (_launcher.TryLaunch(target, context, out var error)) return;
+            var source = datagram.Source;
+            if (_launcher.TryLaunch(target, context, out var error))
+            {
+                // The listener and BeforeSwitch stop once this application is in the background; still in front: FAILED.
+                DemoAppHandoff.Begin(command.DemoId, failure => SendFailure(source, command, "launch_failed", failure), Time.realtimeSinceStartup);
+                return;
+            }
 
             SendStatus(datagram.Source, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
                 command.DemoId, _settings.CurrentDemoId, "launch_failed", error));
-            TryStartListener(out _);
         }
 
         private void HandleDiscover(string json, IPEndPoint source)

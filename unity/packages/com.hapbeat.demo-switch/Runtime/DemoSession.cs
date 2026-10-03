@@ -31,7 +31,6 @@ namespace Hapbeat.DemoSwitch
         private static Dictionary<string, string> _options = new Dictionary<string, string>(StringComparer.Ordinal);
         private static IDemoSessionHost _host;
         private static DemoSessionCompletionPanel _completion;
-        private static bool _launching;
 
         public static event Action CompletionShown;
         public static event Action Closed;
@@ -143,6 +142,7 @@ namespace Hapbeat.DemoSwitch
         {
             CloseCompletion(false);
             DemoPause.ResetForTests();
+            DemoAppHandoff.ResetForTests();
             _platform = platform ?? new SafeDemoSessionPlatform();
             _currentDemoId = currentDemoId;
             Descriptor = descriptor;
@@ -150,7 +150,6 @@ namespace Hapbeat.DemoSwitch
             IsActive = false;
             _options = new Dictionary<string, string>(StringComparer.Ordinal);
             _host = null;
-            _launching = false;
             HapticsEnabled = true;
             HapticsUiVisible = false;
             CompletionShown = null;
@@ -221,33 +220,44 @@ namespace Hapbeat.DemoSwitch
             Closed?.Invoke();
         }
 
+        /// <summary>A system recenter: the shown completion panel goes in front of the HMD again.</summary>
+        internal static void OnRecenter()
+        {
+            if (_completion != null) _completion.PlaceInFront();
+        }
+
         internal static void RetryFromCompletion()
         {
             CloseCompletion();
             Host?.Restart();
         }
 
-        /// <summary>Launches the next step, or the finish runtime after the last step.</summary>
-        public static bool LaunchNext(out string error)
+        /// <summary>
+        /// Launches the next step, or the finish runtime after the last step. <paramref name="onFailed"/>
+        /// receives the error when the started application does not come to the front (see <see cref="LaunchTicket"/>).
+        /// </summary>
+        public static bool LaunchNext(out string error, Action<string> onFailed = null)
         {
             if (!IsActive) { error = "Demo Session is not active."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible), out error);
+            return LaunchTicket(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible), out error, onFailed);
         }
 
         /// <summary>Launches the finish runtime with the all-complete ticket.</summary>
-        public static bool LaunchFinish(out string error)
+        public static bool LaunchFinish(out string error, Action<string> onFailed = null)
         {
             if (Ticket == null) { error = "No Demo Session ticket."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible), out error);
+            return LaunchTicket(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible), out error, onFailed);
         }
 
         /// <summary>
-        /// Starts the component named by <paramref name="ticket"/>'s index with that ticket attached.
-        /// On success this runtime stops its haptics, sound and 7710 listener and removes its task.
+        /// Starts the component named by <paramref name="ticket"/>'s index with that ticket attached. Once
+        /// this runtime has gone to the background it stops its haptics, sound and 7710 listener and removes
+        /// its task, exactly once. When it is still in front after <see cref="DemoAppHandoff.TimeoutSeconds"/>,
+        /// it keeps running and <paramref name="onFailed"/> receives the error (null: only logged).
         /// </summary>
-        public static bool LaunchTicket(DemoSessionTicket ticket, out string error)
+        public static bool LaunchTicket(DemoSessionTicket ticket, out string error, Action<string> onFailed = null)
         {
-            if (_launching) { error = "A launch is already in progress."; return false; }
+            if (DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished) { error = "A launch is already in progress."; return false; }
             var json = ticket.ToJson();
             if (!DemoSessionTicket.TryParse(json, out _, out error)) return false;
             var finish = ticket.IsFinished;
@@ -259,12 +269,7 @@ namespace Hapbeat.DemoSwitch
                 Debug.LogError("[Demo Session] Launch failed: " + error);
                 return false;
             }
-            _launching = true;
-            if (DemoSwitchRuntime.Instance != null) DemoSwitchRuntime.Instance.StopForSessionLaunch(nextDemoId);
-            else DemoSwitch.NotifyBeforeSwitch(nextDemoId);
-            Host?.SetHapticsEnabled(false);
-            AudioListener.pause = true;
-            _platform.FinishTask();
+            DemoAppHandoff.Begin(nextDemoId, onFailed, Time.realtimeSinceStartup);
             return true;
         }
 

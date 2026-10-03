@@ -431,7 +431,75 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(sent.Index, Is.EqualTo(1));
             Assert.That(sent.HapticsUi, Is.True);
             Assert.That(sent.SessionId, Is.EqualTo("0f3a9c2e7b1d4a56"));
+            Assert.That(_platform.Finishes, Is.Zero, "Finishes only after leaving the foreground.");
+            DemoAppHandoff.OnBackgrounded();
             Assert.That(_platform.Finishes, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void HandOverStopsAndFinishesOnceAfterLeavingTheForeground()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var host = new Host();
+            DemoSession.RegisterHost(host);
+            var switches = new List<string>();
+            System.Action<string> onSwitch = id => switches.Add(id);
+            DemoSwitch.BeforeSwitch += onSwitch;
+            try
+            {
+                Assert.That(DemoSession.LaunchNext(out error), Is.True, error);
+                Assert.That(DemoAppHandoff.IsPending, Is.True);
+                Assert.That(_platform.Finishes, Is.Zero, "Not before this application is in the background.");
+                Assert.That(host.Haptics, Is.True, "Nothing stops at the start call.");
+                Assert.That(AudioListener.pause, Is.False);
+                Assert.That(switches, Is.Empty);
+                Assert.That(DemoSession.LaunchNext(out error), Is.False, "One hand-over at a time.");
+
+                DemoAppHandoff.OnBackgrounded();
+                DemoAppHandoff.OnBackgrounded();
+                DemoAppHandoff.Tick(Time.realtimeSinceStartup + DemoAppHandoff.TimeoutSeconds + 1f);
+                Assert.That(_platform.Finishes, Is.EqualTo(1), "Focus loss and pause finish exactly once.");
+                Assert.That(host.Haptics, Is.False);
+                Assert.That(AudioListener.pause, Is.True);
+                Assert.That(switches, Is.EqualTo(new[] { "trex-encounter" }));
+                Assert.That(DemoSession.LaunchNext(out _), Is.False, "Nothing starts after finishing.");
+            }
+            finally { DemoSwitch.BeforeSwitch -= onSwitch; }
+        }
+
+        [Test]
+        public void HandOverThatStaysInFrontShowsTheErrorAndKeepsRunning()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var host = new Host();
+            DemoSession.RegisterHost(host);
+            DemoSession.ShowCompletion();
+            var panel = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+            var start = Time.realtimeSinceStartup;
+            panel.ForwardButton.Press();
+            Assert.That(DemoAppHandoff.IsPending, Is.True);
+            Assert.That(panel.ErrorText, Is.Empty);
+
+            // No panel input while leaving.
+            var ray = new DemoSessionPointer { Id = 3, Position = panel.RetryButton.Rect.position - panel.transform.forward * 0.5f, Direction = panel.transform.forward };
+            panel.Panel.ProcessPointers(new[] { ray }, start + 10f);
+            ray.TriggerHeld = true;
+            panel.Panel.ProcessPointers(new[] { ray }, start + 10f);
+            Assert.That(host.Restarts, Is.Zero);
+            Assert.That(DemoSession.IsCompletionShown, Is.True);
+
+            DemoAppHandoff.Tick(start + DemoAppHandoff.TimeoutSeconds - 0.1f);
+            Assert.That(DemoAppHandoff.IsPending, Is.True);
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("did not come to the front"));
+            DemoAppHandoff.Tick(start + DemoAppHandoff.TimeoutSeconds + 0.1f);
+            Assert.That(DemoAppHandoff.IsPending, Is.False);
+            Assert.That(panel.ErrorText, Does.Contain(DemoAppHandoff.NotInFrontError));
+            Assert.That(DemoSession.IsCompletionShown, Is.True);
+            DemoAppHandoff.OnBackgrounded();
+            Assert.That(_platform.Finishes, Is.Zero, "A later focus loss does not finish.");
+            Assert.That(host.Haptics, Is.True);
+            Assert.That(AudioListener.pause, Is.False);
+            Assert.That(DemoSession.LaunchNext(out error), Is.True, "Can try again.");
         }
 
         [Test]
@@ -599,19 +667,139 @@ namespace Hapbeat.DemoSwitch.Tests
 
             DemoPause.ResetForTests("jp.hapbeat.demohub");
             var launches = 0;
-            DemoPause.HubLauncher = () => { launches++; return false; };
+            DemoPause.HubLauncher = _ => { launches++; return false; };
             DemoPause.Pause();
             Assert.That(DemoPause.Panel.HubButton.Label, Is.EqualTo("Hub に戻る"));
+            Assert.That(DemoPause.Panel.NextButton, Is.Null, "No session: no next step.");
             DemoPause.Panel.HubButton.Press();
             Assert.That(launches, Is.EqualTo(1));
-            Assert.That(DemoPause.Panel.ErrorText, Is.Not.Empty, "A failed launch keeps the panel with an error.");
+            Assert.That(DemoPause.Panel.ErrorText, Is.EqualTo(DemoPause.HubFailed), "A failed launch keeps the panel with an error.");
             Assert.That(_platform.Finishes, Is.Zero);
 
-            DemoPause.HubLauncher = () => { launches++; return true; };
+            // The Hub started but this application stays in front: error, no finish.
+            DemoPause.HubLauncher = onFailed => { launches++; DemoAppHandoff.Begin(DemoSwitchSettings.HubDemoId, onFailed, 0f); return true; };
+            DemoPause.Panel.ShowError(string.Empty);
             DemoPause.Panel.HubButton.Press();
-            Assert.That(_platform.Finishes, Is.EqualTo(1), "Hub launched: this runtime finishes.");
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("did not come to the front"));
+            DemoAppHandoff.Tick(DemoAppHandoff.TimeoutSeconds + 0.1f);
+            Assert.That(DemoPause.Panel.ErrorText, Is.EqualTo(DemoPause.HubFailed));
+            Assert.That(_platform.Finishes, Is.Zero);
+
+            DemoPause.Panel.HubButton.Press();
+            Assert.That(_platform.Finishes, Is.Zero, "Not before the Hub is in front.");
+            DemoAppHandoff.OnBackgrounded();
+            Assert.That(_platform.Finishes, Is.EqualTo(1), "Hub in front: this runtime finishes once.");
             Assert.That(host.Haptics, Is.False);
             Assert.That(AudioListener.pause, Is.True);
+        }
+
+        [Test]
+        public void PauseOffersTheNextStepInASession()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            DemoPause.ResetForTests("jp.hapbeat.demohub");
+            DemoPause.HubLauncher = _ => false;
+            DemoPause.Pause();
+            var panel = DemoPause.Panel;
+            Assert.That(panel.NextButton.Label, Is.EqualTo("次へ：T-Rex"));
+            var order = new[] { panel.ResumeButton, panel.RestartButton, panel.NextButton, panel.HubButton }.Select(b => b.Rect.anchoredPosition.y).ToArray();
+            Assert.That(order, Is.Ordered.Descending, "再開 / 最初からやり直す / 次へ / Hub に戻る");
+
+            _platform.LaunchSucceeds = false;
+            LogAssert.Expect(LogType.Error, "[Demo Session] Launch failed: no such activity");
+            panel.NextButton.Press();
+            Assert.That(panel.ErrorText, Does.Contain("no such activity"));
+            _platform.LaunchSucceeds = true;
+            panel.NextButton.Press();
+            Assert.That(_platform.LaunchedPackage, Is.EqualTo("com.hapbeat.trexencounter"));
+            Assert.That(DemoSessionTicket.TryParse(_platform.LaunchedTicket, out var sent, out error), Is.True, error);
+            Assert.That(sent.Index, Is.EqualTo(1));
+            DemoAppHandoff.OnBackgrounded();
+            Assert.That(_platform.Finishes, Is.EqualTo(1));
+
+            DemoSession.ResetForTests(_platform);
+            Assert.That(DemoSession.TryBegin(Ticket, "trex-encounter", null, out error), Is.True, error);
+            DemoPause.Pause();
+            Assert.That(DemoPause.Panel.NextButton.Label, Is.EqualTo("デモを終了"), "Last step: finish.");
+            Assert.That(DemoPause.Panel.HubButton, Is.Null);
+        }
+
+        [Test]
+        public void RecenterPlacesOpenPanelsInFrontOfTheHeadAgain()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            var anchorObject = new GameObject("test anchor");
+            try
+            {
+                DemoPause.Pause();
+                camera.transform.SetPositionAndRotation(new Vector3(0.4f, 1.5f, -0.2f), Quaternion.LookRotation(Vector3.back));
+                DemoRecenter.Notify();
+                AssertInFrontOfHead(DemoPause.Panel.transform, DemoPausePanel.Distance, DemoPausePanel.Drop, "Pause panel after a recenter.");
+                DemoPause.Resume();
+
+                anchorObject.transform.position = new Vector3(1f, 1.2f, 1f);
+                anchorObject.AddComponent<DemoSessionPanelAnchor>();
+                Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+                DemoSession.ShowCompletion();
+                var completion = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+                var inputFrom = completion.Panel.AcceptsInputAt(Time.realtimeSinceStartup + 0.5f);
+                camera.transform.rotation = Quaternion.LookRotation(Vector3.left);
+                DemoRecenter.Notify();
+                AssertInFrontOfHead(completion.transform, DemoSessionCompletionPanel.Distance, DemoSessionCompletionPanel.Drop, "Also from a scene anchor.");
+                Assert.That(completion.Panel.AcceptsInputAt(Time.realtimeSinceStartup + 0.5f), Is.EqualTo(inputFrom), "The input delay does not restart.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(anchorObject);
+                Object.DestroyImmediate(camera);
+            }
+        }
+
+        [Test]
+        public void HeadPoseJumpWithinOneFrameIsARecenter()
+        {
+            var head = new Vector3(0.1f, 1.6f, 0.2f);
+            var facing = Quaternion.Euler(0, 20, 0);
+            Assert.That(DemoRecenter.IsJump(head, facing, head, Quaternion.Euler(0, 95, 0), 0.014f), Is.True, "Heading reset");
+            Assert.That(DemoRecenter.IsJump(head, facing, Vector3.up * 1.6f + Vector3.right * 0.5f, facing, 0.014f), Is.True, "Position reset");
+            Assert.That(DemoRecenter.IsJump(head, facing, head + Vector3.right * 0.02f, Quaternion.Euler(0, 28, 0), 0.014f), Is.False, "A fast head turn (570°/s)");
+            Assert.That(DemoRecenter.IsJump(head, facing, head, Quaternion.Euler(50, 20, 0), 0.014f), Is.False, "Looking down");
+            Assert.That(DemoRecenter.IsJump(head, facing, head, Quaternion.Euler(0, 140, 0), 0.5f), Is.False, "Long frames are not compared");
+        }
+
+        [Test]
+        public void CapturedButtonFollowsItsPointerOffTheButton()
+        {
+            var panel = DemoSessionPanel.Create("test panel", new Vector2(300, 200));
+            try
+            {
+                var button = panel.AddButton(new Vector2(0, 50), new Vector2(100, 40), "Grip", 20, null);
+                panel.EnableInputAfter(0f);
+                var now = Time.realtimeSinceStartup + 1f;
+                Vector3 At(float x, float y, float depth) => panel.transform.TransformPoint(new Vector3(x, y, 0)) + panel.transform.forward * depth;
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = At(0, 50, -0.03f) } }, now);
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = At(0, 50, 0.002f) } }, now);
+                Assert.That(button.Held && button.Captured, Is.True);
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = At(10, -60, 0.01f) } }, now);
+                Assert.That(button.Held, Is.False, "Off the button.");
+                Assert.That(button.Captured, Is.True, "Still pressed into the panel.");
+                Assert.That(Vector2.Distance(button.CapturePoint, new Vector2(10, -60)), Is.LessThan(0.01f));
+                panel.ProcessPointers(new[] { new DemoSessionPointer { Id = 1, IsPoke = true, Position = At(10, -60, -0.01f) } }, now);
+                Assert.That(button.Captured, Is.False, "Released.");
+
+                var ray = new DemoSessionPointer { Id = 3, Position = At(0, 50, -0.5f), Direction = panel.transform.forward };
+                panel.ProcessPointers(new[] { ray }, now);
+                ray.TriggerHeld = true;
+                panel.ProcessPointers(new[] { ray }, now);
+                ray.Position = At(-40, -30, -0.5f);
+                panel.ProcessPointers(new[] { ray }, now);
+                Assert.That(button.Captured, Is.True);
+                Assert.That(Vector2.Distance(button.CapturePoint, new Vector2(-40, -30)), Is.LessThan(0.01f));
+                ray.TriggerHeld = false;
+                panel.ProcessPointers(new[] { ray }, now);
+                Assert.That(button.Captured, Is.False);
+            }
+            finally { Object.DestroyImmediate(panel.gameObject); }
         }
 
         [Test]

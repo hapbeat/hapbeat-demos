@@ -192,6 +192,13 @@ namespace Hapbeat.DemoSwitch
         internal bool Hovered { get; set; }
         /// <summary>Pressed and still held this frame: a fingertip that pressed it stays past the surface, or a ray keeps the trigger down on it.</summary>
         public bool Held { get; internal set; }
+        /// <summary>
+        /// The pointer that pressed this button still holds this frame, also after leaving the button (a
+        /// fingertip stays past the panel surface, or the trigger stays down): drag gestures.
+        /// </summary>
+        public bool Captured { get; internal set; }
+        /// <summary>Where that pointer is on the panel (millimetres from the panel centre) while <see cref="Captured"/>.</summary>
+        public Vector2 CapturePoint { get; internal set; }
         public bool Interactable { get; set; } = true;
         /// <summary>Selected/ON look for chips and toggles.</summary>
         public bool Highlighted { get; set; }
@@ -238,8 +245,10 @@ namespace Hapbeat.DemoSwitch
         private readonly List<GameObject> _content = new List<GameObject>();
         private readonly Dictionary<int, DemoSessionPokeTracker> _pokes = new Dictionary<int, DemoSessionPokeTracker>();
         private readonly Dictionary<int, bool> _triggers = new Dictionary<int, bool>();
+        private readonly Dictionary<int, DemoSessionButton> _captures = new Dictionary<int, DemoSessionButton>();
         private readonly Image[] _cursors = new Image[2];
         private RectTransform _root;
+        private CanvasScaler _scaler;
         private Image _background;
         private float _inputEnabledAt;
 
@@ -253,9 +262,10 @@ namespace Hapbeat.DemoSwitch
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.sortingOrder = 500;
-            // Renders dynamic glyphs at a resolution that stays sharp at arm's length.
-            go.GetComponent<CanvasScaler>().dynamicPixelsPerUnit = 4f;
             var panel = go.AddComponent<DemoSessionPanel>();
+            panel._scaler = go.GetComponent<CanvasScaler>();
+            // Renders dynamic glyphs at a resolution that stays sharp at arm's length.
+            panel._scaler.dynamicPixelsPerUnit = 4f;
             panel._root = (RectTransform)go.transform;
             panel._root.sizeDelta = sizeMillimetres;
             panel._root.localScale = Vector3.one * MetresPerUnit;
@@ -276,6 +286,30 @@ namespace Hapbeat.DemoSwitch
         }
 
         public void Resize(Vector2 sizeMillimetres) => _root.sizeDelta = sizeMillimetres;
+
+        /// <summary>
+        /// Raster density of text glyphs in pixels per millimetre (default 4). Glyphs have no mipmaps, so a
+        /// density well above the eye buffer's at the viewing distance shimmers and looks jagged.
+        /// </summary>
+        public float GlyphPixelsPerMillimetre
+        {
+            get => _scaler.dynamicPixelsPerUnit;
+            set => _scaler.dynamicPixelsPerUnit = value;
+        }
+
+        /// <summary>A plain coloured rectangle (e.g. an insertion line); removed with the other content.</summary>
+        public Image AddRect(Vector2 centre, Vector2 size, Color color)
+        {
+            var image = new GameObject("Rect", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+            image.rectTransform.SetParent(_root, false);
+            image.rectTransform.sizeDelta = size;
+            image.rectTransform.anchoredPosition = centre;
+            image.color = color;
+            image.raycastTarget = false;
+            _content.Add(image.gameObject);
+            foreach (var cursor in _cursors) cursor.rectTransform.SetAsLastSibling();
+            return image;
+        }
 
         public Text AddText(Vector2 centre, Vector2 size, string text, int fontSize, Color color, TextAnchor alignment = TextAnchor.MiddleCenter)
         {
@@ -319,6 +353,7 @@ namespace Hapbeat.DemoSwitch
             _content.Clear();
             _buttons.Clear();
             _pokes.Clear();
+            _captures.Clear();
         }
 
         public void EnableInputAfter(float seconds) => _inputEnabledAt = Time.realtimeSinceStartup + seconds;
@@ -350,8 +385,9 @@ namespace Hapbeat.DemoSwitch
 
         internal void ProcessPointers(IReadOnlyList<DemoSessionPointer> pointers, float now)
         {
-            foreach (var button in _buttons) button.Hovered = button.Held = false;
-            var accepts = AcceptsInputAt(now);
+            foreach (var button in _buttons) button.Hovered = button.Held = button.Captured = false;
+            // No input while another application is being started (DemoAppHandoff).
+            var accepts = AcceptsInputAt(now) && !DemoAppHandoff.IsPending;
             var cursorShown = new bool[_cursors.Length];
             DemoSessionButton pressed = null;
             foreach (var pointer in pointers)
@@ -363,9 +399,14 @@ namespace Hapbeat.DemoSwitch
                     var target = ButtonAt(local);
                     if (target != null && depth > -HoverDepth && depth < DemoSessionPokeTracker.MaxDepth) target.Hovered = true;
                     _pokes.TryGetValue(pointer.Id, out var tracker);
-                    if (tracker.Update(depth, target != null) && accepts && target != null && target.Interactable) pressed = target;
+                    if (tracker.Update(depth, target != null) && accepts && target != null && target.Interactable)
+                    {
+                        pressed = target;
+                        _captures[pointer.Id] = target;
+                    }
                     if (tracker.Holding && accepts && target != null && target.Interactable) target.Held = true;
                     _pokes[pointer.Id] = tracker;
+                    UpdateCapture(pointer.Id, tracker.Holding, local);
                     continue;
                 }
 
@@ -373,8 +414,13 @@ namespace Hapbeat.DemoSwitch
                 _triggers[pointer.Id] = pointer.TriggerHeld;
                 var ray = new Ray(pointer.Position, pointer.Direction);
                 var plane = new Plane(_root.forward, _root.position);
-                if (Vector3.Dot(pointer.Direction, _root.forward) <= 0f || !plane.Raycast(ray, out var distance) || distance > 3f) continue;
+                if (Vector3.Dot(pointer.Direction, _root.forward) <= 0f || !plane.Raycast(ray, out var distance) || distance > 3f)
+                {
+                    UpdateCapture(pointer.Id, false, Vector3.zero);
+                    continue;
+                }
                 var hit = _root.InverseTransformPoint(ray.GetPoint(distance));
+                UpdateCapture(pointer.Id, pointer.TriggerHeld, hit);
                 if (!_root.rect.Contains(hit)) continue;
                 var cursorIndex = pointer.Id - 2;
                 if (cursorIndex >= 0 && cursorIndex < _cursors.Length)
@@ -386,12 +432,30 @@ namespace Hapbeat.DemoSwitch
                 if (button == null) continue;
                 button.Hovered = true;
                 if (pointer.TriggerHeld && accepts && button.Interactable) button.Held = true;
-                if (pointer.TriggerHeld && !wasHeld && accepts && button.Interactable) pressed = button;
+                if (pointer.TriggerHeld && !wasHeld && accepts && button.Interactable)
+                {
+                    pressed = button;
+                    _captures[pointer.Id] = button;
+                    UpdateCapture(pointer.Id, true, hit);
+                }
             }
             for (var index = 0; index < _cursors.Length; index++)
                 if (_cursors[index].gameObject.activeSelf != cursorShown[index]) _cursors[index].gameObject.SetActive(cursorShown[index]);
             // At most one activation per frame; the callback may rebuild this panel.
             pressed?.Press();
+        }
+
+        /// <summary>A pointer that pressed a button keeps it captured while it holds, wherever it is on the panel.</summary>
+        private void UpdateCapture(int pointerId, bool holding, Vector3 rootLocal)
+        {
+            if (!_captures.TryGetValue(pointerId, out var button)) return;
+            if (!holding || !_buttons.Contains(button))
+            {
+                _captures.Remove(pointerId);
+                return;
+            }
+            button.Captured = true;
+            button.CapturePoint = new Vector2(rootLocal.x, rootLocal.y);
         }
 
         private DemoSessionButton ButtonAt(Vector3 rootLocal)
@@ -471,10 +535,23 @@ namespace Hapbeat.DemoSwitch
             return completion;
         }
 
+        /// <summary>After a system recenter: in front of the HMD, also when it was at a scene anchor.</summary>
+        internal void PlaceInFront()
+        {
+            var camera = Camera.main;
+            if (camera != null) _panel.PlaceInFront(camera.transform, Distance, Drop);
+        }
+
         private void LaunchForward()
         {
             _error.text = string.Empty;
-            if (DemoSession.LaunchNext(out var error)) return;
+            if (DemoSession.LaunchNext(out var error, ShowError)) return;
+            ShowError(error);
+        }
+
+        private void ShowError(string error)
+        {
+            if (this == null) return;
             _error.text = "起動できませんでした: " + error;
             _panel.EnableInputAfter(0.5f);
         }
@@ -489,7 +566,6 @@ namespace Hapbeat.DemoSwitch
         public const float YawDegrees = -30f;
         public const float PitchDegrees = 35f;
         public const float Distance = 0.45f;
-        private const float FollowRate = 2.5f;
         private DemoSessionPanel _panel;
         private DemoSessionButton _button;
         private bool _placed;
@@ -508,35 +584,16 @@ namespace Hapbeat.DemoSwitch
             }
             if (_panel == null) Build();
             if (!_panel.gameObject.activeSelf) _panel.gameObject.SetActive(true);
-            var target = TargetPose(camera.transform.position, camera.transform.forward);
-            if (!_placed)
-            {
-                _panel.transform.SetPositionAndRotation(target.position, target.rotation);
-                _placed = true;
-            }
-            else
-            {
-                var alpha = 1f - Mathf.Exp(-FollowRate * Time.unscaledDeltaTime);
-                _panel.transform.SetPositionAndRotation(Vector3.Lerp(_panel.transform.position, target.position, alpha),
-                    Quaternion.Slerp(_panel.transform.rotation, target.rotation, alpha));
-            }
+            DemoHeadingPlacement.Follow(_panel.transform, TargetPose(camera.transform.position, camera.transform.forward), !_placed, Time.unscaledDeltaTime);
+            _placed = true;
             _button.Label = Label(DemoSession.HapticsEnabled);
             _button.Highlighted = DemoSession.HapticsEnabled;
         }
 
         internal static string Label(bool enabled) => enabled ? "触覚 ON" : "触覚 OFF";
 
-        /// <summary>Heading-relative pose: head pitch is ignored so looking down at the button keeps it still.</summary>
-        internal static Pose TargetPose(Vector3 headPosition, Vector3 headForward)
-        {
-            var heading = Vector3.ProjectOnPlane(headForward, Vector3.up);
-            if (heading.sqrMagnitude < 0.0001f) heading = Vector3.forward;
-            heading.Normalize();
-            var direction = Quaternion.AngleAxis(YawDegrees, Vector3.up) * heading;
-            direction = Quaternion.AngleAxis(PitchDegrees, Vector3.Cross(Vector3.up, direction)) * direction;
-            var position = headPosition + direction * Distance;
-            return new Pose(position, Quaternion.LookRotation(position - headPosition, Vector3.up));
-        }
+        internal static Pose TargetPose(Vector3 headPosition, Vector3 headForward) =>
+            DemoHeadingPlacement.Target(headPosition, headForward, YawDegrees, PitchDegrees, Distance);
 
         private void Build()
         {
@@ -552,6 +609,41 @@ namespace Hapbeat.DemoSwitch
             if (_panel == null) return;
             if (Application.isPlaying) Destroy(_panel.gameObject);
             else DestroyImmediate(_panel.gameObject);
+        }
+    }
+
+    /// <summary>
+    /// Heading-relative placement of small head-following controls (the haptics button, the Hub's 手前に移動):
+    /// a direction turned by yaw (negative = left) and lowered by pitch from the head's heading, at a distance.
+    /// Head pitch is ignored, so looking down at a control keeps it still.
+    /// </summary>
+    public static class DemoHeadingPlacement
+    {
+        /// <summary>How quickly a control catches up with the heading (1/s).</summary>
+        public const float FollowRate = 2.5f;
+
+        public static Pose Target(Vector3 headPosition, Vector3 headForward, float yawDegrees, float pitchDegrees, float distance)
+        {
+            var heading = Vector3.ProjectOnPlane(headForward, Vector3.up);
+            if (heading.sqrMagnitude < 0.0001f) heading = Vector3.forward;
+            heading.Normalize();
+            var direction = Quaternion.AngleAxis(yawDegrees, Vector3.up) * heading;
+            direction = Quaternion.AngleAxis(pitchDegrees, Vector3.Cross(Vector3.up, direction)) * direction;
+            var position = headPosition + direction * distance;
+            return new Pose(position, Quaternion.LookRotation(position - headPosition, Vector3.up));
+        }
+
+        /// <summary>Moves <paramref name="control"/> toward <paramref name="target"/> (at once when <paramref name="snap"/>).</summary>
+        public static void Follow(Transform control, Pose target, bool snap, float deltaTime)
+        {
+            if (snap)
+            {
+                control.SetPositionAndRotation(target.position, target.rotation);
+                return;
+            }
+            var alpha = 1f - Mathf.Exp(-FollowRate * deltaTime);
+            control.SetPositionAndRotation(Vector3.Lerp(control.position, target.position, alpha),
+                Quaternion.Slerp(control.rotation, target.rotation, alpha));
         }
     }
 

@@ -44,6 +44,11 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(plan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "volley", "trex-encounter" }));
             Assert.That(plan.MoveUp(2), Is.True);
             Assert.That(plan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "trex-encounter", "volley" }));
+            Assert.That(plan.Move(0, 2), Is.True, "Insert: the others close up.");
+            Assert.That(plan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "trex-encounter", "volley", "boxing" }));
+            Assert.That(plan.Move(2, 0), Is.True);
+            Assert.That(plan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "trex-encounter", "volley" }));
+            Assert.That(plan.Move(1, 1) || plan.Move(0, 3) || plan.Move(-1, 0), Is.False);
             Assert.That(plan.Remove(1), Is.True);
             Assert.That(plan.Remove(5), Is.False);
             Assert.That(plan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "volley" }));

@@ -93,12 +93,19 @@ namespace Hapbeat.DemoHub
         }
     }
 
-    /// <summary>Long press: fires once after <see cref="Seconds"/> of continuous holding; releasing resets.</summary>
+    /// <summary>Long press: fires once after <see cref="Duration"/> (default <see cref="Seconds"/>) of continuous holding; releasing resets.</summary>
     public sealed class HubHoldGesture
     {
         public const float Seconds = 2f;
         private float _since = -1f;
         private bool _fired;
+
+        public HubHoldGesture(float duration = Seconds)
+        {
+            Duration = duration;
+        }
+
+        public float Duration { get; }
 
         /// <summary>0..1 while held, 0 when released.</summary>
         public float Progress { get; private set; }
@@ -111,7 +118,7 @@ namespace Hapbeat.DemoHub
                 return false;
             }
             if (_since < 0f) _since = now;
-            Progress = Mathf.Clamp01((now - _since) / Seconds);
+            Progress = Mathf.Clamp01((now - _since) / Duration);
             if (_fired || Progress < 1f) return false;
             _fired = true;
             return true;
@@ -127,7 +134,7 @@ namespace Hapbeat.DemoHub
 
     /// <summary>
     /// Where the panel is placed: once, when head tracking first becomes valid, and again only when the
-    /// operator presses 手前に移動. It never follows the head.
+    /// operator presses 手前に移動 or after a system recenter. It never follows the head.
     /// </summary>
     public static class HubPanelPlacement
     {

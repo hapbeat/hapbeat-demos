@@ -149,7 +149,7 @@ namespace Hapbeat.DemoHub.Tests
         public void PanelIsPlacedOnceAndMovesOnlyOnRecenter()
         {
             var go = new GameObject("hub test");
-            var head = new GameObject("head").transform;
+            var head = new GameObject("head", typeof(Camera)) { tag = "MainCamera" }.transform;
             try
             {
                 var controller = go.AddComponent<DemoHubController>();
@@ -177,10 +177,22 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(Vector3.Distance(panel.position, expected.position), Is.LessThan(1e-4f));
                 Assert.That(Quaternion.Angle(panel.rotation, expected.rotation), Is.LessThan(0.01f));
 
-                // 手前に移動 places it in front of the head again.
-                Assert.That(Buttons(controller).Count(b => b.Label == HubText.Recenter), Is.EqualTo(1));
-                controller.PlaceInFrontOf(head);
-                Assert.That(Vector3.Distance(panel.position, HubPanelPlacement.Target(head.position, head.forward, head.up).position), Is.LessThan(1e-4f));
+                // 手前に移動 is not on the panel but a head-following key at the lower left; it places the panel in front again.
+                Assert.That(Buttons(controller).Any(b => b.Label == HubText.Recenter), Is.False);
+                controller.TickRecenterKey(head, 0f);
+                var key = controller.RecenterKey;
+                var keyTarget = HubRecenterKey.Target(head.position, head.forward);
+                Assert.That(Vector3.Distance(key.transform.position, keyTarget.position), Is.LessThan(1e-4f), "Snaps on the first frame.");
+                var local = Quaternion.Inverse(Quaternion.LookRotation(Vector3.ProjectOnPlane(head.forward, Vector3.up))) * (key.transform.position - head.position);
+                Assert.That(local.x < 0f && local.y < 0f, Is.True, "Lower left of view.");
+                var haptics = DemoHeadingPlacement.Target(head.position, head.forward, -30f, 35f, 0.45f);
+                Assert.That(Vector3.Distance(key.transform.position, haptics.position), Is.GreaterThan(0.05f), "Clear of the haptics button.");
+                Press(key.Buttons.Single(b => b.Label == HubText.Recenter));
+                var main = Camera.main.transform; // The test head, or an open scene's own main camera.
+                Assert.That(Vector3.Distance(panel.position, HubPanelPlacement.Target(main.position, main.forward, main.up).position), Is.LessThan(1e-4f));
+                head.rotation = Quaternion.Euler(0, 60, 0);
+                controller.TickRecenterKey(head, 0.1f);
+                Assert.That(Vector3.Distance(key.transform.position, keyTarget.position), Is.GreaterThan(1e-3f), "Follows the heading.");
             }
             finally
             {
@@ -198,24 +210,143 @@ namespace Hapbeat.DemoHub.Tests
                 var controller = go.AddComponent<DemoHubController>();
                 controller.Initialize(_catalog, new HubPlanStore(_directory));
                 controller.Show(DemoHubController.HubScreen.Manage);
-                var size = controller.Panel.Size;
                 for (var i = 0; i < HubPlan.MaxSteps; i++) controller.EditedPlan.Add(i % 2 == 0 ? _volley : _trex);
                 controller.SelectStep(0);
-                Assert.That(controller.Panel.Size, Is.EqualTo(size), "The panel keeps its size as the plan grows.");
+                Assert.That(controller.GridRows, Is.EqualTo(DemoHubController.RowsPerColumn), "Two columns of 16.");
+                var size = controller.Panel.Size;
 
                 var buttons = Buttons(controller);
                 for (var i = 1; i <= HubPlan.MaxSteps; i++)
                     Assert.That(buttons.Count(b => b.Label.StartsWith(i + ". ")), Is.EqualTo(1), "Row " + i);
+                Assert.That(buttons.Count(b => b.Label == HubText.Grip), Is.EqualTo(HubPlan.MaxSteps));
                 Assert.That(buttons.Count(b => b.Label == HubText.Up), Is.EqualTo(HubPlan.MaxSteps));
                 Assert.That(buttons.Count(b => b.Label == HubText.Down), Is.EqualTo(HubPlan.MaxSteps));
                 Assert.That(buttons.Count(b => b.Label == HubText.Remove), Is.EqualTo(HubPlan.MaxSteps));
-                Assert.That(buttons.Any(b => b.Label == "▲" || b.Label == "▼"), Is.False, "No page buttons.");
                 Assert.That(buttons.Count(b => b.Label.StartsWith("モード：")), Is.EqualTo(1), "Options of the selected step.");
                 AssertInsideWithoutOverlap(controller);
 
                 controller.SelectTab(DemoHubController.TilesTab);
-                Assert.That(controller.Panel.Size, Is.EqualTo(size), "Same size on every tab.");
+                Assert.That(controller.Panel.Size.x, Is.EqualTo(size.x), "Same width on every tab.");
+                Assert.That(controller.GridRows, Is.EqualTo(_catalog.Count), "Tiles: one row per installed demo.");
                 AssertInsideWithoutOverlap(controller);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void ManageHeightFollowsTheLongerColumnAndKeepsTheTopInPlace()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Assert.That(controller.GridRows, Is.EqualTo(3), "Catalog 3 rows (and the step hint).");
+                var catalogPosition = Buttons(controller).First(b => b.Label == "Volley").Rect.anchoredPosition;
+                Vector3 TopLeft() => controller.Panel.transform.TransformPoint(new Vector3(-controller.Panel.Size.x * 0.5f, controller.Panel.Size.y * 0.5f, 0));
+                var topLeft = TopLeft();
+                var height = controller.Panel.Size.y;
+                for (var i = 0; i < 10; i++) Press(Buttons(controller).First(b => b.Label == "Volley"));
+                Assert.That(controller.EditedPlan.Steps.Count, Is.EqualTo(10));
+                Assert.That(controller.GridRows, Is.EqualTo(10), "Plan 10 rows.");
+                Assert.That(controller.Panel.Size.y - height, Is.EqualTo(7 * 43f).Within(1e-3f), "Seven more rows of 40 mm + 3 mm gap.");
+                Assert.That(Vector3.Distance(TopLeft(), topLeft), Is.LessThan(1e-5f), "Tabs and catalog stay where they were.");
+                Assert.That(Buttons(controller).First(b => b.Label == "Volley").Rect.anchoredPosition - new Vector2(-controller.Panel.Size.x * 0.5f, controller.Panel.Size.y * 0.5f),
+                    Is.EqualTo(catalogPosition - new Vector2(-controller.Panel.Size.x * 0.5f, height * 0.5f)));
+                AssertInsideWithoutOverlap(controller);
+
+                controller.SelectTab(1);
+                Assert.That(controller.GridRows, Is.EqualTo(3), "Each preset tab fits its own plan.");
+                controller.SelectTab(0);
+                controller.SelectStep(9);
+                Assert.That(controller.GridRows, Is.EqualTo(10));
+
+                // Nothing between the grid and the footer, and 完了 right after 手の見た目.
+                var buttons = Buttons(controller);
+                var lastRow = buttons.Where(b => b.Label.StartsWith("10. ")).Single();
+                var hand = buttons.Single(b => b.Label == HubText.HandStyleGhost);
+                var done = buttons.Single(b => b.Label == HubText.Done);
+                Assert.That(Bottom(lastRow) - Top(hand), Is.LessThan(10f), "No empty rows above the footer.");
+                Assert.That(Left(done) - Right(hand), Is.EqualTo(8f).Within(1e-3f));
+                Assert.That(controller.Panel.Size.x * 0.5f - Right(done), Is.LessThan(40f), "No wide blank on the right of the footer.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        static float Top(DemoSessionButton b) => b.Rect.anchoredPosition.y + b.Rect.sizeDelta.y * 0.5f;
+        static float Bottom(DemoSessionButton b) => b.Rect.anchoredPosition.y - b.Rect.sizeDelta.y * 0.5f;
+        static float Left(DemoSessionButton b) => b.Rect.anchoredPosition.x - b.Rect.sizeDelta.x * 0.5f;
+        static float Right(DemoSessionButton b) => b.Rect.anchoredPosition.x + b.Rect.sizeDelta.x * 0.5f;
+
+        static void SetHold(DemoSessionButton button, bool held, bool captured, Vector2 point)
+        {
+            var type = typeof(DemoSessionButton);
+            type.GetProperty(nameof(DemoSessionButton.Held)).SetValue(button, held);
+            type.GetProperty(nameof(DemoSessionButton.Captured)).SetValue(button, captured);
+            type.GetProperty(nameof(DemoSessionButton.CapturePoint)).SetValue(button, point);
+        }
+
+        [Test]
+        public void LongPressedGripDragsTheRowToTheInsertionLine()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Manage);
+                controller.EditedPlan.Add(_volley);
+                controller.EditedPlan.Add(_boxing);
+                controller.EditedPlan.Add(_trex);
+                controller.SelectStep(0);
+                var grip = controller.Grips[0];
+                var start = grip.Rect.anchoredPosition;
+                SetHold(grip, true, true, start);
+                controller.UpdateDrag(10f);
+                controller.UpdateDrag(10f + DemoHubController.DragHoldSeconds - 0.05f);
+                Assert.That(controller.DragFrom, Is.EqualTo(-1), "Not before the long press.");
+                controller.UpdateDrag(10f + DemoHubController.DragHoldSeconds + 0.01f);
+                Assert.That(controller.DragFrom, Is.Zero);
+
+                // Finger slides down past the last row (off the grip: no longer Held, still Captured).
+                var below = new Vector2(start.x + 30f, controller.Grips[2].Rect.anchoredPosition.y - 25f);
+                SetHold(grip, false, true, below);
+                controller.UpdateDrag(11f);
+                Assert.That(controller.DropSlot, Is.EqualTo(3), "After the last step.");
+                var line = controller.Panel.GetComponentsInChildren<UnityEngine.UI.Image>().Single(i => i.gameObject.name == "Rect");
+                Assert.That(line.gameObject.activeSelf, Is.True, "Insertion line shown.");
+                Assert.That(line.rectTransform.anchoredPosition.y, Is.LessThan(Bottom(controller.Grips[2])).And.GreaterThan(Bottom(controller.Grips[2]) - 5f));
+
+                SetHold(grip, false, false, below);
+                controller.UpdateDrag(11.1f);
+                Assert.That(controller.EditedPlan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "trex-encounter", "volley" }), "Inserted, not swapped.");
+                Assert.That(controller.SelectedStep, Is.EqualTo(2), "The selection follows.");
+                Assert.That(Buttons(controller).Single(b => b.Label.StartsWith("3. ")).IsFlashing, Is.True);
+
+                // Upward, between rows 1 and 2.
+                grip = controller.Grips[2];
+                SetHold(grip, true, true, grip.Rect.anchoredPosition);
+                controller.UpdateDrag(20f);
+                controller.UpdateDrag(21f);
+                var between = new Vector2(grip.Rect.anchoredPosition.x, (Bottom(controller.Grips[0]) + Top(controller.Grips[1])) * 0.5f);
+                SetHold(grip, false, true, between);
+                controller.UpdateDrag(21.1f);
+                Assert.That(controller.DropSlot, Is.EqualTo(1));
+                SetHold(grip, false, false, between);
+                controller.UpdateDrag(21.2f);
+                Assert.That(controller.EditedPlan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "volley", "trex-encounter" }));
+                Assert.That(controller.SelectedStep, Is.EqualTo(1));
+
+                // Released where it was: nothing changes.
+                grip = controller.Grips[0];
+                SetHold(grip, true, true, grip.Rect.anchoredPosition);
+                controller.UpdateDrag(30f);
+                controller.UpdateDrag(31f);
+                SetHold(grip, false, false, grip.Rect.anchoredPosition);
+                controller.UpdateDrag(31.1f);
+                Assert.That(controller.EditedPlan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing", "volley", "trex-encounter" }));
+                Assert.That(controller.DragFrom, Is.EqualTo(-1));
             }
             finally { Object.DestroyImmediate(go); }
         }

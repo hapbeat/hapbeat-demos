@@ -127,7 +127,7 @@ namespace Hapbeat.DemoHub.Editor
         {
             PlayerSettings.companyName = "Hapbeat";
             PlayerSettings.productName = "Demo Hub";
-            PlayerSettings.bundleVersion = "0.1.0-d5";
+            PlayerSettings.bundleVersion = "0.1.0-d6";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageId);
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -136,7 +136,7 @@ namespace Hapbeat.DemoHub.Editor
             PlayerSettings.Android.forceInternetPermission = true;
             PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.GameActivity;
             PlayerSettings.Android.useCustomKeystore = false;
-            PlayerSettings.Android.bundleVersionCode = 5;
+            PlayerSettings.Android.bundleVersionCode = 6;
             PlayerSettings.runInBackground = false;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
@@ -146,6 +146,7 @@ namespace Hapbeat.DemoHub.Editor
             var ps = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset")[0]);
             ps.FindProperty("activeInputHandler").intValue = 1;
             ps.ApplyModifiedPropertiesWithoutUndo();
+            ConfigureAndroidMsaa();
             Directory.CreateDirectory("Assets/XR");
             AssetDatabase.Refresh();
             if (!EditorBuildSettings.TryGetConfigObject<XRGeneralSettingsPerBuildTarget>(XRGeneralSettings.k_SettingsKey, out var general))
@@ -192,6 +193,25 @@ namespace Hapbeat.DemoHub.Editor
             EditorUtility.SetDirty(general);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>4x MSAA on Android's default quality level (built-in pipeline: also the XR eye buffers), against jagged panel edges.</summary>
+        public const int AndroidMsaa = 4;
+
+        static void ConfigureAndroidMsaa()
+        {
+            var quality = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/QualitySettings.asset")[0]);
+            var defaults = quality.FindProperty("m_PerPlatformDefaultQuality");
+            var level = -1;
+            for (var i = 0; i < defaults.arraySize; i++)
+            {
+                var pair = defaults.GetArrayElementAtIndex(i);
+                if (pair.FindPropertyRelative("first").stringValue == "Android") level = pair.FindPropertyRelative("second").intValue;
+            }
+            var levels = quality.FindProperty("m_QualitySettings");
+            if (level < 0 || level >= levels.arraySize) throw new InvalidOperationException("No default Android quality level.");
+            levels.GetArrayElementAtIndex(level).FindPropertyRelative("antiAliasing").intValue = AndroidMsaa;
+            quality.ApplyModifiedPropertiesWithoutUndo();
         }
 
         [MenuItem("Hapbeat Demo Hub/Build Quest APK")]

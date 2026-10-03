@@ -34,8 +34,9 @@ namespace Hapbeat.DemoHub
         public const string EmptyPlan = "プランが空です。左のカタログからデモを追加してください。";
         public const string StepHeading = "選んだ回の設定";
         public const string StepHint = "プランの行の名前を押すと、その回のモードや「もう一度」をここで変えられます。";
-        public const string Up = "上へ";
-        public const string Down = "下へ";
+        public const string Up = "▲";
+        public const string Down = "▼";
+        public const string Grip = "≡";
         public const string Remove = "削除";
         public const string RetryOn = "もう一度あり";
         public const string RetryOff = "もう一度なし";
@@ -65,7 +66,8 @@ namespace Hapbeat.DemoHub
     /// and the finish screen follows a completed multi-step session. With staff waiting mode on, the top
     /// screen is the M5 waiting room instead. M5 SWITCH keeps working in every screen.
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
-    /// then stays put; 手前に移動 places it in front of the head again.
+    /// then stays put; 手前に移動 (a small head-following key at the lower left of view) and a system
+    /// recenter place it in front of the head again.
     /// </summary>
     public sealed class DemoHubController : MonoBehaviour
     {
@@ -73,25 +75,35 @@ namespace Hapbeat.DemoHub
 
         /// <summary>Manage-screen tab after the three presets.</summary>
         internal const int TilesTab = HubPlanStore.PresetCount;
-        /// <summary>Plan rows per column; two columns hold the 32-step maximum.</summary>
+        /// <summary>Plan rows per column; a second column holds steps 17-32.</summary>
         internal const int RowsPerColumn = 16;
-        internal const int PlanColumns = 2;
         /// <summary>Smallest pokable height (mm) of every manage-screen row and button.</summary>
         internal const float RowHeight = 40f;
+        /// <summary>Rows the step column needs for its hint when no step is selected.</summary>
+        private const int HintRows = 3;
         private const float RowGap = 3f;
         private const float Margin = 16f;
         private const float ColumnGap = 12f;
         private const float ButtonGap = 4f;
         private const float CatalogWidth = 200f;
+        private const float GripWidth = 36f;
         private const float StepTitleWidth = 220f;
-        private const float StepButtonWidth = 56f;
-        private const float PlanColumnWidth = StepTitleWidth + 3f * (ButtonGap + StepButtonWidth);
+        private const float MoveButtonWidth = 44f;
+        private const float RemoveButtonWidth = 56f;
+        internal const float PlanColumnWidth = GripWidth + ButtonGap + StepTitleWidth + 2f * (ButtonGap + MoveButtonWidth) + ButtonGap + RemoveButtonWidth;
         private const float EditorWidth = 210f;
         private const float TabWidth = 128f;
         private const float BarHeight = 44f;
         private const float HeadingHeight = 26f;
         private const float StatusHeight = 22f;
-        private const float RecenterWidth = 104f;
+        private const float FooterButtonWidth = 230f;
+        private const float DoneWidth = 120f;
+        private const float FooterGap = 8f;
+        /// <summary>Long press on a row's grip before it can be dragged.</summary>
+        internal const float DragHoldSeconds = 0.5f;
+        private const float IndicatorHeight = 4f;
+        /// <summary>Glyph raster density: about the eye buffer's at 0.6 m on Quest (text has no mipmaps).</summary>
+        internal const float GlyphPixelsPerMillimetre = 2.5f;
         private const float TileLabelWidth = 380f;
         private const float TileToggleWidth = 150f;
         private const int TileColumns = 3;
@@ -103,13 +115,22 @@ namespace Hapbeat.DemoHub
         private const float RowFlashSeconds = 0.5f;
         private static readonly Color Muted = new Color(0.7f, 0.8f, 0.9f);
         private static readonly Color Warning = new Color(1f, 0.6f, 0.45f);
+        private static readonly Color Indicator = new Color(0.55f, 0.9f, 1f, 1f);
 
         [Tooltip("Head-locked waiting labels; shown only on the top screen in staff waiting mode.")]
         [SerializeField] private GameObject _waitingMessage;
 
         private readonly HubPlan[] _presets = new HubPlan[HubPlanStore.PresetCount];
         private readonly HubHoldGesture _hold = new HubHoldGesture();
+        private readonly HubHoldGesture _dragHold = new HubHoldGesture(DragHoldSeconds);
+        private readonly List<DemoSessionButton> _grips = new List<DemoSessionButton>();
         private DemoSessionPanel _panel;
+        private DemoSessionPanel _recenterKey;
+        private HubScreen? _builtScreen;
+        private int _dragCandidate = -1;
+        private int _dragFrom = -1;
+        private int _dropSlot = -1;
+        private UnityEngine.UI.Image _dropIndicator;
         private HubPlanStore _store;
         private IReadOnlyList<DemoSessionCatalogEntry> _catalog;
         private int _tab;
@@ -125,7 +146,14 @@ namespace Hapbeat.DemoHub
         /// <summary>The preset shown in the manage screen (the last preset while the tiles tab is open).</summary>
         public HubPlan EditedPlan => _presets[Mathf.Min(_tab, HubPlanStore.PresetCount - 1)];
         internal DemoSessionPanel Panel => _panel;
+        /// <summary>The head-following 手前に移動 key (null until the first frame with a camera).</summary>
+        internal DemoSessionPanel RecenterKey => _recenterKey;
         internal DemoSessionButton ManageButton => _manageButton;
+        /// <summary>Plan row being dragged (-1: none).</summary>
+        internal int DragFrom => _dragFrom;
+        /// <summary>Insertion slot under the dragged row's pointer (0 = before step 1, n = after the last).</summary>
+        internal int DropSlot => _dropSlot;
+        internal IReadOnlyList<DemoSessionButton> Grips => _grips;
         internal int Tab => _tab;
         /// <summary>Plan row whose options the manage screen edits (-1: none).</summary>
         internal int SelectedStep => _selectedStep;
@@ -139,6 +167,7 @@ namespace Hapbeat.DemoHub
             _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
             Show(InitialScreen(DemoSession.Ticket));
+            DemoRecenter.Recentered += Recenter;
         }
 
         internal void Initialize(IReadOnlyList<DemoSessionCatalogEntry> catalog, HubPlanStore store)
@@ -168,7 +197,9 @@ namespace Hapbeat.DemoHub
         {
             var camera = Camera.main;
             TickPlacement(camera != null ? camera.transform : null, Application.isEditor || IsHeadTracked());
+            if (camera != null) TickRecenterKey(camera.transform, Time.unscaledDeltaTime);
             UpdateManageHold(Time.realtimeSinceStartup);
+            UpdateDrag(Time.realtimeSinceStartup);
         }
 
         /// <summary>
@@ -189,10 +220,27 @@ namespace Hapbeat.DemoHub
             _panel.transform.SetPositionAndRotation(pose.position, pose.rotation);
         }
 
+        /// <summary>手前に移動 and a system recenter.</summary>
         private void Recenter()
         {
             var camera = Camera.main;
-            if (camera != null) PlaceInFrontOf(camera.transform);
+            if (camera != null && _panel != null) PlaceInFrontOf(camera.transform);
+        }
+
+        /// <summary>
+        /// 手前に移動 follows the head's heading at the lower left of view like the shared haptics button,
+        /// above it so the two never overlap (the Hub shows no haptics button, but the place is reserved).
+        /// </summary>
+        internal void TickRecenterKey(Transform head, float deltaTime)
+        {
+            var snap = _recenterKey == null;
+            if (snap)
+            {
+                _recenterKey = DemoSessionPanel.Create("Hub Recenter Key", new Vector2(HubRecenterKey.Width + 8f, RowHeight + 8f));
+                _recenterKey.GlyphPixelsPerMillimetre = GlyphPixelsPerMillimetre;
+                _recenterKey.AddButton(Vector2.zero, new Vector2(HubRecenterKey.Width, RowHeight), HubText.Recenter, 16, Recenter);
+            }
+            DemoHeadingPlacement.Follow(_recenterKey.transform, HubRecenterKey.Target(head.position, head.forward), snap, deltaTime);
         }
 
         /// <summary>Long press on 管理: the button label shows the hold progress, 2 s opens the manage screen.</summary>
@@ -222,7 +270,11 @@ namespace Hapbeat.DemoHub
         {
             Screen = screen;
             _status = string.Empty;
-            if (_panel == null) _panel = DemoSessionPanel.Create("Demo Session Hub", Vector2.one);
+            if (_panel == null)
+            {
+                _panel = DemoSessionPanel.Create("Demo Session Hub", Vector2.one);
+                _panel.GlyphPixelsPerMillimetre = GlyphPixelsPerMillimetre;
+            }
             if (_waitingMessage != null) _waitingMessage.SetActive(screen == HubScreen.Top && Settings.StaffWaiting);
             Rebuild();
             var camera = Camera.main;
@@ -232,9 +284,15 @@ namespace Hapbeat.DemoHub
 
         internal void Rebuild()
         {
+            var previousSize = _panel.Size;
+            var sameScreen = _builtScreen == Screen;
             _panel.ClearContent();
             _manageButton = null;
             _hold.Reset();
+            _grips.Clear();
+            _dropIndicator = null;
+            _dragCandidate = _dragFrom = _dropSlot = -1;
+            _dragHold.Reset();
             switch (Screen)
             {
                 case HubScreen.Top:
@@ -244,19 +302,23 @@ namespace Hapbeat.DemoHub
                 case HubScreen.Manage: BuildManage(); break;
                 case HubScreen.Finished: BuildFinished(); break;
             }
+            // Within the manage screen a size change keeps the top-left corner (tabs, catalog) where it was.
+            if (sameScreen && Screen == HubScreen.Manage) KeepTopLeft(previousSize, _panel.Size);
+            _builtScreen = Screen;
+        }
+
+        private void KeepTopLeft(Vector2 previous, Vector2 size)
+        {
+            if (previous == size) return;
+            var t = _panel.transform;
+            // Canvas units are millimetres; +X is the viewer's right and +Y up on the panel.
+            t.position += (t.right * (size.x - previous.x) * 0.5f + t.up * (previous.y - size.y) * 0.5f) * 0.001f;
         }
 
         private void SetStatus(string status)
         {
             _status = status;
             Rebuild();
-        }
-
-        /// <summary>The one 手前に移動 button, in the panel's top-right corner on every screen.</summary>
-        private void AddRecenterButton(Vector2 panelSize)
-        {
-            var centre = new Vector2(panelSize.x * 0.5f - Margin - RecenterWidth * 0.5f, panelSize.y * 0.5f - Margin - RowHeight * 0.5f);
-            _panel.AddButton(centre, new Vector2(RecenterWidth, RowHeight), HubText.Recenter, 15, Recenter);
         }
 
         // ------------------------------------------------------------------ top
@@ -272,10 +334,8 @@ namespace Hapbeat.DemoHub
                 + BarHeight + Margin;
             var size = new Vector2(TopWidth, height);
             _panel.Resize(size);
-            AddRecenterButton(size);
             var y = height * 0.5f - Margin - RowHeight * 0.5f;
-            // The title stays clear of the corner button on both sides, so it remains centred.
-            _panel.AddText(new Vector2(0, y), new Vector2(TopWidth - 2f * (Margin + RecenterWidth + 8f), RowHeight), HubText.TopTitle, 25, Color.white);
+            _panel.AddText(new Vector2(0, y), new Vector2(TopWidth - 40, RowHeight), HubText.TopTitle, 25, Color.white);
             y -= RowHeight * 0.5f + 4f + 12f;
             _panel.AddText(new Vector2(0, y), new Vector2(TopWidth - 40, 24), DeviceAddressLine(_deviceAddress), 16, Muted);
             y -= 12f + TopGap;
@@ -314,12 +374,11 @@ namespace Hapbeat.DemoHub
             _manageButton = _panel.AddButton(new Vector2(TopWidth * 0.5f - 20f - 50f, y), new Vector2(100, BarHeight), HubText.Manage, 18, null);
         }
 
-        /// <summary>M5 waiting room: only the head-locked labels, this device's address, 手前に移動 and the manage button.</summary>
+        /// <summary>M5 waiting room: only the head-locked labels, this device's address and the manage button.</summary>
         private void BuildStaffWaiting()
         {
             var size = new Vector2(600, 120);
             _panel.Resize(size);
-            AddRecenterButton(size);
             _panel.AddText(new Vector2(-70, 28), new Vector2(420, 26), DeviceAddressLine(_deviceAddress), 16, Muted, TextAnchor.MiddleLeft);
             _panel.AddText(new Vector2(-70, -28), new Vector2(420, 44), HubText.StaffWaitingNote, 15, Muted, TextAnchor.MiddleLeft);
             _manageButton = _panel.AddButton(new Vector2(232, -28), new Vector2(104, BarHeight), HubText.Manage, 18, null);
@@ -363,23 +422,52 @@ namespace Hapbeat.DemoHub
         private void Launch(DemoSessionTicket ticket)
         {
             if (ticket == null) { SetStatus(HubText.NothingInstalled); return; }
-            if (!DemoSession.LaunchTicket(ticket, out var error)) SetStatus(HubText.LaunchFailed + error);
+            if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
         }
+
+        /// <summary>A start that failed, or whose application did not come to the front: the Hub stays with the error.</summary>
+        private void LaunchFailed(string error) => SetStatus(HubText.LaunchFailed + error);
 
         // --------------------------------------------------------------- manage
 
         /// <summary>Catalog buttons per column match the plan rows; more demos add catalog columns.</summary>
         private int CatalogColumns => Mathf.Max(1, Mathf.CeilToInt(_catalog.Count / (float)RowsPerColumn));
 
+        /// <summary>Plan columns: a second one only past 16 steps (the widest of the three presets, so tabs keep the width).</summary>
+        private int PlanColumns => _presets.Any(p => p != null && p.Steps.Count > RowsPerColumn) ? 2 : 1;
+
         /// <summary>
-        /// One size for every tab (switching tabs never resizes the panel): catalog column(s), two plan
-        /// columns of 16 rows, the selected step's settings column, and the footer.
+        /// Width: the catalog column(s), the plan column(s) and the selected step's column, or the footer
+        /// when wider; the same on every tab. Height: as many rows as the tab's longest column needs
+        /// (catalog or plan, at most 16, or the step settings), so no empty rows above the footer.
         /// </summary>
         internal Vector2 ManageSize => new Vector2(
-            Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
-            Margin + BarHeight + 8f + HeadingHeight + GridHeight + 8f + BarHeight + 4f + StatusHeight + Margin);
+            Mathf.Max(Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
+                Margin + 3f * (FooterButtonWidth + FooterGap) + DoneWidth + Margin,
+                Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + Margin),
+            Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + 4f + StatusHeight + Margin);
 
-        private static float GridHeight => RowsPerColumn * (RowHeight + RowGap) - RowGap;
+        /// <summary>Rows of the current tab: its longest column.</summary>
+        internal int GridRows
+        {
+            get
+            {
+                var catalogRows = Mathf.Min(_catalog.Count, RowsPerColumn);
+                if (_tab == TilesTab) return Mathf.Max(1, catalogRows);
+                var plan = EditedPlan;
+                var editorRows = HintRows;
+                if (_selectedStep >= 0 && _selectedStep < plan.Steps.Count)
+                {
+                    var entry = HubPlan.Find(_catalog, plan.Steps[_selectedStep].DemoId);
+                    editorRows = 2 + (entry == null ? 0 : HubPlan.VisibleOptions(plan.Steps[_selectedStep], entry.Descriptor).Count);
+                }
+                return Mathf.Max(Mathf.Max(catalogRows, Mathf.Min(plan.Steps.Count, RowsPerColumn)), editorRows);
+            }
+        }
+
+        private const float TilesColumnWidth = TileLabelWidth + ButtonGap + TileToggleWidth + 2f * ColumnGap;
+
+        private static float GridHeight(int rows) => rows * (RowHeight + RowGap) - RowGap;
 
         private float GridTop => ManageSize.y * 0.5f - Margin - BarHeight - 8f - HeadingHeight;
 
@@ -398,7 +486,6 @@ namespace Hapbeat.DemoHub
                 var label = tab == TilesTab ? HubText.Tiles : HubText.Preset + " " + (tab + 1);
                 _panel.AddButton(new Vector2(left + TabWidth * 0.5f + tab * (TabWidth + ButtonGap), barY), new Vector2(TabWidth, BarHeight), label, 18, () => SelectTab(index)).Highlighted = tab == _tab;
             }
-            AddRecenterButton(size);
             if (_tab == TilesTab) BuildTilesTab(size);
             else
             {
@@ -413,26 +500,26 @@ namespace Hapbeat.DemoHub
                 BuildPresetTab(size);
             }
 
-            // Footer: settings shared by every launch, then done; the status line below never moves them.
+            // Footer: settings shared by every launch, then done right after them; the status line below never moves them.
             var footerY = -size.y * 0.5f + Margin + StatusHeight + 4f + BarHeight * 0.5f;
             var x = left;
-            DemoSessionButton Footer(float width, string label, System.Action press)
+            DemoSessionButton Footer(float width, string label, int fontSize, System.Action press)
             {
-                var button = _panel.AddButton(new Vector2(x + width * 0.5f, footerY), new Vector2(width, BarHeight), label, 18, press);
-                x += width + 8f;
+                var button = _panel.AddButton(new Vector2(x + width * 0.5f, footerY), new Vector2(width, BarHeight), label, fontSize, press);
+                x += width + FooterGap;
                 return button;
             }
-            Footer(260, Settings.HapticsUi ? HubText.HapticsUiOn : HubText.HapticsUiOff,
+            Footer(FooterButtonWidth, Settings.HapticsUi ? HubText.HapticsUiOn : HubText.HapticsUiOff, 18,
                 () => { Settings.HapticsUi = !Settings.HapticsUi; SettingsChanged(); }).Highlighted = Settings.HapticsUi;
-            Footer(260, Settings.StaffWaiting ? HubText.StaffWaitingOn : HubText.StaffWaitingOff,
+            Footer(FooterButtonWidth, Settings.StaffWaiting ? HubText.StaffWaitingOn : HubText.StaffWaitingOff, 18,
                 () => { Settings.StaffWaiting = !Settings.StaffWaiting; SettingsChanged(); }).Highlighted = Settings.StaffWaiting;
-            Footer(260, Settings.HandStyle == DemoHandStyle.Skin ? HubText.HandStyleSkin : HubText.HandStyleGhost, () =>
+            Footer(FooterButtonWidth, Settings.HandStyle == DemoHandStyle.Skin ? HubText.HandStyleSkin : HubText.HandStyleGhost, 18, () =>
             {
                 Settings.HandStyle = Settings.HandStyle == DemoHandStyle.Skin ? DemoHandStyle.Ghost : DemoHandStyle.Skin;
                 ApplyHandStyle();
                 SettingsChanged();
             });
-            _panel.AddButton(new Vector2(size.x * 0.5f - Margin - 60f, footerY), new Vector2(120, BarHeight), HubText.Done, 20, () => Show(HubScreen.Top));
+            Footer(DoneWidth, HubText.Done, 20, () => Show(HubScreen.Top));
             _panel.AddText(new Vector2(0, -size.y * 0.5f + Margin + StatusHeight * 0.5f), new Vector2(size.x - 2f * Margin, StatusHeight), _status, 15, Warning);
         }
 
@@ -472,8 +559,8 @@ namespace Hapbeat.DemoHub
                 });
             }
 
-            // Plan: two columns of 16 numbered rows, each with 上へ / 下へ / 削除.
-            var planLeft = left + catalogWidth + ColumnGap;
+            // Plan: numbered rows (16 per column), each with a drag grip, ▲ / ▼ and 削除.
+            var planLeft = PlanLeft(size);
             var planWidth = PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap;
             _panel.AddText(new Vector2(planLeft + planWidth * 0.5f, headingY), new Vector2(planWidth, HeadingHeight),
                 string.Format(CultureInfo.InvariantCulture, HubText.PlanHeading, plan.Steps.Count, HubPlan.MaxSteps), 16, Muted, TextAnchor.MiddleLeft);
@@ -482,6 +569,8 @@ namespace Hapbeat.DemoHub
             for (var index = 0; index < plan.Steps.Count; index++)
                 PlanRow(index, planLeft + (index / RowsPerColumn) * (PlanColumnWidth + ColumnGap), RowCentreY(gridTop, index % RowsPerColumn));
             _flashStep = -1;
+            _dropIndicator = _panel.AddRect(Vector2.zero, new Vector2(PlanColumnWidth, IndicatorHeight), Indicator);
+            _dropIndicator.gameObject.SetActive(false);
 
             // The selected step's options and retry.
             var editorX = planLeft + planWidth + ColumnGap + EditorWidth * 0.5f;
@@ -496,23 +585,99 @@ namespace Hapbeat.DemoHub
             return (index + 1) + ". " + (entry == null ? step.DemoId + HubText.NotInstalled : HubPlan.Title(step, entry));
         }
 
+        private float PlanLeft(Vector2 size) => -size.x * 0.5f + Margin + CatalogColumns * (CatalogWidth + ColumnGap);
+
+        /// <summary>One plan row: grip (long press, then drag to a new place), name (selects), ▲, ▼, 削除.</summary>
         private void PlanRow(int index, float left, float y)
         {
             var plan = EditedPlan;
             var i = index;
-            var title = _panel.AddButton(new Vector2(left + StepTitleWidth * 0.5f, y), new Vector2(StepTitleWidth, RowHeight), StepTitle(index), 16, () => SelectStep(i));
+            // No press action: holding the grip must not rebuild the panel.
+            _grips.Add(_panel.AddButton(new Vector2(left + GripWidth * 0.5f, y), new Vector2(GripWidth, RowHeight), HubText.Grip, 20, null));
+            var x = left + GripWidth + ButtonGap;
+            var title = _panel.AddButton(new Vector2(x + StepTitleWidth * 0.5f, y), new Vector2(StepTitleWidth, RowHeight), StepTitle(index), 16, () => SelectStep(i));
             title.Text.alignment = TextAnchor.MiddleLeft;
             title.Highlighted = index == _selectedStep;
-            var x = left + StepTitleWidth + ButtonGap + StepButtonWidth * 0.5f;
-            var up = _panel.AddButton(new Vector2(x, y), new Vector2(StepButtonWidth, RowHeight), HubText.Up, 16, () => Move(i, i - 1));
+            x += StepTitleWidth + ButtonGap + MoveButtonWidth * 0.5f;
+            var up = _panel.AddButton(new Vector2(x, y), new Vector2(MoveButtonWidth, RowHeight), HubText.Up, 16, () => Move(i, i - 1));
             up.Interactable = index > 0;
-            x += StepButtonWidth + ButtonGap;
-            var down = _panel.AddButton(new Vector2(x, y), new Vector2(StepButtonWidth, RowHeight), HubText.Down, 16, () => Move(i, i + 1));
+            x += MoveButtonWidth + ButtonGap;
+            var down = _panel.AddButton(new Vector2(x, y), new Vector2(MoveButtonWidth, RowHeight), HubText.Down, 16, () => Move(i, i + 1));
             down.Interactable = index < plan.Steps.Count - 1;
-            x += StepButtonWidth + ButtonGap;
-            _panel.AddButton(new Vector2(x, y), new Vector2(StepButtonWidth, RowHeight), HubText.Remove, 16, () => RemoveStep(i));
+            x += MoveButtonWidth * 0.5f + ButtonGap + RemoveButtonWidth * 0.5f;
+            _panel.AddButton(new Vector2(x, y), new Vector2(RemoveButtonWidth, RowHeight), HubText.Remove, 16, () => RemoveStep(i));
             if (index != _flashStep) return;
             title.FlashFor(RowFlashSeconds);
+        }
+
+        /// <summary>
+        /// Drag to reorder: holding a row's grip for <see cref="DragHoldSeconds"/> (fingertip pressed in, or
+        /// the trigger held) picks the row up; moving up/down shows a line at the insertion place; releasing
+        /// inserts the step there (not a swap).
+        /// </summary>
+        internal void UpdateDrag(float now)
+        {
+            if (Screen != HubScreen.Manage || _tab == TilesTab || _grips.Count == 0) return;
+            if (_dragFrom < 0)
+            {
+                var held = _grips.FindIndex(g => g.Held);
+                if (held != _dragCandidate)
+                {
+                    _dragHold.Reset();
+                    _dragCandidate = held;
+                }
+                if (held < 0 || !_dragHold.Update(true, now)) return;
+                _dragFrom = held;
+                _grips[held].Highlighted = true;
+            }
+            var grip = _grips[_dragFrom];
+            if (!grip.Captured)
+            {
+                // Released: insert at the last place shown.
+                var from = _dragFrom;
+                var slot = _dropSlot;
+                _dragFrom = _dropSlot = _dragCandidate = -1;
+                _dragHold.Reset();
+                if (!(slot >= 0 && Insert(from, slot)))
+                {
+                    grip.Highlighted = false;
+                    _dropIndicator.gameObject.SetActive(false);
+                }
+                return;
+            }
+            _dropSlot = SlotAt(grip.CapturePoint);
+            var column = _dropSlot > RowsPerColumn || (_dropSlot == RowsPerColumn && PlanColumnOf(grip.CapturePoint) == 1) ? 1 : 0;
+            var row = _dropSlot - column * RowsPerColumn;
+            var planLeft = PlanLeft(_panel.Size) + column * (PlanColumnWidth + ColumnGap);
+            _dropIndicator.rectTransform.anchoredPosition = new Vector2(planLeft + PlanColumnWidth * 0.5f, GridTop - row * (RowHeight + RowGap) + RowGap * 0.5f);
+            if (!_dropIndicator.gameObject.activeSelf) _dropIndicator.gameObject.SetActive(true);
+        }
+
+        private int PlanColumnOf(Vector2 point) =>
+            PlanColumns > 1 && point.x >= PlanLeft(_panel.Size) + PlanColumnWidth + ColumnGap * 0.5f ? 1 : 0;
+
+        /// <summary>Insertion slot (0..step count) nearest to a panel point in the plan columns.</summary>
+        internal int SlotAt(Vector2 point)
+        {
+            var count = EditedPlan.Steps.Count;
+            var column = PlanColumnOf(point);
+            var rows = Mathf.Clamp(count - column * RowsPerColumn, 0, RowsPerColumn);
+            var row = Mathf.Clamp(Mathf.RoundToInt((GridTop - point.y) / (RowHeight + RowGap)), 0, rows);
+            return Mathf.Min(column * RowsPerColumn + row, count);
+        }
+
+        /// <summary>Moves step <paramref name="from"/> to insertion slot <paramref name="slot"/>; the selection follows, the moved step flashes.</summary>
+        internal bool Insert(int from, int slot)
+        {
+            var plan = EditedPlan;
+            var to = slot > from ? slot - 1 : slot;
+            if (!plan.Move(from, to)) return false;
+            if (_selectedStep == from) _selectedStep = to;
+            else if (from < _selectedStep && _selectedStep <= to) _selectedStep--;
+            else if (to <= _selectedStep && _selectedStep < from) _selectedStep++;
+            _flashStep = to;
+            PlanChanged();
+            return true;
         }
 
         /// <summary>Swaps a step with its neighbour; the selection follows the moved step, which flashes.</summary>
@@ -567,7 +732,7 @@ namespace Hapbeat.DemoHub
             _panel.AddText(new Vector2(0, headingY), new Vector2(size.x - 2f * Margin, HeadingHeight), HubText.TilesHeading, 16, Muted, TextAnchor.MiddleLeft);
             if (_catalog.Count == 0)
             {
-                _panel.AddText(new Vector2(0, GridTop - 40f), new Vector2(size.x - 2f * Margin, 40), HubText.NoDemos, 19, Color.white);
+                _panel.AddText(new Vector2(0, GridTop - RowHeight * 0.5f), new Vector2(size.x - 2f * Margin, RowHeight), HubText.NoDemos, 19, Color.white);
                 return;
             }
             const float columnWidth = TileLabelWidth + ButtonGap + TileToggleWidth + 2f * ColumnGap;
@@ -606,7 +771,6 @@ namespace Hapbeat.DemoHub
         {
             var size = new Vector2(540, 340);
             _panel.Resize(size);
-            AddRecenterButton(size);
             _panel.AddText(new Vector2(0, 50), new Vector2(500, 110), HubText.FinishedMessage, 30, Color.white);
             _panel.AddButton(new Vector2(0, -60), new Vector2(380, 64), HubText.Restart, 24, RestartFinishedSession);
             _panel.AddButton(new Vector2(0, -125), new Vector2(160, 44), HubText.BackToTop, 18, () => Show(HubScreen.Top));
@@ -619,15 +783,32 @@ namespace Hapbeat.DemoHub
             var finished = DemoSession.Ticket;
             if (finished == null) { Show(HubScreen.Top); return; }
             var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle);
-            if (!DemoSession.LaunchTicket(ticket, out var error)) SetStatus(HubText.LaunchFailed + error);
+            if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
         }
 
         private void OnDestroy()
         {
-            if (_panel == null) return;
-            if (Application.isPlaying) Destroy(_panel.gameObject);
-            else DestroyImmediate(_panel.gameObject);
+            DemoRecenter.Recentered -= Recenter;
+            foreach (var panel in new[] { _panel, _recenterKey })
+            {
+                if (panel == null) continue;
+                if (Application.isPlaying) Destroy(panel.gameObject);
+                else DestroyImmediate(panel.gameObject);
+            }
         }
+    }
+
+    /// <summary>Where the head-following 手前に移動 key sits: lower left of view, above the shared haptics button.</summary>
+    public static class HubRecenterKey
+    {
+        public const float YawDegrees = -30f;
+        /// <summary>The haptics button is at 35° (±3.4° tall at 0.45 m); this key (±2.5°) sits above it with a gap.</summary>
+        public const float PitchDegrees = 27f;
+        public const float Distance = 0.45f;
+        public const float Width = 112f;
+
+        public static Pose Target(Vector3 headPosition, Vector3 headForward) =>
+            DemoHeadingPlacement.Target(headPosition, headForward, YawDegrees, PitchDegrees, Distance);
     }
 
     public static class HubIdentity

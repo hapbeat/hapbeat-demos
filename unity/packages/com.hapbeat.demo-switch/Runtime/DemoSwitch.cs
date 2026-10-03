@@ -10,7 +10,14 @@ namespace Hapbeat.DemoSwitch
 
         public static bool ReturnToHub() => SwitchTo(DemoSwitchSettings.HubDemoId);
 
-        public static bool SwitchTo(string demoId)
+        /// <summary>
+        /// Starts an allowlisted application. This application finishes after it has gone to the background;
+        /// when it is still in front after 5 s, it keeps running and logs an error.
+        /// </summary>
+        public static bool SwitchTo(string demoId) => SwitchTo(demoId, null);
+
+        /// <summary><see cref="SwitchTo(string)"/> with the error of a start that did not come to the front.</summary>
+        internal static bool SwitchTo(string demoId, Action<string> onFailed)
         {
             if (DemoSwitchRuntime.Instance == null)
             {
@@ -18,7 +25,7 @@ namespace Hapbeat.DemoSwitch
                 return false;
             }
 
-            return DemoSwitchRuntime.Instance.SwitchLocal(demoId);
+            return DemoSwitchRuntime.Instance.SwitchLocal(demoId, onFailed);
         }
 
         internal static void NotifyBeforeSwitch(string demoId)
