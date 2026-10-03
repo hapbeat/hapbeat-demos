@@ -73,4 +73,6 @@ if (-not $BothEyes -and $size -match '(\d+)x(\d+)') {
     if ($width -gt $height * 1.2) { $scrcpyArgs += "--crop=$([int]($width / 2)):${height}:0:0" }
 }
 Write-Host "Mirroring $serial (view only, no audio). Close the window to stop."
+# scrcpy ships its own adb; a different adb version would restart the running adb server.
+$env:ADB = $script:adb
 & $scrcpy @scrcpyArgs

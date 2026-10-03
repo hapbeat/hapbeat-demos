@@ -40,6 +40,8 @@ Pistol Whip / Robo Recall / Blade & Sorcery 向け mod、共通送信コア、
 
 このリポジトリには、デモ共通の [Demo Switch package](unity/packages/com.hapbeat.demo-switch/README.md)、APK を切り替える [Demo Hub](unity/demo-hub/README.md)、補助スクリプト（`tools/`）と、ビルド済みアプリの Releases を置く。
 
+デモ一式の Quest へのインストールは `tools/install-demos.cmd -Group 1` のように行う。`-Group` / `-Player` を付けると、その Quest の全デモの触覚の宛先（`hapbeat-device.json`）も同時に書き込む。2 台目は `-Group 2`。
+
 Quest の画面を PC に映すには `tools/quest-mirror.cmd` をダブルクリックする（同じ LAN 内の Wi-Fi adb + [scrcpy](https://github.com/Genymobile/scrcpy)。インターネット不要、表示のみ・音声なし）。Quest を再起動した直後だけ USB ケーブルを一度挿す必要がある。
 
 ## 4. 独立 APK の切替
