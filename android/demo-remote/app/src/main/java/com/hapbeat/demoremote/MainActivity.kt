@@ -6,7 +6,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,14 +48,19 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = screen != Screen.REMOTE) {
                     screen = if (screen == Screen.LICENSES) Screen.SETTINGS else Screen.REMOTE
                 }
-                when (screen) {
-                    Screen.REMOTE -> RemoteScreen(viewModel, onOpenSettings = { screen = Screen.SETTINGS })
-                    Screen.SETTINGS -> SettingsScreen(
-                        viewModel,
-                        onBack = { screen = Screen.REMOTE },
-                        onOpenLicenses = { screen = Screen.LICENSES },
-                    )
-                    Screen.LICENSES -> LicenseScreen(onBack = { screen = Screen.SETTINGS })
+                // targetSdk 35 draws edge-to-edge: keep content clear of the status / navigation bars.
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                        when (screen) {
+                            Screen.REMOTE -> RemoteScreen(viewModel, onOpenSettings = { screen = Screen.SETTINGS })
+                            Screen.SETTINGS -> SettingsScreen(
+                                viewModel,
+                                onBack = { screen = Screen.REMOTE },
+                                onOpenLicenses = { screen = Screen.LICENSES },
+                            )
+                            Screen.LICENSES -> LicenseScreen(onBack = { screen = Screen.SETTINGS })
+                        }
+                    }
                 }
             }
         }
