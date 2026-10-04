@@ -50,7 +50,7 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
      * headset; dadb blocks until it is answered, so the handshake runs on a detached IO job
      * and [onAuthWaiting] is called when it has not finished after a short delay.
      */
-    suspend fun connect(onAuthWaiting: () -> Unit): AdbConnectResult {
+    suspend fun connect(onAuthWaiting: () -> Unit, authWaitMs: Long = AUTH_WAIT_MS): AdbConnectResult {
         close()
         val reachable = withContext(Dispatchers.IO) {
             try {
@@ -73,7 +73,7 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
             var done = withTimeoutOrNull(AUTH_HINT_DELAY_MS) { handshake.join(); true } ?: false
             if (!done) {
                 onAuthWaiting()
-                done = withTimeoutOrNull(AUTH_WAIT_MS - AUTH_HINT_DELAY_MS) { handshake.join(); true } ?: false
+                done = withTimeoutOrNull((authWaitMs - AUTH_HINT_DELAY_MS).coerceAtLeast(0)) { handshake.join(); true } ?: false
             }
             if (!done) {
                 candidate.close()

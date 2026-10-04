@@ -49,6 +49,10 @@ data class QuestState(
     val adb: AdbState = AdbState.DISCONNECTED,
     /** TCP 5555 answered in the last subnet scan (Wi-Fi adb on); null = not scanned yet. */
     val adbPortOpen: Boolean? = null,
+    /** ro.serialno; lets a saved Quest follow its new IP after a DHCP change. */
+    val serial: String = "",
+    /** Haptics state from the last READY haptics_on/off in the current foreground demo; null = unknown. */
+    val hapticsOn: Boolean? = null,
     val battery: Int? = null,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
@@ -66,7 +70,9 @@ data class LogEntry(
     val detail: String = "",
 )
 
-private class PendingCommand(val seq: Long, val demoId: String, val ip: String, val logId: Long, var terminal: Boolean = false)
+private class PendingCommand(
+    val seq: Long, val demoId: String, val ip: String, val logId: Long, val action: String, var terminal: Boolean = false,
+)
 
 class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsStore(app)
@@ -84,7 +90,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var authConfig by mutableStateOf(settings.authConfig); private set
     var authChosen by mutableStateOf(settings.authChosen); private set
     val quests = mutableStateListOf<QuestState>().apply {
-        addAll(settings.loadQuests().map { QuestState(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs) })
+        addAll(settings.loadQuests().map { QuestState(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, serial = it.serial) })
     }
     var selectedIp by mutableStateOf(settings.selectedIp); private set
     val logs = mutableStateListOf<LogEntry>()
@@ -248,7 +254,34 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun persistQuests() {
-        settings.saveQuests(quests.map { SavedQuest(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs) })
+        settings.saveQuests(quests.map { SavedQuest(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, it.serial) })
+    }
+
+    /** A new foreground demo starts with its own haptics state, so the remembered one no longer applies. */
+    private fun withForegroundDemo(quest: QuestState, demoId: String): QuestState =
+        quest.copy(lastDemoId = demoId, lastSeenAtMs = System.currentTimeMillis(),
+            hapticsOn = if (demoId == quest.lastDemoId) quest.hapticsOn else null)
+
+    /**
+     * [ip] turned out to be the headset [serial]. If a saved entry with the same serial sits on an
+     * older IP, carry its label (and selection) over to [ip] and drop the stale entry.
+     */
+    private fun adoptSerial(ip: String, serial: String) {
+        if (serial.isEmpty()) return
+        val stale = quests.firstOrNull { it.serial == serial && it.ip != ip }
+        updateQuest(ip) { it.copy(serial = serial, label = stale?.label ?: it.label) }
+        if (stale != null) {
+            adbConnections.remove(stale.ip)?.close()
+            quests.removeAll { it.ip == stale.ip }
+            if (selectedIp == stale.ip) {
+                stopMirror()
+                selectedIp = ip
+                settings.selectedIp = ip
+                mirrorVideoSize = null
+            }
+            addLog(stale.label, "IP が変わったため ${stale.ip} → $ip に更新しました", null, LogState.INFO)
+        }
+        persistQuests()
     }
 
     // ---- discovery -------------------------------------------------------------------------
@@ -275,6 +308,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
                 if (open.isNotEmpty()) persistQuests()
+                followSelectedQuest(open)
             } finally {
                 scanningAdb = false
             }
@@ -306,10 +340,35 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (quests.none { it.ip == source }) {
             quests.add(QuestState(source, "Quest ${quests.size + 1}"))
         }
-        updateQuest(source) {
-            it.copy(lastDemoId = here.currentDemoId, lastSeenAtMs = System.currentTimeMillis(), respondedLastRound = true)
-        }
+        updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
         persistQuests()
+    }
+
+    /**
+     * The selected Quest is gone from its saved IP (DHCP gave it a new one): try the other hosts with
+     * Wi-Fi adb open and re-select the one with the same serial. A headset that already trusts this
+     * phone answers at once; others time out quickly and are left alone.
+     */
+    private suspend fun followSelectedQuest(open: Set<String>) {
+        val target = selectedQuest ?: return
+        if (target.serial.isEmpty() || target.ip in open || target.adb != AdbState.DISCONNECTED) return
+        val keys = withContext(Dispatchers.IO) { keyPair }
+        for (ip in open) {
+            val entry = quests.firstOrNull { it.ip == ip }
+            if (entry != null && (entry.serial.isNotEmpty() || entry.adb != AdbState.DISCONNECTED)) continue
+            val adb = QuestAdb(ip, keys)
+            if (adb.connect(onAuthWaiting = {}, authWaitMs = FOLLOW_AUTH_WAIT_MS) != AdbConnectResult.Connected) continue
+            val serial = runCatching { adb.shell("getprop ro.serialno").output.trim() }.getOrDefault("")
+            if (serial != target.serial) { adb.close(); continue }
+            adbConnections.remove(ip)?.close()
+            adbConnections[ip] = adb
+            updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
+            adoptSerial(ip, serial)
+            adbMessage = ""
+            refreshAdbInfo(ip)
+            updateMirror()
+            return
+        }
     }
 
     // ---- receive -----------------------------------------------------------------------------
@@ -340,7 +399,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             "READY" -> {
                 command.terminal = true
                 updateLog(command.logId) { it.copy(state = LogState.READY) }
-                updateQuest(command.ip) { it.copy(lastDemoId = status.currentDemoId, lastSeenAtMs = System.currentTimeMillis()) }
+                updateQuest(command.ip) {
+                    val q = withForegroundDemo(it, status.currentDemoId)
+                    when (command.action) {
+                        "haptics_on" -> q.copy(hapticsOn = true)
+                        "haptics_off" -> q.copy(hapticsOn = false)
+                        else -> q
+                    }
+                }
                 persistQuests()
             }
             "FAILED" -> {
@@ -360,7 +426,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val seq = reserveSeq() ?: return@launch
             val payload = DemoSwitchProtocol.buildSwitch(controllerId, seq, demoId, config)
-            send(quest, seq, demoId, "切替 → ${DemoCatalog.labelFor(demoId)}", payload, SWITCH_TIMEOUT_MS)
+            send(quest, seq, demoId, "切替 → ${DemoCatalog.labelFor(demoId)}", payload, SWITCH_TIMEOUT_MS, "")
         }
     }
 
@@ -382,7 +448,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             }
             val seq = reserveSeq() ?: return@launch
             val payload = DemoSwitchProtocol.buildControl(controllerId, seq, current, control.action, control.sceneId, config)
-            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, CONTROL_TIMEOUT_MS)
+            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, CONTROL_TIMEOUT_MS, control.action)
         }
     }
 
@@ -412,9 +478,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun send(quest: QuestState, seq: Long, demoId: String, content: String, payload: String, timeoutMs: Long) {
+    private suspend fun send(
+        quest: QuestState, seq: Long, demoId: String, content: String, payload: String, timeoutMs: Long, action: String,
+    ) {
         val logId = addLog(quest.label, content, seq, LogState.SENT)
-        val command = PendingCommand(seq, demoId, quest.ip, logId)
+        val command = PendingCommand(seq, demoId, quest.ip, logId, action)
         pending[seq] = command
         if (!socket.send(quest.ip, payload)) {
             pending.remove(seq)
@@ -460,12 +528,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
             adbMessage = "adb 接続中…"
             val result = try {
-                adb.connect {
+                adb.connect(onAuthWaiting = {
                     viewModelScope.launch(Dispatchers.Main) {
                         updateQuest(ip) { it.copy(adb = AdbState.AUTH_WAIT) }
                         adbMessage = "ヘッドセット内で「このコンピューターから常に許可」にチェックして許可してください（最大 30 秒）"
                     }
-                }
+                })
             } catch (e: kotlinx.coroutines.CancellationException) {
                 updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
                 adbMessage = "adb 接続を中止しました"
@@ -520,6 +588,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshAdbInfo(ip: String) {
         val model = adbShell(ip, "getprop ro.product.model")?.output?.let { QuestAdb.parseModel(it) } ?: return
+        val serial = adbShell(ip, "getprop ro.serialno")?.output?.trim() ?: return
+        adoptSerial(ip, serial)
         val packages = adbShell(ip, "pm list packages")?.output?.let { QuestAdb.parsePackages(it) } ?: return
         val battery = adbShell(ip, "dumpsys battery")?.output?.let { QuestAdb.parseBatteryLevel(it) }
         updateQuest(ip) { it.copy(model = model, installed = packages, battery = battery) }
@@ -647,5 +717,6 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val BATTERY_INTERVAL_MS = 30_000L
         const val LAUNCH_REDISCOVER_DELAY_MS = 3_000L
         const val MAX_LOGS = 20
+        const val FOLLOW_AUTH_WAIT_MS = 3_000L
     }
 }

@@ -80,14 +80,18 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
             }
         } else {
             var mirrorCollapsed by rememberSaveable { mutableStateOf(false) }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                QuestBar(vm, onOpenSettings)
+            // Phone portrait: the mirror stays pinned at the top while the controls below scroll.
+            val mirrorHeight = (LocalConfiguration.current.screenHeightDp * 0.36f).dp
+            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 MirrorHeader(vm, collapsed = mirrorCollapsed, onToggleCollapsed = { mirrorCollapsed = !mirrorCollapsed })
-                if (!mirrorCollapsed) MirrorPane(vm, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-                ActionsAndLog(vm)
+                if (!mirrorCollapsed) MirrorPane(vm, Modifier.fillMaxWidth().height(mirrorHeight))
+                Column(
+                    Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    QuestBar(vm, onOpenSettings)
+                    ActionsAndLog(vm)
+                }
             }
         }
     }
@@ -236,6 +240,11 @@ private fun NoticeArea(vm: RemoteViewModel) {
 private fun SwitchTab(vm: RemoteViewModel) {
     val enabled = vm.demoSwitchBlockReason == null
     val current = vm.selectedQuest?.lastDemoId
+    Text(
+        "前面のデモに次のデモへの切替を頼みます（前面に Demo Switch 対応デモが必要）。Hub のチュートリアル付きセッションにはなりません",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     ButtonGrid(DemoCatalog.apps, columns = 2) { app, modifier ->
         ActionButton(app.label, enabled = enabled && app.demoId != current, modifier = modifier) { vm.sendSwitch(app.demoId) }
     }
@@ -250,6 +259,8 @@ private fun ControlTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    val haptics = when (vm.selectedQuest?.hapticsOn) { true -> "ON"; false -> "OFF"; null -> "不明" }
+    Text("触覚: $haptics（このアプリから最後に成功した操作。デモが替わると不明に戻ります）", style = MaterialTheme.typography.bodyMedium)
     ButtonGrid(ControlCatalog.actions, columns = 2) { control, modifier ->
         val allowed = enabled && (control.action != "scene" || isVolley)
         ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
@@ -261,7 +272,7 @@ private fun LaunchTab(vm: RemoteViewModel) {
     val quest = vm.selectedQuest
     val connected = quest?.adb == AdbState.CONNECTED
     Text(
-        if (connected) "adb で直接起動します（未インストールのアプリは無効）" else "adb 接続後に使えます",
+        if (connected) "Quest のアプリ一覧から起動するのと同じです。前面アプリに関係なく使えます（未インストールは無効）" else "adb 接続後に使えます",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

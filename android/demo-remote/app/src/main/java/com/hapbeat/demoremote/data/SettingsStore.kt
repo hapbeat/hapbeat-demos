@@ -19,6 +19,8 @@ data class SavedQuest(
     val model: String = "",
     val lastDemoId: String = "",
     val lastSeenAtMs: Long = 0,
+    /** ro.serialno from adb: identifies the headset when DHCP hands it a different IP. */
+    val serial: String = "",
 )
 
 data class MirrorSettings(
@@ -85,6 +87,7 @@ class SettingsStore(context: Context) : SequenceStore {
                     model = (f["model"] as? JsonString)?.value ?: "",
                     lastDemoId = (f["last_demo_id"] as? JsonString)?.value ?: "",
                     lastSeenAtMs = (f["last_seen_at"] as? JsonNumber)?.longOrNull() ?: 0,
+                    serial = (f["serial"] as? JsonString)?.value ?: "",
                 )
             }
         } catch (_: JsonException) {
@@ -98,7 +101,7 @@ class SettingsStore(context: Context) : SequenceStore {
         val json = MiniJson.write(quests.map {
             linkedMapOf(
                 "ip" to it.ip, "label" to it.label, "model" to it.model,
-                "last_demo_id" to it.lastDemoId, "last_seen_at" to it.lastSeenAtMs,
+                "last_demo_id" to it.lastDemoId, "last_seen_at" to it.lastSeenAtMs, "serial" to it.serial,
             )
         })
         prefs.edit().putString(KEY_QUESTS, json).apply()
