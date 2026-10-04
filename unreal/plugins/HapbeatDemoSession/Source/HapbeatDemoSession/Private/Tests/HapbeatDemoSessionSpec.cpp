@@ -8,6 +8,7 @@
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionUi.h"
+#include "Components/WidgetComponent.h"
 #include "HapbeatDemoSessionPanelAnchor.h"
 #include "HapbeatDemoSessionPause.h"
 #include "HapbeatDemoSessionHandoff.h"
@@ -715,7 +716,7 @@ void FHapbeatDemoSessionSpec::Define()
             const float NewFacing=T.GetRotation().Rotator().Yaw+(110-90);
             TestTrue(TEXT("facing the start yaw"),FMath::IsNearlyZero(FRotator::NormalizeAxis(NewFacing),.01f));
         });
-        It(TEXT("the 視線をリセット button presses like the haptics button and reports the controls' heading"),[this]()
+        It(TEXT("the 視線をリセット button presses like the haptics button and sits where Unity puts it"),[this]()
         {
             UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
             ON_SCOPE_EXIT { World->DestroyWorld(false); };
@@ -723,31 +724,47 @@ void FHapbeatDemoSessionSpec::Define()
             if(!TestNotNull(TEXT("ui"),Ui)) return;
             const FVector Eye(0,0,160);
             Ui->SetRecenterButton(true);
+            Ui->SetHapticsButton(true,true);
             FHapbeatSessionPointerInput None;
-            Ui->Step(None,Eye,FRotator(0,40,0),.1f);
-            TestTrue(TEXT("heading from the head"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
-            // A glance 20 deg down-left (inside the dead zone) keeps the heading.
-            Ui->Step(None,Eye,FRotator(-30,20,0),.1f);
-            TestTrue(TEXT("a glance keeps it"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
-            // The pair: 45 cm away, 15 deg left of the heading, 30 deg down; 視線をリセット on the left, haptics on the
-            // right, 112 x 68 mm plates 8 mm apart (side by side, not overlapping), each facing the eye.
+            // Unity DemoSessionCornerButtons: 45 cm away, 30 deg down; 視線をリセット 19.5 deg and haptics 5 deg left
+            // of the heading, 88 x 64 mm plates about 10 mm apart (side by side, level, not overlapping), facing the eye.
             const FVector Centre=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,40,true);
             const FVector Haptics=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,40,false);
-            const FVector Pair=Eye+FRotator(-30,40-15,0).Vector()*45.f;
-            TestTrue(TEXT("pair centre"),((Centre+Haptics)*.5f).Equals(Pair,.01f));
-            TestTrue(TEXT("12 cm apart, level"),FMath::IsNearlyEqual(FVector::Dist(Centre,Haptics),12.f,.01f)&&FMath::IsNearlyEqual(Centre.Z,Haptics.Z,.01f));
-            TestTrue(TEXT("reset on the left"),FVector::DotProduct(Haptics-Centre,FRotator(0,25,0).Quaternion().GetRightVector())>0);
+            TestTrue(TEXT("reset at -19.5 deg"),Centre.Equals(Eye+FRotator(-30,40-19.5f,0).Vector()*45.f,.01f));
+            TestTrue(TEXT("haptics at -5 deg"),Haptics.Equals(Eye+FRotator(-30,40-5,0).Vector()*45.f,.01f));
+            const float Gap=FVector::Dist(Centre,Haptics)*10.f-88.f;
+            TestTrue(TEXT("about 10 mm apart, level"),Gap>9.f&&Gap<11.f&&FMath::IsNearlyEqual(Centre.Z,Haptics.Z,.01f));
+            TestTrue(TEXT("reset on the left"),FVector::DotProduct(Haptics-Centre,FRotator(0,40,0).Quaternion().GetRightVector())>0);
+            // Placed at once from the head's heading; the head's pitch is ignored.
+            Ui->Step(None,Eye,FRotator(-50,40,0),.1f);
+            TArray<UWidgetComponent*> Widgets;Ui->GetComponents(Widgets);
+            auto Find=[&Widgets](const TCHAR* Name){for(UWidgetComponent* W:Widgets) if(W->GetName()==Name) return W;return (UWidgetComponent*)nullptr;};
+            UWidgetComponent* ResetWidget=Find(TEXT("RecenterButton"));UWidgetComponent* HapticsWidget=Find(TEXT("HapticsButton"));
+            if(!TestNotNull(TEXT("widgets"),ResetWidget)||!TestNotNull(TEXT("haptics widget"),HapticsWidget)) return;
+            TestTrue(TEXT("reset placed"),ResetWidget->GetComponentLocation().Equals(Centre,.01f));
+            TestTrue(TEXT("haptics placed"),HapticsWidget->GetComponentLocation().Equals(Haptics,.01f));
+            TestTrue(TEXT("facing the eye"),ResetWidget->GetForwardVector().Equals((Eye-Centre).GetSafeNormal(),.001f));
+            TestTrue(TEXT("88 x 64 mm"),ResetWidget->GetDrawSize().Equals(FVector2D(176,128))&&HapticsWidget->GetDrawSize().Equals(FVector2D(176,128)));
+            // Hiding one keeps the other where it is.
+            Ui->SetHapticsButton(false,true);Ui->Step(None,Eye,FRotator(0,40,0),.1f);
+            TestTrue(TEXT("reset stays"),ResetWidget->GetComponentLocation().Equals(Centre,.01f));
+            // Then it follows a head turn slowly (1 - e^(-2.5 dt) of the way per frame), not at once.
+            Ui->Step(None,Eye,FRotator(0,80,0),.1f);
+            const FVector Turned=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,80,true);
+            TestTrue(TEXT("follows slowly"),ResetWidget->GetComponentLocation().Equals(FMath::Lerp(Centre,Turned,1.f-FMath::Exp(-.25f)),.01f));
+            Ui->SetRecenterButton(false);Ui->SetRecenterButton(true);Ui->Step(None,Eye,FRotator(0,40,0),.1f);
+            // Looking down at the button (same heading) keeps it still.
             const FTransform At((Eye-Centre).Rotation(),Centre);
-            const FVector2D Plate(224,136);
+            const FVector2D Plate(176,128);
             FHapbeatSessionPointerInput In;In.bFinger[0]=true;In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);
-            TestFalse(TEXT("approach"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
+            TestFalse(TEXT("approach"),Ui->Step(In,Eye,FRotator(-30,40,0),.1f).bRecenter);
             In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
-            const auto E=Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            const auto E=Ui->Step(In,Eye,FRotator(-30,40,0),.1f);
             TestTrue(TEXT("pressed"),E.bRecenter);TestFalse(TEXT("not haptics"),E.bToggleHaptics);
             Ui->SetRecenterButton(false);
-            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);Ui->Step(In,Eye,FRotator(-30,40,0),.1f);
             In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
-            TestFalse(TEXT("hidden: nothing"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
+            TestFalse(TEXT("hidden: nothing"),Ui->Step(In,Eye,FRotator(-30,40,0),.1f).bRecenter);
         });
     });
     Describe(TEXT("Handoff"),[this]()

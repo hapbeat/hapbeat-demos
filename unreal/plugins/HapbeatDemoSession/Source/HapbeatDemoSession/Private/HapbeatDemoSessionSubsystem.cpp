@@ -525,7 +525,7 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     // While a launch waits for the background the panels stay up, but nothing else is started from them.
     if(IsLeaving()) return;
     if(E.bToggleHaptics) SetHapticsEnabled(!bHapticsEnabled);
-    if(E.bRecenter) RecenterView(View->GetControlsYaw(),TEXT("button"));
+    if(E.bRecenter) RecenterView(Rotation.Yaw,TEXT("button"));
     if(E.bRetry) {
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RETRY step=%d"),Ticket.Index+1);
         HideCompletion();OnRestartRequested.Broadcast();

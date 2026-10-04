@@ -123,15 +123,11 @@ public:
     void SetHapticsButton(bool bVisible,bool bOn);
     void SetRecenterButton(bool bVisible);
     /**
-     * World yaw the in-view buttons are placed from. It follows the head only once it has turned more than a dead
-     * zone away, so it stays the user's facing while they glance down-left at a button.
+     * Centre of an in-view button for the head's heading (world yaw), as in Unity's DemoSessionCornerButtons: 45 cm
+     * from the eye, 30 deg below the horizon, 視線をリセット (bRecenter) 19.5 deg and haptics 5 deg left of the heading;
+     * 88 x 64 mm each, about 10 mm apart.
      */
-    float GetControlsYaw() const {return ControlsYaw;}
-    /**
-     * Centre of an in-view button for a controls heading (world yaw): the pair sits 15 deg left of it and 30 deg below
-     * the horizon, 45 cm from the eye; 視線をリセット (bRecenter) on the left, haptics on the right, 112 x 68 mm each.
-     */
-    static FVector InViewButtonLocation(const FVector& Eye,float ControlsYaw,bool bRecenter);
+    static FVector InViewButtonLocation(const FVector& Eye,float HeadingYaw,bool bRecenter);
     FEvents Step(const FHapbeatSessionPointerInput& Input,const FVector& Eye,const FRotator& ViewRotation,float Dt);
 private:
     /** One floating panel's input and look state; its widget is CompletionPanel / PausePanel / HapticsButton / RecenterButton. */
@@ -154,6 +150,7 @@ private:
     {
         FPanel Face;
         FVector Location=FVector::ZeroVector;
+        FQuat Rotation=FQuat::Identity;
         bool bPlaced=false;
     };
     void BuildCompletionWidget();
@@ -184,6 +181,5 @@ private:
     int32 RetryButton=INDEX_NONE, NextButton=INDEX_NONE;
     int32 ResumeButton=INDEX_NONE, RestartButton=INDEX_NONE, PauseNextButton=INDEX_NONE, HubButton=INDEX_NONE;
     FString PauseNextLabel;
-    bool bHapticsOn=true, bControlsPlaced=false;
-    float ControlsYaw=0;
+    bool bHapticsOn=true;
 };
