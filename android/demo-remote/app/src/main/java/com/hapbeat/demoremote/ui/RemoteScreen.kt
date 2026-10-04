@@ -68,8 +68,8 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
         if (wide) {
             Row(Modifier.fillMaxSize().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1.5f).fillMaxHeight()) {
-                    MirrorHeader(vm, collapsed = false, onToggleCollapsed = null)
-                    MirrorPane(vm, Modifier.fillMaxWidth().weight(1f))
+                    MirrorHeader(vm)
+                    if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().weight(1f))
                 }
                 Column(
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
@@ -79,12 +79,12 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
                 }
             }
         } else {
-            var mirrorCollapsed by rememberSaveable { mutableStateOf(false) }
             // Phone portrait: the mirror stays pinned at the top while the controls below scroll.
             val mirrorHeight = (LocalConfiguration.current.screenHeightDp * 0.36f).dp
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                MirrorHeader(vm, collapsed = mirrorCollapsed, onToggleCollapsed = { mirrorCollapsed = !mirrorCollapsed })
-                if (!mirrorCollapsed) MirrorPane(vm, Modifier.fillMaxWidth().height(mirrorHeight))
+                MirrorHeader(vm)
+                // ON opens the pane, OFF closes it: no separate collapse button.
+                if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().height(mirrorHeight))
                 Column(
                     Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -185,7 +185,8 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
             Text(
                 if (battery == null) "電池 --%" else "電池 $battery%",
                 color = if (battery != null && battery <= 20) StatusRed else Color.Unspecified,
-                modifier = Modifier.width(72.dp),
+                maxLines = 1,
+                modifier = Modifier.width(104.dp),
             )
         }
         // adb status / guidance: fixed two-line area so messages never shift the layout.
@@ -300,9 +301,10 @@ private fun SessionTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("プリセット", style = MaterialTheme.typography.bodyMedium)
         (1..3).forEach { preset ->
-            ActionButton("プリセット $preset", enabled = connected, modifier = Modifier.weight(1f)) { vm.startSession(preset = preset) }
+            ActionButton("$preset", enabled = connected, modifier = Modifier.weight(1f)) { vm.startSession(preset = preset) }
         }
     }
     var tutorial by rememberSaveable { mutableStateOf<String?>(null) }
@@ -375,14 +377,14 @@ private fun LogRow(entry: LogEntry) {
 // ---- mirror ---------------------------------------------------------------------------------
 
 @Composable
-private fun MirrorHeader(vm: RemoteViewModel, collapsed: Boolean, onToggleCollapsed: (() -> Unit)?) {
+private fun MirrorHeader(vm: RemoteViewModel) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("画面ミラー", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-        if (vm.mirrorStatus.startsWith("ミラーエラー")) TextButton(onClick = vm::retryMirror) { Text("再試行") }
-        Switch(checked = vm.mirrorEnabled, onCheckedChange = vm::changeMirrorEnabled)
-        if (onToggleCollapsed != null) {
-            TextButton(onClick = onToggleCollapsed, modifier = Modifier.width(88.dp)) { Text(if (collapsed) "開く" else "たたむ") }
+        // Fixed width whether or not the retry button is shown.
+        Box(Modifier.width(88.dp)) {
+            if (vm.mirrorEnabled && vm.mirrorStatus.startsWith("ミラーエラー")) TextButton(onClick = vm::retryMirror) { Text("再試行") }
         }
+        Switch(checked = vm.mirrorEnabled, onCheckedChange = vm::changeMirrorEnabled)
     }
 }
 
@@ -405,9 +407,8 @@ private fun MirrorPane(vm: RemoteViewModel, modifier: Modifier) {
                 modifier = Modifier.aspectRatio(aspect),
             )
         }
-        val status = if (vm.mirrorEnabled) vm.mirrorStatus else "ミラーは OFF です"
-        if (status.isNotEmpty()) {
-            Text(status, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+        if (vm.mirrorStatus.isNotEmpty()) {
+            Text(vm.mirrorStatus, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
         }
     }
 }

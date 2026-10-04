@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.hapbeat.demoremote.protocol.AuthConfig
 import com.hapbeat.demoremote.protocol.JsonArray
 import com.hapbeat.demoremote.protocol.JsonException
+import com.hapbeat.demoremote.protocol.JsonBool
 import com.hapbeat.demoremote.protocol.JsonNumber
 import com.hapbeat.demoremote.protocol.JsonObject
 import com.hapbeat.demoremote.protocol.JsonString
@@ -21,6 +22,8 @@ data class SavedQuest(
     val lastSeenAtMs: Long = 0,
     /** ro.serialno from adb: identifies the headset when DHCP hands it a different IP. */
     val serial: String = "",
+    /** Added by hand in settings; kept even before adb has identified it. */
+    val manual: Boolean = false,
 )
 
 data class MirrorSettings(
@@ -88,6 +91,7 @@ class SettingsStore(context: Context) : SequenceStore {
                     lastDemoId = (f["last_demo_id"] as? JsonString)?.value ?: "",
                     lastSeenAtMs = (f["last_seen_at"] as? JsonNumber)?.longOrNull() ?: 0,
                     serial = (f["serial"] as? JsonString)?.value ?: "",
+                    manual = (f["manual"] as? JsonBool)?.value ?: false,
                 )
             }
         } catch (_: JsonException) {
@@ -101,7 +105,7 @@ class SettingsStore(context: Context) : SequenceStore {
         val json = MiniJson.write(quests.map {
             linkedMapOf(
                 "ip" to it.ip, "label" to it.label, "model" to it.model,
-                "last_demo_id" to it.lastDemoId, "last_seen_at" to it.lastSeenAtMs, "serial" to it.serial,
+                "last_demo_id" to it.lastDemoId, "last_seen_at" to it.lastSeenAtMs, "serial" to it.serial, "manual" to it.manual,
             )
         })
         prefs.edit().putString(KEY_QUESTS, json).apply()

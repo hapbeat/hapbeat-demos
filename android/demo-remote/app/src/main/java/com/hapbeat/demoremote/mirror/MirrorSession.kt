@@ -48,7 +48,8 @@ object ScrcpyLaunch {
  * reads the H.264 stream and renders it to [surface] with MediaCodec. No audio, no input.
  */
 class MirrorSession(
-    private val dadb: Dadb,
+    /** Opens a dedicated adb connection: the video stream never shares (or stalls) the control one. */
+    private val connect: () -> Dadb,
     private val serverJar: () -> InputStream,
     private val settings: MirrorSettings,
     private val surface: Surface,
@@ -62,6 +63,7 @@ class MirrorSession(
     private class RestartNeeded : Exception()
 
     @Volatile private var stopped = false
+    @Volatile private var dadb: Dadb? = null
     private val codecLock = Any()
     private var codec: MediaCodec? = null
     @Volatile private var shell: AdbShellStream? = null
@@ -100,6 +102,8 @@ class MirrorSession(
     }
 
     private fun runSession() {
+        val dadb = connect().also { this.dadb = it }
+        if (stopped) return
         val push = serverJar().use { input ->
             dadb.push(input.source(), ScrcpyLaunch.REMOTE_JAR, 0b110100100, System.currentTimeMillis())
         }
@@ -213,6 +217,8 @@ class MirrorSession(
         video = null
         shell?.let { runCatching { it.close() } }
         shell = null
+        dadb?.let { runCatching { it.close() } }
+        dadb = null
     }
 
     private fun drainShell(stream: AdbShellStream) {

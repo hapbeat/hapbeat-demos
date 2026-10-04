@@ -24,6 +24,7 @@ import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
 import com.hapbeat.demoremote.protocol.SequenceReservation
 import com.hapbeat.demoremote.protocol.SequenceReserver
 import dadb.AdbKeyPair
+import dadb.Dadb
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,6 +56,8 @@ data class QuestState(
     val hapticsOn: Boolean? = null,
     /** Last STATE reply (QUERY); null when the receiver does not support QUERY or the demo changed. */
     val remoteState: DemoSwitchMessage.State? = null,
+    /** Added by hand; kept (and saved) even before adb has identified it. */
+    val manual: Boolean = false,
     val battery: Int? = null,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
@@ -92,7 +95,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var authConfig by mutableStateOf(settings.authConfig); private set
     var authChosen by mutableStateOf(settings.authChosen); private set
     val quests = mutableStateListOf<QuestState>().apply {
-        addAll(settings.loadQuests().map { QuestState(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, serial = it.serial) })
+        // Only headsets identified by adb (serial) or added by hand are remembered; a Demo Switch responder seen
+        // once (e.g. a PC running a demo in the editor) is not. Older "Quest N" labels read like model names.
+        addAll(settings.loadQuests().filter { it.serial.isNotEmpty() || it.manual }.map {
+            QuestState(it.ip, it.label.replace(Regex("^Quest (\\d+)$"), "HMD #$1"), it.model, "", it.lastSeenAtMs,
+                serial = it.serial, manual = it.manual)
+        })
     }
     var selectedIp by mutableStateOf(settings.selectedIp); private set
     val logs = mutableStateListOf<LogEntry>()
@@ -232,7 +240,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val trimmed = ip.trim()
         if (!DemoSwitchProtocol.isUnicastIpv4(trimmed)) return false
         if (quests.any { it.ip == trimmed }) return true
-        quests.add(QuestState(trimmed, label.ifBlank { "Quest ${quests.size + 1}" }))
+        quests.add(QuestState(trimmed, label.ifBlank { nextLabel() }, manual = true))
         persistQuests()
         return true
     }
@@ -258,8 +266,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (i >= 0) quests[i] = block(quests[i])
     }
 
+    /** "HMD #n" with the smallest unused n ("Quest n" would read like a model name). */
+    private fun nextLabel(): String {
+        val used = quests.mapNotNull { Regex("^HMD #(\\d+)$").find(it.label)?.groupValues?.get(1)?.toInt() }.toSet()
+        return "HMD #" + generateSequence(1) { it + 1 }.first { it !in used }
+    }
+
     private fun persistQuests() {
-        settings.saveQuests(quests.map { SavedQuest(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, it.serial) })
+        settings.saveQuests(quests.filter { it.serial.isNotEmpty() || it.manual }.map {
+            SavedQuest(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, it.serial, it.manual)
+        })
     }
 
     /** A new foreground demo starts with its own haptics state, so the remembered one no longer applies. */
@@ -310,7 +326,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 val hosts = AdbPortScanner.subnetHosts(local.address.address, local.prefixLength)
                 val open = AdbPortScanner.scan(hosts).toSet()
                 open.filter { ip -> quests.none { it.ip == ip } }.forEach { ip ->
-                    quests.add(QuestState(ip, "Quest ${quests.size + 1}"))
+                    quests.add(QuestState(ip, nextLabel()))
                 }
                 quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
                 if (open.isNotEmpty()) persistQuests()
@@ -338,13 +354,23 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         quests.map { it.ip }.forEach { socket.send(it, payload) }
         delay(DISCOVERY_WINDOW_MS)
         activeNonces.remove(nonce)
-        quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = quests[it].ip in responders) }
+        quests.indices.forEach {
+            val q = quests[it]
+            // No answer: whatever was in front before is no longer known (home screen, asleep, other app).
+            quests[it] = if (q.ip in responders) q.copy(respondedLastRound = true)
+            else q.copy(respondedLastRound = false, lastDemoId = "", remoteState = null)
+        }
+        // Forget unidentified responders that went quiet (never adb, not added by hand, not selected).
+        quests.removeAll {
+            it.serial.isEmpty() && !it.manual && it.respondedLastRound == false && it.adbPortOpen != true &&
+                it.adb == AdbState.DISCONNECTED && it.ip != selectedIp
+        }
         discovering = false
     }
 
     private fun onHere(source: String, here: DemoSwitchMessage.Here) {
         if (quests.none { it.ip == source }) {
-            quests.add(QuestState(source, "Quest ${quests.size + 1}"))
+            quests.add(QuestState(source, nextLabel()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
         persistQuests()
@@ -551,7 +577,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             val keys = withContext(Dispatchers.IO) { keyPair } // first use generates RSA-2048
             val adb = adbConnections.getOrPut(ip) { QuestAdb(ip, keys) }
             updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
-            adbMessage = "adb 接続中…"
+            // Elapsed seconds so a slow handshake reads as progress, not a hang.
+            val startedAt = System.currentTimeMillis()
+            val ticker = launch {
+                while (isActive) {
+                    val s = (System.currentTimeMillis() - startedAt) / 1000
+                    if (quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTING) adbMessage = "adb 接続中…（${s} 秒）"
+                    delay(1_000)
+                }
+            }
             val result = try {
                 adb.connect(onAuthWaiting = {
                     viewModelScope.launch(Dispatchers.Main) {
@@ -563,7 +597,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
                 adbMessage = "adb 接続を中止しました"
                 throw e
+            } finally {
+                ticker.cancel()
             }
+            val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+            if (result != AdbConnectResult.Connected) addLog(label, "adb 接続 $ip", null, LogState.ERROR, result.toString())
             when (result) {
                 AdbConnectResult.Connected -> {
                     updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
@@ -594,7 +632,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null) }
         if (ip == selectedIp) {
             stopMirror()
-            adbMessage = "adb 接続が切れました。再接続してください"
+            adbMessage = "adb 接続が切れました。再接続しています…"
+            // One automatic retry (Quest woke up / Wi-Fi came back); a failure shows its own guidance.
+            if (foreground) connectAdb()
         }
     }
 
@@ -720,12 +760,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!foreground) return
         val ip = selectedIp ?: run { mirrorStatus = "Quest を選択してください"; return }
         val surface = mirrorSurface ?: return
-        val adb = adbConnections[ip]?.dadb
-        if (adb == null || selectedQuest?.adb != AdbState.CONNECTED) { mirrorStatus = "adb 接続後に表示します"; return }
+        if (adbConnections[ip]?.dadb == null || selectedQuest?.adb != AdbState.CONNECTED) { mirrorStatus = "adb 接続後に表示します"; return }
         val app = getApplication<Application>()
         mirrorStatus = "ミラー開始中…"
         var session: MirrorSession? = null
-        session = MirrorSession(adb, { app.assets.open("scrcpy-server.jar") }, mirrorSettings, surface,
+        session = MirrorSession({ Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, 0) },
+            { app.assets.open("scrcpy-server.jar") }, mirrorSettings, surface,
             object : MirrorSession.Listener {
                 override fun onVideoSize(width: Int, height: Int) {
                     viewModelScope.launch(Dispatchers.Main) {

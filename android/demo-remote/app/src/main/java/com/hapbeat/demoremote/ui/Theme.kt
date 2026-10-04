@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -30,13 +31,16 @@ fun AppTheme(content: @Composable () -> Unit) {
 /** Minimum touch height for every action button (56dp). */
 val ButtonMinHeight = 56.dp
 
+/** Grids of buttons read better as tiles than as rows of capsules. */
+private val ButtonShape = RoundedCornerShape(6.dp)
+
 @Composable
 fun ActionButton(text: String, enabled: Boolean, modifier: Modifier = Modifier, outlined: Boolean = false, onClick: () -> Unit) {
     val m = modifier.heightIn(min = ButtonMinHeight)
     if (outlined) {
-        OutlinedButton(onClick = onClick, enabled = enabled, modifier = m) { Text(text, textAlign = TextAlign.Center) }
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = m, shape = ButtonShape) { Text(text, textAlign = TextAlign.Center) }
     } else {
-        Button(onClick = onClick, enabled = enabled, modifier = m) { Text(text, textAlign = TextAlign.Center) }
+        Button(onClick = onClick, enabled = enabled, modifier = m, shape = ButtonShape) { Text(text, textAlign = TextAlign.Center) }
     }
 }
 

@@ -98,10 +98,22 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
         }
     }
 
-    /** Runs a shell command; any I/O failure means the connection is gone (caller marks it disconnected). */
-    suspend fun shell(command: String): AdbShellResponse = withContext(Dispatchers.IO) {
+    /**
+     * Runs a shell command; any I/O failure means the connection is gone (caller marks it disconnected).
+     * dadb reads with no socket timeout, so a connection that died silently (Quest asleep, Wi-Fi drop)
+     * would block forever: the call runs detached and the connection is closed after [timeoutMs].
+     */
+    suspend fun shell(command: String, timeoutMs: Long = SHELL_TIMEOUT_MS): AdbShellResponse {
         val d = dadb ?: throw IOException("adb not connected")
-        d.shell(command)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val call = scope.async { d.shell(command) }
+        val done = withTimeoutOrNull(timeoutMs) { call.join(); true } ?: false
+        if (!done) {
+            close() // unblocks the parked read
+            scope.cancel()
+            throw IOException("adb did not answer within ${timeoutMs / 1000} s")
+        }
+        return call.await()
     }
 
     fun close() {
@@ -119,6 +131,7 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
         const val CONNECT_TIMEOUT_MS = 3000
         const val AUTH_WAIT_MS = 30_000L
         const val AUTH_HINT_DELAY_MS = 1500L
+        const val SHELL_TIMEOUT_MS = 10_000L
 
         fun parseModel(output: String): String = output.trim()
 
