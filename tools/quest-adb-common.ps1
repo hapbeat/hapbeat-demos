@@ -12,8 +12,9 @@ function Get-QuestAdb {
 }
 
 function Get-OnlineDevices([string]$adb) {
+    # Only headsets: other Android devices on adb (e.g. the Demo Switch remote phone) are skipped.
     & $adb devices | Select-String '^(\S+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value } |
-        Where-Object { $_ -notmatch '^emulator-' }
+        Where-Object { $_ -notmatch '^emulator-' } | Where-Object { (Get-QuestModel $adb $_) -match 'Quest' }
 }
 
 function Get-KnownQuestIps {
