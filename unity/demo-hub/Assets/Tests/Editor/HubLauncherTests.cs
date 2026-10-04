@@ -527,6 +527,120 @@ namespace Hapbeat.DemoHub.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        [TestCase("{\"version\":1,\"preset\":1}", 1, null)]
+        [TestCase("{\"version\":1,\"preset\":3}", 3, null)]
+        [TestCase("{\"version\":1,\"demo_id\":\"handdemo\",\"options\":{\"tutorial\":\"on\"}}", 0, "handdemo")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\"}", 0, "volley")]
+        public void ExternalStartAcceptsAPresetOrOneDemo(string json, int preset, string demoId)
+        {
+            Assert.That(HubStartRequest.TryParse(json, out var request, out var error), Is.True, error);
+            Assert.That(request.Preset, Is.EqualTo(preset));
+            Assert.That(request.DemoId, Is.EqualTo(demoId));
+        }
+
+        [TestCase("")]
+        [TestCase("not json")]
+        [TestCase("[]")]
+        [TestCase("{\"version\":2,\"preset\":1}")]
+        [TestCase("{\"version\":1}")]
+        [TestCase("{\"version\":1,\"preset\":0}")]
+        [TestCase("{\"version\":1,\"preset\":4}")]
+        [TestCase("{\"version\":1,\"preset\":\"1\"}")]
+        [TestCase("{\"version\":1,\"preset\":1,\"demo_id\":\"volley\"}")]
+        [TestCase("{\"version\":1,\"preset\":1,\"options\":{}}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"Volley\"}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"package\":\"evil.app\"}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"points\":3}}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"demo_id\":\"boxing\"}")]
+        [TestCase("{\"version\":1,\"preset\":1} {}")]
+        public void ExternalStartRejectsInvalidRequests(string json)
+        {
+            Assert.That(HubStartRequest.TryParse(json, out var request, out var error), Is.False);
+            Assert.That(request, Is.Null);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        [Test]
+        public void ExternalStartRejectsOver4096Bytes()
+        {
+            var json = "{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"scene\":\"" + new string('x', HubStartRequest.MaxBytes) + "\"}}";
+            Assert.That(HubStartRequest.TryParse(json, out _, out _), Is.False);
+        }
+
+        [Test]
+        public void ExternalStartBuildsTheTicketWithManageSettings()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var settings = new HubSettings { HapticsUi = true, RecenterUi = true, HandStyle = DemoHandStyle.Skin };
+            var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
+            presets[0].Add(_volley);
+            presets[0].Add(_trex);
+            presets[1].Steps.Add(new HubPlanStep("not-installed", null, true));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":1}", out var request, out var error), Is.True, error);
+            var ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
+            Assert.That(ticket, Is.Not.Null, error);
+            Assert.That(ticket.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
+            Assert.That(ticket.HapticsUi && ticket.RecenterUi, Is.True);
+            Assert.That(ticket.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":2}", out request, out _), Is.True);
+            Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error), Is.Null);
+            Assert.That(error, Is.EqualTo(string.Format(HubText.StartPresetEmpty, 2)));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"handdemo\"}", out request, out _), Is.True);
+            Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error), Is.Null);
+            Assert.That(error, Is.EqualTo(HubText.StartNotInstalled + "handdemo"));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\",\"balls\":\"99\",\"speed\":\"fast\"}}", out request, out _), Is.True);
+            LogAssert.Expect(LogType.Warning, new Regex("balls=99"));
+            LogAssert.Expect(LogType.Warning, new Regex("speed=fast"));
+            ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
+            Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out error), Is.True, error);
+            Assert.That(parsed.Steps.Count, Is.EqualTo(1));
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["balls"] = "10" }),
+                "Given value kept, unknown value and option replaced by the defaults, inactive options left out.");
+            Assert.That(parsed.Steps[0].Retry, Is.True);
+            Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
+            Assert.That(parsed.HapticsUi, Is.True);
+            Assert.That(parsed.RecenterUi, Is.True);
+            Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+        }
+
+        [Test]
+        public void RejectedOrFailedExternalStartOpensTheTopWithTheReason()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                LogAssert.Expect(LogType.Warning, new Regex("External start rejected"));
+                controller.StartExternal("{\"version\":1,\"demo_id\":\"handdemo\"}");
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller), Has.Member(HubText.StartRejected + HubText.StartNotInstalled + "handdemo"));
+
+                controller.Show(DemoHubController.HubScreen.Manage);
+                LogAssert.Expect(LogType.Warning, new Regex("External start rejected"));
+                controller.StartExternal("{\"version\":1,\"preset\":9}");
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.StartRejected)), Is.True);
+
+                // Accepted, but the Editor cannot start applications: the top screen shows the launch error.
+                Object.DestroyImmediate(go);
+                go = new GameObject("hub test");
+                controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
+                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
+                controller.StartExternal("{\"version\":1,\"demo_id\":\"boxing\"}");
+                Assert.That(controller.Panel, Is.Not.Null);
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         static List<string> Texts(DemoHubController controller) =>
             controller.Panel.GetComponentsInChildren<UnityEngine.UI.Text>().Select(t => t.text).ToList();
     }

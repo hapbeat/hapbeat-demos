@@ -85,6 +85,78 @@ namespace Hapbeat.DemoSwitch
         public string Auth { get; }
     }
 
+    internal sealed class DemoSwitchQuery
+    {
+        public DemoSwitchQuery(string controllerId, string nonce, string auth)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public string Auth { get; }
+    }
+
+    /// <summary>The foreground runtime's answer to <see cref="DemoSwitchQuery"/> (contracts: State query).</summary>
+    internal sealed class DemoSwitchState
+    {
+        public DemoSwitchState(string controllerId, string nonce, string currentDemoId, bool hapticsOn, bool hapticsUi,
+            bool recenterUi, bool paused, int stepIndex, int stepCount, string auth = "")
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            CurrentDemoId = currentDemoId;
+            HapticsOn = hapticsOn;
+            HapticsUi = hapticsUi;
+            RecenterUi = recenterUi;
+            Paused = paused;
+            StepIndex = stepIndex;
+            StepCount = stepCount;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public string CurrentDemoId { get; }
+        public bool HapticsOn { get; }
+        public bool HapticsUi { get; }
+        public bool RecenterUi { get; }
+        public bool Paused { get; }
+        /// <summary>0-based Demo Session step; -1 outside a session.</summary>
+        public int StepIndex { get; }
+        /// <summary>0 outside a session.</summary>
+        public int StepCount { get; }
+        public string Auth { get; }
+    }
+
+    internal readonly struct QueryParseResult
+    {
+        public QueryParseResult(DemoSwitchQuery query, string errorMessage)
+        {
+            Query = query;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Query != null;
+        public DemoSwitchQuery Query { get; }
+        public string ErrorMessage { get; }
+    }
+
+    internal readonly struct StateParseResult
+    {
+        public StateParseResult(DemoSwitchState state, string errorMessage)
+        {
+            State = state;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => State != null;
+        public DemoSwitchState State { get; }
+        public string ErrorMessage { get; }
+    }
+
     internal readonly struct CommandParseResult
     {
         public CommandParseResult(DemoSwitchCommand command, string errorCode, string errorMessage)
@@ -148,6 +220,14 @@ namespace Hapbeat.DemoSwitch
         private static readonly string[] StatusFields = { "version", "type", "controller_id", "seq", "demo_id", "current_demo_id", "code", "message", "auth" };
         private static readonly string[] DiscoverFields = { "version", "type", "controller_id", "nonce", "auth" };
         private static readonly string[] HereFields = { "version", "type", "controller_id", "nonce", "current_demo_id", "auth" };
+        private static readonly string[] QueryFields = { "version", "type", "controller_id", "nonce", "auth" };
+        private static readonly string[] StateFields =
+        {
+            "version", "type", "controller_id", "nonce", "current_demo_id", "haptics_on", "haptics_ui", "recenter_ui",
+            "paused", "step_index", "step_count", "auth"
+        };
+        /// <summary>Schema bound of `step_index` / `step_count` (a ticket has at most 32 steps).</summary>
+        public const int MaxStateSteps = 32;
         private static readonly HashSet<string> StatusTypes = new HashSet<string>(StringComparer.Ordinal) { "ACK", "READY", "FAILED" };
         private static readonly HashSet<string> StatusCodes = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -372,8 +452,111 @@ namespace Hapbeat.DemoSwitch
             return json;
         }
 
+        public static QueryParseResult ParseQuery(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new QueryParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !QueryFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new QueryParseResult(null, "QUERY contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "QUERY" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce))
+                    return new QueryParseResult(null, "QUERY is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new QueryParseResult(null, "QUERY auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new QueryParseResult(null, "QUERY auth is invalid.");
+                }
+                return new QueryParseResult(new DemoSwitchQuery(controllerId, nonce, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new QueryParseResult(null, exception.Message);
+            }
+        }
+
+        public static StateParseResult ParseState(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new StateParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !StateFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new StateParseResult(null, "STATE contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "STATE" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce) ||
+                    !TryString(value, "current_demo_id", out var currentDemoId) || !IsIdentifier(currentDemoId) ||
+                    !TryBoolean(value, "haptics_on", out var hapticsOn) || !TryBoolean(value, "haptics_ui", out var hapticsUi) ||
+                    !TryBoolean(value, "recenter_ui", out var recenterUi) || !TryBoolean(value, "paused", out var paused) ||
+                    !TryInteger(value, "step_index", out var stepIndex) || !TryInteger(value, "step_count", out var stepCount) ||
+                    !IsStepPosition(stepIndex, stepCount))
+                    return new StateParseResult(null, "STATE is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new StateParseResult(null, "STATE auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new StateParseResult(null, "STATE auth is invalid.");
+                }
+                return new StateParseResult(new DemoSwitchState(controllerId, nonce, currentDemoId, hapticsOn, hapticsUi, recenterUi,
+                    paused, (int)stepIndex, (int)stepCount, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new StateParseResult(null, exception.Message);
+            }
+        }
+
+        public static string SerializeState(DemoSwitchState state, string secret)
+        {
+            if (state == null || !IsIdentifier(state.ControllerId) || !IsNonce(state.Nonce) || !IsIdentifier(state.CurrentDemoId) ||
+                !IsStepPosition(state.StepIndex, state.StepCount))
+                throw new ArgumentException("STATE fields do not satisfy the Demo Switch contract.", nameof(state));
+
+            var auth = string.IsNullOrEmpty(secret) ? string.Empty : ComputeAuth(state, secret);
+            var value = new JObject
+            {
+                ["version"] = 1,
+                ["type"] = "STATE",
+                ["controller_id"] = state.ControllerId,
+                ["nonce"] = state.Nonce,
+                ["current_demo_id"] = state.CurrentDemoId,
+                ["haptics_on"] = state.HapticsOn,
+                ["haptics_ui"] = state.HapticsUi,
+                ["recenter_ui"] = state.RecenterUi,
+                ["paused"] = state.Paused,
+                ["step_index"] = state.StepIndex,
+                ["step_count"] = state.StepCount
+            };
+            if (auth.Length > 0) value["auth"] = auth;
+            var json = value.ToString(Formatting.None);
+            if (Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                throw new InvalidOperationException("STATE fields exceed the 1024-byte payload limit.");
+            return json;
+        }
+
+        /// <summary>Schema bounds: `step_index` -1..32 (-1 outside a session), `step_count` 0..32.</summary>
+        private static bool IsStepPosition(long index, long count) =>
+            index >= -1 && index <= MaxStateSteps && count >= 0 && count <= MaxStateSteps;
+
         public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
-            || action == "restart" || action == "scene" || IsHapticsAction(action) || IsRecenterAction(action);
+            || action == "restart" || action == "scene" || action == "tutorial_start" || IsHapticsAction(action) || IsRecenterAction(action);
+
+        /// <summary>The actions the shared pause handles when the scene has no adapter for them.</summary>
+        public static bool IsSharedPauseAction(string action) => action == "menu_open" || action == "menu_close" || action == "restart";
 
         public static bool IsHapticsAction(string action) => action == "haptics_on" || action == "haptics_off"
             || action == "haptics_ui_show" || action == "haptics_ui_hide";
@@ -404,7 +587,26 @@ namespace Hapbeat.DemoSwitch
             Field("version", "1") + Field("type", "HERE") + Field("controller_id", here.ControllerId) +
             Field("nonce", here.Nonce) + Field("current_demo_id", here.CurrentDemoId);
 
+        public static string Canonicalize(DemoSwitchQuery query) =>
+            "HAPBEAT-DEMO-SWITCH/1\nQUERY\n" +
+            Field("version", "1") + Field("type", "QUERY") + Field("controller_id", query.ControllerId) +
+            Field("nonce", query.Nonce);
+
+        /// <summary>Booleans as `true` / `false`, integers in base 10 (`step_index` may be -1).</summary>
+        public static string Canonicalize(DemoSwitchState state) =>
+            "HAPBEAT-DEMO-SWITCH/1\nSTATE\n" +
+            Field("version", "1") + Field("type", "STATE") + Field("controller_id", state.ControllerId) +
+            Field("nonce", state.Nonce) + Field("current_demo_id", state.CurrentDemoId) +
+            Field("haptics_on", BooleanText(state.HapticsOn)) + Field("haptics_ui", BooleanText(state.HapticsUi)) +
+            Field("recenter_ui", BooleanText(state.RecenterUi)) + Field("paused", BooleanText(state.Paused)) +
+            Field("step_index", state.StepIndex.ToString(CultureInfo.InvariantCulture)) +
+            Field("step_count", state.StepCount.ToString(CultureInfo.InvariantCulture));
+
         public static string ComputeAuth(DemoSwitchCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
+        public static string ComputeAuth(DemoSwitchQuery query, string secret) => ComputeMac(Canonicalize(query), secret);
+        public static string ComputeAuth(DemoSwitchState state, string secret) => ComputeMac(Canonicalize(state), secret);
+        public static bool Authenticate(DemoSwitchQuery query, string secret) => ConstantTimeMacEquals(query.Auth, ComputeAuth(query, secret));
+        public static bool Authenticate(DemoSwitchState state, string secret) => ConstantTimeMacEquals(state.Auth, ComputeAuth(state, secret));
         public static string ComputeAuth(DemoSwitchStatus status, string secret) => ComputeMac(Canonicalize(status), secret);
         public static string ComputeAuth(DemoSwitchDiscover discover, string secret) => ComputeMac(Canonicalize(discover), secret);
         public static string ComputeAuth(DemoSwitchHere here, string secret) => ComputeMac(Canonicalize(here), secret);
@@ -428,6 +630,7 @@ namespace Hapbeat.DemoSwitch
         private static bool IsLowerHexMac(string value) => value != null && value.Length == 64 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
         private static bool IsNonce(string value) => value != null && value.Length == 16 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
         private static string Field(string name, string value) => name + "=" + Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value + "\n";
+        private static string BooleanText(bool value) => value ? "true" : "false";
 
         internal static JObject ParseStrictObject(string json)
         {
@@ -477,6 +680,14 @@ namespace Hapbeat.DemoSwitch
             result = 0;
             if (!value.TryGetValue(name, StringComparison.Ordinal, out var token) || token.Type != JTokenType.Integer) return false;
             return long.TryParse(token.ToString(Formatting.None), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+        }
+
+        private static bool TryBoolean(JObject value, string name, out bool result)
+        {
+            result = false;
+            if (!value.TryGetValue(name, StringComparison.Ordinal, out var token) || token.Type != JTokenType.Boolean) return false;
+            result = token.Value<bool>();
+            return true;
         }
 
         private static bool TryString(JObject value, string name, out string result)
@@ -549,6 +760,34 @@ namespace Hapbeat.DemoSwitch
 
             var here = new DemoSwitchHere(discover.ControllerId, discover.Nonce, currentDemoId);
             return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeHere(here, sharedSecret), null);
+        }
+    }
+
+    /// <summary>QUERY → STATE: the same authentication and unsigned-mode rules as DISCOVER; nothing changes state.</summary>
+    internal static class DemoSwitchQueryHandler
+    {
+        /// <param name="answer">Builds the STATE (unsigned) for an accepted query; called only after authentication.</param>
+        public static DiscoveryHandleResult Handle(string json, Func<DemoSwitchQuery, DemoSwitchState> answer, string sharedSecret,
+            bool allowUnsignedOnIsolatedLan)
+        {
+            var parsed = DemoSwitchProtocol.ParseQuery(json);
+            if (!parsed.Success) return new DiscoveryHandleResult(null, "invalid_payload");
+
+            var query = parsed.Query;
+            if (!string.IsNullOrEmpty(sharedSecret))
+            {
+                if (!DemoSwitchProtocol.Authenticate(query, sharedSecret))
+                    return new DiscoveryHandleResult(null, "invalid_auth");
+            }
+            else if (!allowUnsignedOnIsolatedLan)
+            {
+                return new DiscoveryHandleResult(null, "unsigned_disabled");
+            }
+
+            var state = answer(query);
+            if (state == null || !DemoSwitchProtocol.IsIdentifier(state.CurrentDemoId))
+                return new DiscoveryHandleResult(null, "invalid_payload");
+            return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeState(state, sharedSecret), null);
         }
     }
 }

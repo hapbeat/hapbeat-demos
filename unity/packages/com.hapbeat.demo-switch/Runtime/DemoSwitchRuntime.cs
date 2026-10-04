@@ -113,6 +113,11 @@ namespace Hapbeat.DemoSwitch
                 HandleDiscover(json, datagram.Source);
                 return;
             }
+            if (messageType == "QUERY")
+            {
+                HandleQuery(json, datagram.Source);
+                return;
+            }
 
             var parsed = DemoSwitchProtocol.ParseCommand(json);
             if (!parsed.Success)
@@ -189,18 +194,75 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        private void HandleQuery(string json, IPEndPoint source)
+        {
+            var result = DemoSwitchQueryHandler.Handle(json, query => BuildState(query, _settings.CurrentDemoId), _settings.SharedSecret,
+                _settings.AllowUnsignedOnIsolatedLan);
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected QUERY payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] STATE send failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// STATE values: haptics output (<see cref="DemoSession.HapticsEnabled"/>), whether the haptics button is shown
+        /// (the descriptor supports the toggle and haptics UI is on), the 視線をリセット button, the shared pause or a
+        /// scene's <see cref="IDemoAppMenuState"/>, and the active session's step (-1 / 0 outside a session).
+        /// </summary>
+        internal static DemoSwitchState BuildState(DemoSwitchQuery query, string currentDemoId)
+        {
+            var ticket = DemoSession.IsActive ? DemoSession.Ticket : null;
+            return new DemoSwitchState(query.ControllerId, query.Nonce, currentDemoId, DemoSession.HapticsEnabled,
+                DemoSession.SupportsHapticsToggle && DemoSession.HapticsUiVisible, DemoSession.RecenterUiVisible,
+                DemoPause.IsPaused || IsAppMenuOpen(), ticket != null ? ticket.Index : -1, ticket != null ? ticket.Steps.Count : 0);
+        }
+
+        private static bool IsAppMenuOpen()
+        {
+            foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                if (behaviour.isActiveAndEnabled && behaviour is IDemoAppMenuState menu && menu.IsMenuOpen) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// The adapter for a CONTROL action. haptics_*, recenter / recenter_ui_* and tutorial_start belong to the shared
+        /// Demo Session layer. Other actions go to the scene's adapter when it accepts them; otherwise menu_open,
+        /// menu_close and restart fall back to the shared pause (<see cref="DemoPause.SharedControls"/>, which accepts
+        /// them only where the shared pause is on). The caller rejects the action when the result cannot execute it.
+        /// </summary>
+        internal static IDemoAppControls ResolveControls(string action, string sceneId, IDemoAppControls sceneControls)
+        {
+            if (DemoSwitchProtocol.IsHapticsAction(action)) return DemoSession.HapticsControls;
+            if (DemoSwitchProtocol.IsRecenterAction(action)) return DemoSession.RecenterControls;
+            if (action == "tutorial_start") return DemoSession.TutorialControls;
+            if (sceneControls != null && sceneControls.CanExecuteControl(action, sceneId)) return sceneControls;
+            return DemoSwitchProtocol.IsSharedPauseAction(action) ? DemoPause.SharedControls : sceneControls;
+        }
+
+        private static bool IsSharedLayerAction(string action) => DemoSwitchProtocol.IsHapticsAction(action)
+            || DemoSwitchProtocol.IsRecenterAction(action) || action == "tutorial_start";
+
         private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
         {
-            IDemoAppControls adapter = null;
-            // haptics_* and recenter / recenter_ui_* belong to the shared Demo Session layer, never to the scene's control adapter.
-            if (DemoSwitchProtocol.IsHapticsAction(command.Action)) adapter = DemoSession.HapticsControls;
-            else if (DemoSwitchProtocol.IsRecenterAction(command.Action)) adapter = DemoSession.RecenterControls;
-            else foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-            {
-                if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
-                if (adapter != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }
-                adapter = candidate;
-            }
+            IDemoAppControls sceneControls = null;
+            if (!IsSharedLayerAction(command.Action))
+                foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                {
+                    if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
+                    if (sceneControls != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }
+                    sceneControls = candidate;
+                }
+            var adapter = ResolveControls(command.Action, command.SceneId, sceneControls);
             if (command.DemoId != _settings.CurrentDemoId || adapter == null
                 || !adapter.CanExecuteControl(command.Action,command.SceneId))
             { SendFailure(source,command,"not_allowed","Current demo or action is not supported."); return; }

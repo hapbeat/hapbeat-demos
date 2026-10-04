@@ -64,10 +64,17 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        /// <summary>
+        /// Reads a String extra of the Intent that started (or, for a `singleTask` activity, last re-delivered to)
+        /// this activity and removes it, so it is acted on once. False outside an Android player or when absent.
+        /// </summary>
+        public static bool TryTakeLaunchExtra(string name, out string value) => _platform.TryTakeStringExtra(name, out value);
+
         public static string GetOption(string id) => id != null && _options.TryGetValue(id, out var value) ? value : null;
 
         internal static IDemoAppControls HapticsControls { get; } = new DemoSessionHapticsControls();
         internal static IDemoAppControls RecenterControls { get; } = new DemoSessionRecenterControls();
+        internal static IDemoAppControls TutorialControls { get; } = new DemoSessionTutorialControls();
         internal static string CurrentDemoId => _currentDemoId;
         internal static IDemoSessionPlatform Platform => _platform;
 
@@ -77,7 +84,7 @@ namespace Hapbeat.DemoSwitch
             _platform = platform ?? new SafeDemoSessionPlatform();
             _currentDemoId = currentDemoId ?? string.Empty;
             Descriptor = LoadOwnDescriptor(_platform, _currentDemoId);
-            if (_platform.TryTakeTicketExtra(out var json) && !TryBegin(json, _currentDemoId, Descriptor, out var error))
+            if (_platform.TryTakeStringExtra(TicketExtra, out var json) && !TryBegin(json, _currentDemoId, Descriptor, out var error))
                 Debug.LogWarning("[Demo Session] Ticket ignored; starting normally. " + error);
         }
 
@@ -322,6 +329,26 @@ namespace Hapbeat.DemoSwitch
             {
                 if (!CanExecuteControl(action, sceneId) || !ApplyHapticsAction(action))
                     throw new InvalidOperationException("Unsupported haptics control.");
+                yield break;
+            }
+        }
+
+        /// <summary>
+        /// CONTROL adapter for `tutorial_start`: the registered host's <see cref="IDemoSessionTutorial"/>. Closes the
+        /// shared pause and the completion panel first, like the pause's 最初からやり直す and the panel's もう一度.
+        /// </summary>
+        private sealed class DemoSessionTutorialControls : IDemoAppControls
+        {
+            public bool CanExecuteControl(string action, string sceneId) =>
+                action == "tutorial_start" && sceneId == string.Empty && Host is IDemoSessionTutorial;
+
+            public IEnumerator ExecuteControl(string action, string sceneId)
+            {
+                if (!CanExecuteControl(action, sceneId)) throw new InvalidOperationException("No tutorial in this demo.");
+                var tutorial = (IDemoSessionTutorial)Host;
+                DemoPause.Resume();
+                CloseCompletion();
+                tutorial.StartTutorial();
                 yield break;
             }
         }

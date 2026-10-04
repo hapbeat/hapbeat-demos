@@ -55,6 +55,9 @@ namespace Hapbeat.DemoHub
         public const string PlanFull = "プランは最大 32 件です";
         public const string DeviceAddress = "この端末: プレイヤー {0} / グループ {1}";
         public const string Unspecified = "指定なし";
+        public const string StartRejected = "外部からの開始を受け付けませんでした: ";
+        public const string StartNotInstalled = "未インストールです: ";
+        public const string StartPresetEmpty = "プリセット {0} にインストール済みのデモがありません";
 
         public static IEnumerable<string> All => typeof(HubText).GetFields()
             .Where(f => f.IsLiteral && f.FieldType == typeof(string)).Select(f => (string)f.GetRawConstantValue());
@@ -163,8 +166,57 @@ namespace Hapbeat.DemoHub
         {
             _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
-            Show(InitialScreen(DemoSession.Ticket));
             DemoRecenter.Recentered += Recenter;
+            // An external start goes straight to its first demo; the top screen only shows when it is rejected.
+            if (!TakeExternalStart()) Show(InitialScreen(DemoSession.Ticket));
+        }
+
+        /// <summary>
+        /// A `singleTask` Hub already running gets the new Intent through onNewIntent (UnityPlayerGameActivity sets it
+        /// as the current Intent) and is paused and resumed meanwhile, so the start extra is read on every return.
+        /// </summary>
+        private void OnApplicationPause(bool paused)
+        {
+            if (!paused && _catalog != null) TakeExternalStart();
+        }
+
+        /// <summary>Reads and removes the Intent's start extra (<see cref="HubStartRequest.Extra"/>) and starts it.</summary>
+        private bool TakeExternalStart()
+        {
+            if (!DemoSession.TryTakeLaunchExtra(HubStartRequest.Extra, out var json)) return false;
+            // Started from outside: the catalog may have changed since the Hub was opened.
+            if (_builtScreen.HasValue) _catalog = HubCatalog.Load();
+            StartExternal(json);
+            return true;
+        }
+
+        /// <summary>
+        /// Starts the request in <paramref name="json"/> like a top-screen start. A rejected request (invalid, or nothing
+        /// installed) and a failed launch open the top screen with the reason on its status line.
+        /// </summary>
+        internal void StartExternal(string json)
+        {
+            if (!HubStartRequest.TryParse(json, out var request, out var error))
+            {
+                Debug.LogWarning("[Demo Hub] External start rejected: " + error);
+                ShowTopWithStatus(HubText.StartRejected + error);
+                return;
+            }
+            var ticket = request.BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, out error);
+            if (ticket == null)
+            {
+                Debug.LogWarning("[Demo Hub] External start rejected: " + error);
+                ShowTopWithStatus(HubText.StartRejected + error);
+                return;
+            }
+            Debug.Log("[Demo Hub] External start: " + (request.DemoId ?? "preset " + request.Preset));
+            if (!DemoSession.LaunchTicket(ticket, out error, LaunchFailed)) LaunchFailed(error);
+        }
+
+        private void ShowTopWithStatus(string status)
+        {
+            if (_panel == null || Screen != HubScreen.Top) Show(HubScreen.Top);
+            SetStatus(status);
         }
 
         internal void Initialize(IReadOnlyList<DemoSessionCatalogEntry> catalog, HubPlanStore store)
@@ -397,8 +449,15 @@ namespace Hapbeat.DemoHub
             if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
         }
 
-        /// <summary>A start that failed, or whose application did not come to the front: the Hub stays with the error.</summary>
-        private void LaunchFailed(string error) => SetStatus(HubText.LaunchFailed + error);
+        /// <summary>
+        /// A start that failed, or whose application did not come to the front: the Hub stays with the error (on the top
+        /// screen when an external start left it without one).
+        /// </summary>
+        private void LaunchFailed(string error)
+        {
+            if (_panel == null) Show(HubScreen.Top);
+            SetStatus(HubText.LaunchFailed + error);
+        }
 
         // --------------------------------------------------------------- manage
 

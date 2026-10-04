@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.XR;
@@ -27,11 +28,21 @@ namespace Hapbeat.DemoSwitch
         private static DemoPausePanel _panel;
         private static bool _audioWasPaused;
         private static string _hubPackage;
+        private static bool _enabled;
 
         /// <summary>Fires with true when the pause panel opens and false when it closes.</summary>
         public static event Action<bool> PausedChanged;
 
         public static bool IsPaused => _panel != null;
+
+        /// <summary>This runtime hosts the shared pause (settings Pause Menu; never the Hub).</summary>
+        public static bool IsEnabled => _enabled;
+
+        /// <summary>
+        /// CONTROL `menu_open` / `menu_close` / `restart` when the scene has no adapter for them: the panel's
+        /// Pause / Resume and its 最初からやり直す. Only in a runtime that hosts the shared pause.
+        /// </summary>
+        internal static IDemoAppControls SharedControls { get; } = new DemoPauseControls();
 
         public const string HubFailed = "Hub を起動できませんでした";
         public const string LaunchFailed = "起動できませんでした: ";
@@ -39,8 +50,12 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Starts the Hub; the argument receives the error of a start that did not come to the front. Replaced in tests.</summary>
         internal static Func<Action<string>, bool> HubLauncher = StartHub;
 
-        /// <summary>Called by the bootstrap; null disables "Hub に戻る".</summary>
-        internal static void Configure(string hubPackage) => _hubPackage = string.IsNullOrWhiteSpace(hubPackage) ? null : hubPackage;
+        /// <summary>Called by the bootstrap when the shared pause is on; null disables "Hub に戻る".</summary>
+        internal static void Configure(string hubPackage)
+        {
+            _enabled = true;
+            _hubPackage = string.IsNullOrWhiteSpace(hubPackage) ? null : hubPackage;
+        }
 
         internal static bool CanReturnToHub => _hubPackage != null && DemoSession.Platform.IsPackageInstalled(_hubPackage);
 
@@ -50,6 +65,7 @@ namespace Hapbeat.DemoSwitch
         {
             if (_panel != null) DestroyPanel();
             _hubPackage = hubPackage;
+            _enabled = false;
             _audioWasPaused = false;
             HubLauncher = StartHub;
             PausedChanged = null;
@@ -134,6 +150,40 @@ namespace Hapbeat.DemoSwitch
             if (Application.isPlaying) UnityEngine.Object.Destroy(_panel.gameObject);
             else UnityEngine.Object.DestroyImmediate(_panel.gameObject);
             _panel = null;
+        }
+
+        /// <summary>
+        /// `menu_open` opens the panel (not while the completion panel is shown), `menu_close` closes it (also
+        /// when already closed), `restart` is 最初からやり直す and needs a registered scene host. While the
+        /// completion panel is shown `restart` is refused too: its もう一度 decides whether a step may be repeated.
+        /// </summary>
+        private sealed class DemoPauseControls : IDemoAppControls
+        {
+            public bool CanExecuteControl(string action, string sceneId)
+            {
+                if (!_enabled || sceneId != string.Empty) return false;
+                switch (action)
+                {
+                    case "menu_open": return !DemoSession.IsCompletionShown;
+                    case "menu_close": return true;
+                    case "restart": return !DemoSession.IsCompletionShown && DemoSession.CurrentHost != null;
+                    default: return false;
+                }
+            }
+
+            public IEnumerator ExecuteControl(string action, string sceneId)
+            {
+                if (!CanExecuteControl(action, sceneId)) throw new InvalidOperationException("Unsupported pause control.");
+                switch (action)
+                {
+                    case "menu_open":
+                        if (!Pause()) throw new InvalidOperationException("The pause could not open.");
+                        break;
+                    case "menu_close": Resume(); break;
+                    default: RestartFromPause(); break;
+                }
+                yield break;
+            }
         }
     }
 

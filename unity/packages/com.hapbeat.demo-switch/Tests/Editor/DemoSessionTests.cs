@@ -33,7 +33,7 @@ namespace Hapbeat.DemoSwitch.Tests
             public bool LaunchSucceeds = true;
             public string LaunchedPackage, LaunchedActivity, LaunchedTicket;
             public int Finishes;
-            public bool TryTakeTicketExtra(out string json) { json = null; return false; }
+            public bool TryTakeStringExtra(string name, out string value) { value = null; return false; }
             public bool TryLaunch(string packageName, string activityName, string ticketJson, out string error)
             {
                 error = LaunchSucceeds ? null : "no such activity";
@@ -308,6 +308,156 @@ namespace Hapbeat.DemoSwitch.Tests
         static void Run(IEnumerator operation)
         {
             while (operation.MoveNext()) { }
+        }
+
+        sealed class TutorialHost : IDemoSessionHost, IDemoSessionTutorial
+        {
+            public int Tutorials, Restarts;
+            public bool? Paused;
+            public void ApplyOptions(IReadOnlyDictionary<string, string> options) { }
+            public void Restart() => Restarts++;
+            public void SetHapticsEnabled(bool enabled) { }
+            public void SetGameplayPaused(bool paused) => Paused = paused;
+            public void StartTutorial() => Tutorials++;
+        }
+
+        sealed class SceneMenu : IDemoAppControls
+        {
+            public bool Handles;
+            public bool CanExecuteControl(string action, string sceneId) => Handles && action == "menu_open";
+            public IEnumerator ExecuteControl(string action, string sceneId) { yield break; }
+        }
+
+        [Test]
+        public void MenuAndRestartFallBackToTheSharedPauseOnlyWhereItIsOn()
+        {
+            foreach (var action in new[] { "menu_open", "menu_close", "restart" })
+            {
+                var adapter = DemoSwitchRuntime.ResolveControls(action, "", null);
+                Assert.That(adapter, Is.SameAs(DemoPause.SharedControls), action);
+                Assert.That(adapter.CanExecuteControl(action, ""), Is.False, action + ": no shared pause (Hub, own-menu demos): not_allowed.");
+            }
+            Assert.That(DemoSwitchRuntime.ResolveControls("scene", "block", null), Is.Null, "Scenes need the app's adapter.");
+
+            DemoPause.Configure(null);
+            var shared = DemoPause.SharedControls;
+            Assert.That(shared.CanExecuteControl("menu_open", ""), Is.True);
+            Assert.That(shared.CanExecuteControl("menu_close", ""), Is.True);
+            Assert.That(shared.CanExecuteControl("restart", ""), Is.False, "Nothing to restart without a scene host.");
+            Assert.That(shared.CanExecuteControl("scene", "block"), Is.False);
+            var host = new Host();
+            DemoSession.RegisterHost(host);
+            Assert.That(shared.CanExecuteControl("restart", ""), Is.True);
+
+            Run(shared.ExecuteControl("menu_open", ""));
+            Assert.That(DemoPause.IsPaused, Is.True);
+            Assert.That(host.Paused, Is.True);
+            Run(shared.ExecuteControl("menu_open", ""));
+            Assert.That(DemoPause.IsPaused, Is.True, "Explicit open, not a toggle.");
+            Run(shared.ExecuteControl("menu_close", ""));
+            Assert.That(DemoPause.IsPaused, Is.False);
+            Run(shared.ExecuteControl("menu_close", ""));
+            Assert.That(DemoPause.IsPaused, Is.False, "Explicit close, not a toggle.");
+            Run(shared.ExecuteControl("menu_open", ""));
+            Run(shared.ExecuteControl("restart", ""));
+            Assert.That(host.Restarts, Is.EqualTo(1), "Same as the panel's restart button.");
+            Assert.That(DemoPause.IsPaused, Is.False);
+
+            // The scene's adapter wins when it handles the action; the rest still falls back.
+            var menu = new SceneMenu { Handles = true };
+            Assert.That(DemoSwitchRuntime.ResolveControls("menu_open", "", menu), Is.SameAs(menu));
+            Assert.That(DemoSwitchRuntime.ResolveControls("restart", "", menu), Is.SameAs(DemoPause.SharedControls));
+            menu.Handles = false;
+            Assert.That(DemoSwitchRuntime.ResolveControls("menu_open", "", menu), Is.SameAs(DemoPause.SharedControls));
+            Assert.That(DemoSwitchRuntime.ResolveControls("haptics_on", "", menu), Is.SameAs(DemoSession.HapticsControls));
+            Assert.That(DemoSwitchRuntime.ResolveControls("recenter", "", menu), Is.SameAs(DemoSession.RecenterControls));
+            Assert.That(DemoSwitchRuntime.ResolveControls("tutorial_start", "", menu), Is.SameAs(DemoSession.TutorialControls));
+
+            // The completion panel owns input: neither the pause nor a restart from outside.
+            DemoSession.ResetForTests(_platform, "volley", Volley());
+            DemoPause.Configure(null);
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            DemoSession.RegisterHost(host);
+            DemoSession.ShowCompletion();
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_open", ""), Is.False);
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("restart", ""), Is.False);
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_close", ""), Is.True);
+        }
+
+        [Test]
+        public void TutorialStartNeedsAHostWithATutorialAndClosesPanelsFirst()
+        {
+            var controls = DemoSession.TutorialControls;
+            Assert.That(controls.CanExecuteControl("tutorial_start", ""), Is.False, "No host: not_allowed.");
+            DemoSession.RegisterHost(new Host());
+            Assert.That(controls.CanExecuteControl("tutorial_start", ""), Is.False, "No tutorial: not_allowed.");
+
+            DemoSession.ResetForTests(_platform, "volley", Volley());
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var host = new TutorialHost();
+            DemoSession.RegisterHost(host);
+            Assert.That(controls.CanExecuteControl("tutorial_start", ""), Is.True);
+            Assert.That(controls.CanExecuteControl("tutorial_start", "intro"), Is.False);
+            Assert.That(controls.CanExecuteControl("restart", ""), Is.False);
+            DemoSession.ShowCompletion();
+            Run(controls.ExecuteControl("tutorial_start", ""));
+            Assert.That(host.Tutorials, Is.EqualTo(1));
+            Assert.That(DemoSession.IsCompletionShown, Is.False);
+            Assert.That(host.Paused, Is.False, "Gameplay resumes.");
+            DemoPause.Pause();
+            Run(controls.ExecuteControl("tutorial_start", ""));
+            Assert.That(host.Tutorials, Is.EqualTo(2));
+            Assert.That(DemoPause.IsPaused, Is.False);
+            Assert.That(host.Restarts, Is.Zero);
+        }
+
+        sealed class OwnMenu : MonoBehaviour, IDemoAppMenuState
+        {
+            public bool Open;
+            public bool IsMenuOpen => Open;
+        }
+
+        [Test]
+        public void StateReportsHapticsButtonsPauseAndStep()
+        {
+            var query = new DemoSwitchQuery("remote-pixel", "0123456789abcdef", "");
+            var state = DemoSwitchRuntime.BuildState(query, "volley");
+            Assert.That(state.CurrentDemoId, Is.EqualTo("volley"));
+            Assert.That(state.HapticsOn, Is.True);
+            Assert.That(state.HapticsUi, Is.False);
+            Assert.That(state.RecenterUi, Is.False);
+            Assert.That(state.Paused, Is.False);
+            Assert.That(state.StepIndex, Is.EqualTo(-1), "Outside a session.");
+            Assert.That(state.StepCount, Is.Zero);
+
+            DemoSession.SetHapticsUiVisible(true);
+            Assert.That(DemoSwitchRuntime.BuildState(query, "volley").HapticsUi, Is.False, "No haptics toggle: the button is not shown.");
+
+            DemoSession.ResetForTests(_platform, "volley", Volley());
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            DemoSession.SetHapticsUiVisible(true);
+            DemoSession.SetRecenterUiVisible(true);
+            DemoSession.SetHapticsEnabled(false);
+            DemoPause.Pause();
+            state = DemoSwitchRuntime.BuildState(query, "volley");
+            Assert.That(state.HapticsOn, Is.False);
+            Assert.That(state.HapticsUi, Is.True);
+            Assert.That(state.RecenterUi, Is.True);
+            Assert.That(state.Paused, Is.True);
+            Assert.That(state.StepIndex, Is.Zero);
+            Assert.That(state.StepCount, Is.EqualTo(2));
+            DemoPause.Resume();
+            Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.False);
+
+            var go = new GameObject("own menu");
+            try
+            {
+                var menu = go.AddComponent<OwnMenu>();
+                Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.False);
+                menu.Open = true;
+                Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.True, "The app's own menu pause.");
+            }
+            finally { Object.DestroyImmediate(go); }
         }
 
         [Test]
@@ -588,18 +738,42 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
-        public void HapticsButtonSitsLowLeftAndKeepsAFixedLabelWidth()
+        public void HapticsButtonSitsLowNearTheCentreAndKeepsAFixedLabelWidth()
         {
             var pose = DemoSessionHapticsButton.TargetPose(Vector3.up * 1.6f, Vector3.forward);
             var offset = pose.position - Vector3.up * 1.6f;
             Assert.That(offset.magnitude, Is.EqualTo(DemoSessionHapticsButton.Distance).Within(1e-4f));
             Assert.That(offset.x, Is.LessThan(0f), "Left");
             Assert.That(offset.y, Is.LessThan(0f), "Below");
-            Assert.That(Mathf.Asin(-offset.y / offset.magnitude) * Mathf.Rad2Deg, Is.EqualTo(35f).Within(0.1f));
+            Assert.That(Mathf.Asin(-offset.y / offset.magnitude) * Mathf.Rad2Deg, Is.EqualTo(30f).Within(0.1f));
+            Assert.That(Mathf.Atan2(offset.x, offset.z) * Mathf.Rad2Deg, Is.EqualTo(-5f).Within(0.1f));
             var lookingDown = DemoSessionHapticsButton.TargetPose(Vector3.up * 1.6f, new Vector3(0, -1, 1));
             Assert.That(Vector3.Distance(lookingDown.position, pose.position), Is.LessThan(1e-4f), "Pitch does not move the button.");
-            Assert.That(DemoSessionHapticsButton.Label(true), Is.EqualTo("触覚 ON"));
-            Assert.That(DemoSessionHapticsButton.Label(false), Is.EqualTo("触覚 OFF"));
+            Assert.That(DemoSessionHapticsButton.Label(true), Is.EqualTo("Haptics\nON"));
+            Assert.That(DemoSessionHapticsButton.Label(false), Is.EqualTo("Haptics\nOFF"));
+
+            DemoSession.ResetForTests(_platform, "volley", Volley());
+            DemoSession.SetHapticsUiVisible(true);
+            var go = new GameObject("haptics button");
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            try
+            {
+                var button = go.AddComponent<DemoSessionHapticsButton>();
+                var update = typeof(DemoSessionHapticsButton).GetMethod("Update", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                update.Invoke(button, null);
+                var rect = button.Panel.Buttons.Single().Rect;
+                var size = rect.sizeDelta;
+                DemoSession.SetHapticsEnabled(false);
+                update.Invoke(button, null);
+                Assert.That(button.Panel.Buttons.Single().Label, Is.EqualTo("Haptics\nOFF"));
+                Assert.That(rect.sizeDelta, Is.EqualTo(size), "The label never resizes the button.");
+                Assert.That(button.Panel.Size, Is.EqualTo(DemoSessionCornerButtons.PanelSize));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(camera);
+            }
         }
 
         static GameObject MainCamera(Vector3 position, Vector3 forward)
@@ -1036,18 +1210,22 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
-        public void RecenterButtonSitsAboveTheHapticsButtonAndIsHiddenByDefault()
+        public void RecenterButtonSitsLeftOfTheHapticsButtonAndIsHiddenByDefault()
         {
-            var pose = DemoSessionRecenterButton.TargetPose(Vector3.up * 1.6f, Vector3.forward);
-            var offset = pose.position - Vector3.up * 1.6f;
+            var head = Vector3.up * 1.6f;
+            var pose = DemoSessionRecenterButton.TargetPose(head, Vector3.forward);
+            var offset = pose.position - head;
             Assert.That(offset.magnitude, Is.EqualTo(DemoSessionRecenterButton.Distance).Within(1e-4f));
-            Assert.That(offset.x, Is.LessThan(0f), "Left");
-            var pitch = Mathf.Asin(-offset.y / offset.magnitude) * Mathf.Rad2Deg;
-            Assert.That(pitch, Is.EqualTo(27f).Within(0.1f));
-            // Both panels are 54 mm tall: half-heights in degrees at 0.45 m.
-            var half = Mathf.Atan2(0.027f, 0.45f) * Mathf.Rad2Deg;
-            Assert.That(DemoSessionHapticsButton.PitchDegrees - half, Is.GreaterThan(pitch + half), "Above the haptics button with a gap.");
-            Assert.That(DemoSessionRecenterButton.Label, Is.EqualTo("視線をリセット"));
+            Assert.That(Mathf.Atan2(offset.x, offset.z) * Mathf.Rad2Deg, Is.EqualTo(-19.5f).Within(0.1f));
+            Assert.That(Mathf.Asin(-offset.y / offset.magnitude) * Mathf.Rad2Deg, Is.EqualTo(30f).Within(0.1f));
+            // Same height; the panels' facing edges (88 mm wide) stay apart.
+            var haptics = DemoSessionHapticsButton.TargetPose(head, Vector3.forward);
+            Assert.That(haptics.position.y, Is.EqualTo(pose.position.y).Within(1e-4f));
+            var halfWidth = DemoSessionCornerButtons.PanelSize.x * 0.0005f;
+            var recenterRight = pose.position + pose.rotation * Vector3.right * halfWidth;
+            var hapticsLeft = haptics.position - haptics.rotation * Vector3.right * halfWidth;
+            Assert.That(hapticsLeft.x - recenterRight.x, Is.GreaterThan(0.005f), "At least 5 mm between the buttons.");
+            Assert.That(DemoSessionRecenterButton.Label, Is.EqualTo("Reset\nView"));
 
             var go = new GameObject("recenter button");
             var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
@@ -1060,7 +1238,8 @@ namespace Hapbeat.DemoSwitch.Tests
                 DemoSession.SetRecenterUiVisible(true);
                 update.Invoke(button, null);
                 Assert.That(button.Panel.gameObject.activeSelf, Is.True);
-                Assert.That(button.Panel.Buttons.Single().Label, Is.EqualTo("視線をリセット"));
+                Assert.That(button.Panel.Buttons.Single().Label, Is.EqualTo("Reset\nView"));
+                Assert.That(button.Panel.Size, Is.EqualTo(DemoSessionCornerButtons.PanelSize), "Same size as the haptics button.");
                 DemoSession.SetRecenterUiVisible(false);
                 update.Invoke(button, null);
                 Assert.That(button.Panel.gameObject.activeSelf, Is.False);

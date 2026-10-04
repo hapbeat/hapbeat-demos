@@ -1,6 +1,6 @@
 {
   "name": "com.hapbeat.demo-switch",
-  "version": "0.1.0-d14",
+  "version": "0.1.0-d15",
   "displayName": "Hapbeat Demo Switch",
   "description": "Foreground-only UDP control plane for switching between allowlisted demo applications, and the self-paced Demo Session flow.",
   "unity": "6000.0",

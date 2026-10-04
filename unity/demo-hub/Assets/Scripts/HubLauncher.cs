@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using Hapbeat.DemoSwitch;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -133,6 +135,129 @@ namespace Hapbeat.DemoHub
             _since = -1f;
             _fired = false;
             Progress = 0f;
+        }
+    }
+
+    /// <summary>
+    /// External start (contracts demo-session.md "Hub を外部から起動してセッションを始める"): the launch Intent's String
+    /// extra <see cref="Extra"/>, one JSON object of at most <see cref="MaxBytes"/> UTF-8 bytes, either
+    /// <c>{"version":1,"preset":1}</c> (preset 1..3) or <c>{"version":1,"demo_id":"handdemo","options":{...}}</c>
+    /// (options optional, string values). Other fields, both or neither of preset / demo_id are invalid.
+    /// </summary>
+    public sealed class HubStartRequest
+    {
+        public const string Extra = "com.hapbeat.demo_hub.start";
+        public const int MaxBytes = 4096;
+        private static readonly string[] Fields = { "version", "preset", "demo_id", "options" };
+
+        private HubStartRequest(int preset, string demoId, IReadOnlyDictionary<string, string> options)
+        {
+            Preset = preset;
+            DemoId = demoId;
+            Options = options;
+        }
+
+        /// <summary>1..3, or 0 for a single demo.</summary>
+        public int Preset { get; }
+        /// <summary>The single demo, or null for a preset.</summary>
+        public string DemoId { get; }
+        public IReadOnlyDictionary<string, string> Options { get; }
+
+        public static bool TryParse(string json, out HubStartRequest request, out string error)
+        {
+            request = null;
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxBytes) { error = "empty or over 4096 bytes"; return false; }
+            try
+            {
+                JObject root;
+                using (var reader = new JsonTextReader(new System.IO.StringReader(json)) { DateParseHandling = DateParseHandling.None })
+                {
+                    root = JObject.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+                    if (reader.Read()) { error = "trailing content"; return false; }
+                }
+                var unknown = root.Properties().FirstOrDefault(p => !Fields.Contains(p.Name, StringComparer.Ordinal));
+                if (unknown != null) { error = "unknown field " + unknown.Name; return false; }
+                if (!(root["version"] is JValue version) || version.Type != JTokenType.Integer || version.Value<long>() != 1) { error = "version must be 1"; return false; }
+                var hasPreset = root["preset"] != null;
+                var hasDemo = root["demo_id"] != null;
+                if (hasPreset == hasDemo) { error = "give either preset or demo_id"; return false; }
+                if (hasPreset)
+                {
+                    if (root["options"] != null) { error = "options belong to demo_id"; return false; }
+                    var preset = root["preset"];
+                    if (preset.Type != JTokenType.Integer || preset.Value<long>() < 1 || preset.Value<long>() > HubPlanStore.PresetCount)
+                    { error = "preset must be 1.." + HubPlanStore.PresetCount; return false; }
+                    request = new HubStartRequest(preset.Value<int>(), null, new Dictionary<string, string>(StringComparer.Ordinal));
+                    error = null;
+                    return true;
+                }
+                var demoId = root["demo_id"];
+                if (demoId.Type != JTokenType.String || !IsIdentifier(demoId.Value<string>())) { error = "demo_id is invalid"; return false; }
+                var options = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (root["options"] != null)
+                {
+                    if (!(root["options"] is JObject optionObject)) { error = "options must be an object"; return false; }
+                    foreach (var property in optionObject.Properties())
+                    {
+                        if (property.Value.Type != JTokenType.String) { error = "option " + property.Name + " must be a string"; return false; }
+                        options[property.Name] = property.Value.Value<string>();
+                    }
+                }
+                request = new HubStartRequest(0, demoId.Value<string>(), options);
+                error = null;
+                return true;
+            }
+            catch (Exception exception) when (exception is JsonException || exception is InvalidCastException || exception is FormatException || exception is OverflowException)
+            {
+                error = "not a JSON object";
+                return false;
+            }
+        }
+
+        /// <summary>The Demo Switch identifier rule (<c>[a-z0-9][a-z0-9._-]{0,63}</c>).</summary>
+        private static bool IsIdentifier(string value) =>
+            value != null && System.Text.RegularExpressions.Regex.IsMatch(value, @"^[a-z0-9][a-z0-9._-]{0,63}\z");
+
+        /// <summary>
+        /// The session's ticket, as the top screen would start it: a preset's installed steps, or one step of
+        /// <see cref="DemoId"/> with the given options (unknown options and values become the descriptor defaults,
+        /// with a warning), retry on, finish = this Hub, and the manage screen's haptics UI, 視線をリセット and hand style.
+        /// Null with <paramref name="error"/> (shown on the top screen) when nothing installed can start.
+        /// </summary>
+        public DemoSessionTicket BuildTicket(IReadOnlyList<HubPlan> presets, IReadOnlyList<DemoSessionCatalogEntry> catalog,
+            DemoSessionComponent finish, string sessionId, HubSettings settings, out string error)
+        {
+            HubPlan plan;
+            if (DemoId == null)
+            {
+                plan = presets[Preset - 1];
+                error = string.Format(CultureInfo.InvariantCulture, HubText.StartPresetEmpty, Preset);
+            }
+            else
+            {
+                var entry = HubPlan.Find(catalog, DemoId);
+                if (entry == null)
+                {
+                    error = HubText.StartNotInstalled + DemoId;
+                    return null;
+                }
+                plan = HubPlan.Single(entry.Descriptor);
+                var step = plan.Steps[0];
+                foreach (var pair in Options)
+                {
+                    var option = entry.Descriptor.FindOption(pair.Key);
+                    if (option == null || !option.HasValue(pair.Value))
+                    {
+                        Debug.LogWarning("[Demo Hub] External start: option " + pair.Key + "=" + pair.Value + " is unknown for " + DemoId + "; the default is used.");
+                        continue;
+                    }
+                    step.Options[pair.Key] = pair.Value;
+                }
+                error = HubText.StartNotInstalled + DemoId;
+            }
+            var ticket = plan.BuildTicket(catalog, finish, sessionId, settings.HapticsUi, settings.HandStyle, settings.RecenterUi);
+            if (ticket != null) error = null;
+            return ticket;
         }
     }
 
