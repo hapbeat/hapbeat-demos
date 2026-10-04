@@ -12,9 +12,11 @@ function Get-QuestAdb {
 }
 
 function Get-OnlineDevices([string]$adb) {
-    # Only headsets: other Android devices on adb (e.g. the Demo Switch remote phone) are skipped.
-    & $adb devices | Select-String '^(\S+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value } |
-        Where-Object { $_ -notmatch '^emulator-' } | Where-Object { (Get-QuestModel $adb $_) -match 'Quest' }
+    # Only headsets: other Android devices on adb (e.g. the Demo Switch remote phone) are skipped. The model comes
+    # from `adb devices -l` (model:Quest_3S), so no shell command can hang on a device that is not a Quest.
+    & $adb devices -l | Select-String '^(\S+)\s+device\s.*\bmodel:(\S+)' |
+        Where-Object { $_.Matches[0].Groups[1].Value -notmatch '^emulator-' -and $_.Matches[0].Groups[2].Value -match 'Quest' } |
+        ForEach-Object { $_.Matches[0].Groups[1].Value }
 }
 
 function Get-KnownQuestIps {
