@@ -15,6 +15,7 @@ import com.hapbeat.demoremote.data.MirrorSettings
 import com.hapbeat.demoremote.data.SavedQuest
 import com.hapbeat.demoremote.data.SettingsStore
 import com.hapbeat.demoremote.mirror.MirrorSession
+import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
 import com.hapbeat.demoremote.net.WifiBinding
 import com.hapbeat.demoremote.protocol.AuthConfig
@@ -46,6 +47,8 @@ data class QuestState(
     /** null = not probed yet in this foreground session. */
     val respondedLastRound: Boolean? = null,
     val adb: AdbState = AdbState.DISCONNECTED,
+    /** TCP 5555 answered in the last subnet scan (Wi-Fi adb on); null = not scanned yet. */
+    val adbPortOpen: Boolean? = null,
     val battery: Int? = null,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
@@ -94,6 +97,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var mirrorStatus by mutableStateOf(""); private set
     var keepScreenOn by mutableStateOf(settings.keepScreenOn); private set
     var discovering by mutableStateOf(false); private set
+    var scanningAdb by mutableStateOf(false); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -137,6 +141,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         startBatteryPolling()
+        scanAdbHosts()
         if (selectedQuest?.adb == AdbState.DISCONNECTED) connectAdb()
         updateMirror()
     }
@@ -250,6 +255,30 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rediscover() {
         viewModelScope.launch { runDiscoveryRound() }
+        scanAdbHosts()
+    }
+
+    /**
+     * Lists hosts with Wi-Fi adb open, so a Quest on its home screen (no Demo Switch receiver to
+     * answer DISCOVER) can still be selected for "Hub を開く" and the mirror. TCP connect only.
+     */
+    private fun scanAdbHosts() {
+        if (scanningAdb) return
+        scanningAdb = true
+        viewModelScope.launch {
+            try {
+                val local = withContext(Dispatchers.IO) { DemoSwitchSocket.localIpv4(getApplication(), wifi.network) } ?: return@launch
+                val hosts = AdbPortScanner.subnetHosts(local.address.address, local.prefixLength)
+                val open = AdbPortScanner.scan(hosts).toSet()
+                open.filter { ip -> quests.none { it.ip == ip } }.forEach { ip ->
+                    quests.add(QuestState(ip, "Quest ${quests.size + 1}"))
+                }
+                quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
+                if (open.isNotEmpty()) persistQuests()
+            } finally {
+                scanningAdb = false
+            }
+        }
     }
 
     /** Broadcast + unicast to known Quests, 700 ms window, fresh nonce. */

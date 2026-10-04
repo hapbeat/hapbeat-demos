@@ -138,14 +138,22 @@ private fun QuestBar(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
                     selected = q.ip == vm.selectedIp,
                     onClick = { vm.selectQuest(q.ip) },
                     label = { Text(q.label) },
-                    leadingIcon = { StatusDot(if (q.respondedLastRound == true) StatusGreen else StatusGray) },
+                    // Green: Demo Switch receiver answered. Yellow: only Wi-Fi adb is reachable (home screen etc.).
+                    leadingIcon = {
+                        StatusDot(when {
+                            q.respondedLastRound == true -> StatusGreen
+                            q.adbPortOpen == true || q.adb == AdbState.CONNECTED -> StatusYellow
+                            else -> StatusGray
+                        })
+                    },
                     modifier = Modifier.height(48.dp),
                 )
             }
         }
         // Fixed width so the label swap does not shift the chips.
-        TextButton(onClick = vm::rediscover, enabled = !vm.discovering, modifier = Modifier.width(96.dp)) {
-            Text(if (vm.discovering) "探索中" else "再探索")
+        val searching = vm.discovering || vm.scanningAdb
+        TextButton(onClick = vm::rediscover, enabled = !searching, modifier = Modifier.width(96.dp)) {
+            Text(if (searching) "探索中" else "再探索")
         }
         TextButton(onClick = onOpenSettings) { Text("設定") }
     }

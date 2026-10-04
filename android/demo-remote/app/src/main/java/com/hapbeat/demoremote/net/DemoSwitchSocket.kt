@@ -2,6 +2,7 @@ package com.hapbeat.demoremote.net
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkAddress
 import android.net.Network
 import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
 import kotlinx.coroutines.CoroutineScope
@@ -75,10 +76,15 @@ class DemoSwitchSocket(
     companion object {
         /** Subnet broadcast of [network]'s IPv4 address (Wi-Fi when bound); 255.255.255.255 if unknown. */
         fun broadcastAddress(context: Context, network: Network?): String {
-            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return LIMITED_BROADCAST
-            val link = cm.getLinkProperties(network ?: cm.activeNetwork) ?: return LIMITED_BROADCAST
-            val la = link.linkAddresses.firstOrNull { it.address is Inet4Address } ?: return LIMITED_BROADCAST
+            val la = localIpv4(context, network) ?: return LIMITED_BROADCAST
             return subnetBroadcast(la.address.address, la.prefixLength) ?: LIMITED_BROADCAST
+        }
+
+        /** This device's IPv4 address and prefix on [network] (Wi-Fi when bound). */
+        fun localIpv4(context: Context, network: Network?): LinkAddress? {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+            val link = cm.getLinkProperties(network ?: cm.activeNetwork) ?: return null
+            return link.linkAddresses.firstOrNull { it.address is Inet4Address }
         }
 
         fun subnetBroadcast(address: ByteArray, prefixLength: Int): String? {
