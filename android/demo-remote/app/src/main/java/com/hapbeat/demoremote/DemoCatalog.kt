@@ -27,6 +27,34 @@ object DemoCatalog {
     /** Display name for a demo ID; unknown IDs are shown as-is. */
     fun labelFor(demoId: String?): String = apps.firstOrNull { it.demoId == demoId }?.label ?: (demoId ?: "-")
 
+    /** Demo IDs that can start a one-demo Hub session (everything but the Hub itself). */
+    val sessionApps: List<DemoApp> get() = apps.filter { it.demoId != HUB_ID }
+
+    private const val HUB_COMPONENT = "jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity"
+    private const val HUB_START_EXTRA = "com.hapbeat.demo_hub.start"
+
+    /**
+     * Starts a Demo Session through the Hub's external start extra (demo-session.md「Hub を外部から起動して
+     * セッションを始める」): a preset 1..3, or one demo with an optional tutorial option ("on" / "off").
+     * The JSON is built only from the fixed table and literals, so it never contains a single quote.
+     */
+    fun hubSessionCommand(preset: Int? = null, demoId: String? = null, tutorial: String? = null): String {
+        val json = when {
+            preset != null -> {
+                require(preset in 1..3)
+                "{\"version\":1,\"preset\":$preset}"
+            }
+            demoId != null -> {
+                require(sessionApps.any { it.demoId == demoId })
+                require(tutorial == null || tutorial == "on" || tutorial == "off")
+                val options = if (tutorial == null) "" else ",\"options\":{\"tutorial\":\"$tutorial\"}"
+                "{\"version\":1,\"demo_id\":\"$demoId\"$options}"
+            }
+            else -> throw IllegalArgumentException("preset or demoId")
+        }
+        return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA '$json'"
+    }
+
     /** Shell command that resolves the launcher activity of [app] and starts it. */
     fun launchCommand(app: DemoApp): String =
         "c=\$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER " +
@@ -38,10 +66,11 @@ data class ControlAction(val label: String, val action: String, val sceneId: Str
 
 object ControlCatalog {
     val actions: List<ControlAction> = listOf(
+        ControlAction("チュートリアル開始", "tutorial_start"),
+        ControlAction("最初から", "restart"),
         ControlAction("メニューを開く", "menu_open"),
         ControlAction("メニューを閉じる", "menu_close"),
         ControlAction("視線リセット", "recenter"),
-        ControlAction("最初から", "restart"),
         ControlAction("触覚 ON", "haptics_on"),
         ControlAction("触覚 OFF", "haptics_off"),
         ControlAction("触覚ボタン表示", "haptics_ui_show"),

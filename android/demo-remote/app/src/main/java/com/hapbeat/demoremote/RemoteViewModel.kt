@@ -53,6 +53,8 @@ data class QuestState(
     val serial: String = "",
     /** Haptics state from the last READY haptics_on/off in the current foreground demo; null = unknown. */
     val hapticsOn: Boolean? = null,
+    /** Last STATE reply (QUERY); null when the receiver does not support QUERY or the demo changed. */
+    val remoteState: DemoSwitchMessage.State? = null,
     val battery: Int? = null,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
@@ -111,6 +113,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var foreground = false
     private var discoveryLoop: Job? = null
     private val activeNonces = mutableMapOf<String, (String, DemoSwitchMessage.Here) -> Unit>()
+    /** QUERY nonce -> Quest IP it was sent to. */
+    private val queryNonces = mutableMapOf<String, String>()
     private val pending = mutableMapOf<Long, PendingCommand>()
     private var nextLogId = 1L
     private val adbConnections = mutableMapOf<String, QuestAdb>()
@@ -143,6 +147,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         discoveryLoop = viewModelScope.launch {
             while (isActive) {
                 runDiscoveryRound()
+                selectedQuest?.takeIf { it.respondedLastRound == true }?.let { queryState(it.ip) }
                 delay(DISCOVERY_INTERVAL_MS)
             }
         }
@@ -260,7 +265,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** A new foreground demo starts with its own haptics state, so the remembered one no longer applies. */
     private fun withForegroundDemo(quest: QuestState, demoId: String): QuestState =
         quest.copy(lastDemoId = demoId, lastSeenAtMs = System.currentTimeMillis(),
-            hapticsOn = if (demoId == quest.lastDemoId) quest.hapticsOn else null)
+            hapticsOn = if (demoId == quest.lastDemoId) quest.hapticsOn else null,
+            remoteState = quest.remoteState?.takeIf { it.currentDemoId == demoId })
 
     /**
      * [ip] turned out to be the headset [serial]. If a saved entry with the same serial sits on an
@@ -381,6 +387,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 if (!DemoSwitchProtocol.acceptHere(message, source, controllerId, activeNonces.keys, config)) return
                 activeNonces[message.nonce]?.invoke(source, message)
             }
+            is DemoSwitchMessage.State -> {
+                if (!DemoSwitchProtocol.acceptState(message, source, controllerId, { queryNonces[it] }, config)) return
+                queryNonces.remove(message.nonce)
+                updateQuest(source) { withForegroundDemo(it, message.currentDemoId).copy(remoteState = message, hapticsOn = message.hapticsOn) }
+            }
             is DemoSwitchMessage.Status -> {
                 val ok = DemoSwitchProtocol.acceptStatus(message, source, controllerId, { seq, demoId ->
                     pending[seq]?.takeIf { it.demoId == demoId }?.ip
@@ -399,6 +410,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             "READY" -> {
                 command.terminal = true
                 updateLog(command.logId) { it.copy(state = LogState.READY) }
+                queryState(command.ip)
                 updateQuest(command.ip) {
                     val q = withForegroundDemo(it, status.currentDemoId)
                     when (command.action) {
@@ -414,6 +426,19 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 val detail = if (status.message.isEmpty()) status.code else "${status.code}: ${status.message}"
                 updateLog(command.logId) { it.copy(state = LogState.FAILED, detail = detail) }
             }
+        }
+    }
+
+    /** Asks [ip] for its state (QUERY -> STATE). Receivers without QUERY simply do not answer. */
+    private fun queryState(ip: String) {
+        val config = authConfig
+        if (!config.canSend || !socket.isOpen) return
+        val nonce = DemoSwitchProtocol.newNonce()
+        queryNonces[nonce] = ip
+        viewModelScope.launch {
+            socket.send(ip, DemoSwitchProtocol.buildQuery(controllerId, nonce, config))
+            delay(QUERY_TIMEOUT_MS)
+            queryNonces.remove(nonce)
         }
     }
 
@@ -609,6 +634,34 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Starts a Demo Session through the Hub (adb + the Hub's start extra): [preset] 1..3, or one [demoId]
+     * with [tutorial] "on" / "off" / null (descriptor default).
+     */
+    fun startSession(preset: Int? = null, demoId: String? = null, tutorial: String? = null) {
+        val quest = selectedQuest ?: return
+        if (quest.adb != AdbState.CONNECTED) return
+        val title = if (preset != null) "プリセット $preset" else DemoCatalog.labelFor(demoId) +
+            when (tutorial) { "on" -> "（チュートリアルあり）"; "off" -> "（チュートリアルなし）"; else -> "" }
+        viewModelScope.launch {
+            val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
+            val response = adbShell(quest.ip, DemoCatalog.hubSessionCommand(preset, demoId, tutorial))
+            if (response == null) {
+                updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
+                return@launch
+            }
+            val summary = response.allOutput.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.lastOrNull()?.take(120) ?: ""
+            val ok = response.exitCode == 0 && !summary.startsWith("Error")
+            updateLog(logId) {
+                it.copy(state = if (ok) LogState.READY else LogState.FAILED, detail = "exit ${response.exitCode}${if (summary.isEmpty()) "" else " / $summary"}")
+            }
+            if (ok) {
+                delay(LAUNCH_REDISCOVER_DELAY_MS)
+                runDiscoveryRound()
+            }
+        }
+    }
+
     /** Starts [app] through adb (fixed package table only). */
     fun launchApp(app: DemoApp) {
         val quest = selectedQuest ?: return
@@ -718,5 +771,6 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val LAUNCH_REDISCOVER_DELAY_MS = 3_000L
         const val MAX_LOGS = 20
         const val FOLLOW_AUTH_WAIT_MS = 3_000L
+        const val QUERY_TIMEOUT_MS = 1_500L
     }
 }

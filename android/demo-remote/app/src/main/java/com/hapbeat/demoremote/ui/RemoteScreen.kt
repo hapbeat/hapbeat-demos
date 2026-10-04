@@ -115,14 +115,15 @@ private fun ActionsAndLog(vm: RemoteViewModel) {
     NoticeArea(vm)
     var tab by rememberSaveable { mutableIntStateOf(0) }
     TabRow(selectedTabIndex = tab) {
-        listOf("アプリ切替", "アプリ操作", "直接起動").forEachIndexed { i, title ->
+        listOf("デモ開始", "切替", "操作", "直接起動").forEachIndexed { i, title ->
             Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (tab) {
-            0 -> SwitchTab(vm)
-            1 -> ControlTab(vm)
+            0 -> SessionTab(vm)
+            1 -> SwitchTab(vm)
+            2 -> ControlTab(vm)
             else -> LaunchTab(vm)
         }
     }
@@ -259,11 +260,63 @@ private fun ControlTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    val haptics = when (vm.selectedQuest?.hapticsOn) { true -> "ON"; false -> "OFF"; null -> "不明" }
-    Text("触覚: $haptics（このアプリから最後に成功した操作。デモが替わると不明に戻ります）", style = MaterialTheme.typography.bodyMedium)
+    StateSummary(vm.selectedQuest)
     ButtonGrid(ControlCatalog.actions, columns = 2) { control, modifier ->
         val allowed = enabled && (control.action != "scene" || isVolley)
         ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
+    }
+}
+
+/** Current state from STATE (QUERY); falls back to the last successful haptics operation from this app. */
+@Composable
+private fun StateSummary(quest: QuestState?) {
+    val state = quest?.remoteState
+    val onOff = { v: Boolean -> if (v) "ON" else "OFF" }
+    val shown = { v: Boolean -> if (v) "表示" else "非表示" }
+    val lines = if (state != null) {
+        listOf(
+            "触覚 ${onOff(state.hapticsOn)}　触覚ボタン ${shown(state.hapticsUi)}　リセットボタン ${shown(state.recenterUi)}",
+            (if (state.paused) "一時停止中" else "進行中") +
+                (if (state.stepCount > 0) "　セッション ${state.stepIndex + 1}/${state.stepCount}" else "　セッション外"),
+        )
+    } else {
+        val haptics = when (quest?.hapticsOn) { true -> "ON"; false -> "OFF"; null -> "不明" }
+        listOf("触覚 $haptics（このアプリから最後に成功した操作）", "状態問い合わせ（QUERY）に未対応か応答なし")
+    }
+    // Fixed two-line block: the text changes, the layout does not.
+    Column(Modifier.fillMaxWidth().height(44.dp)) {
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    }
+}
+
+@Composable
+private fun SessionTab(vm: RemoteViewModel) {
+    val quest = vm.selectedQuest
+    val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
+    val connected = quest?.adb == AdbState.CONNECTED && hubInstalled
+    Text(
+        if (connected) "Hub 経由でセッション（チュートリアル・完了画面付き）として始めます。前面アプリに関係なく使えます"
+        else "adb 接続後に使えます",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        (1..3).forEach { preset ->
+            ActionButton("プリセット $preset", enabled = connected, modifier = Modifier.weight(1f)) { vm.startSession(preset = preset) }
+        }
+    }
+    var tutorial by rememberSaveable { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("チュートリアル", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        listOf(null to "既定", "on" to "あり", "off" to "なし").forEach { (value, label) ->
+            FilterChip(selected = tutorial == value, onClick = { tutorial = value }, label = { Text(label) })
+        }
+    }
+    ButtonGrid(DemoCatalog.sessionApps, columns = 2) { app, modifier ->
+        val installed = quest?.installed?.contains(app.packageName) == true
+        ActionButton(app.label, enabled = connected && installed, modifier = modifier) {
+            vm.startSession(demoId = app.demoId, tutorial = tutorial)
+        }
     }
 }
 

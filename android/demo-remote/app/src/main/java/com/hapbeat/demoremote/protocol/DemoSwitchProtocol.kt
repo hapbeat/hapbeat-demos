@@ -25,6 +25,12 @@ sealed interface DemoSwitchMessage {
     ) : DemoSwitchMessage
     data class Discover(override val controllerId: String, val nonce: String, override val auth: String?) : DemoSwitchMessage
     data class Here(override val controllerId: String, val nonce: String, val currentDemoId: String, override val auth: String?) : DemoSwitchMessage
+    data class Query(override val controllerId: String, val nonce: String, override val auth: String?) : DemoSwitchMessage
+    data class State(
+        override val controllerId: String, val nonce: String, val currentDemoId: String,
+        val hapticsOn: Boolean, val hapticsUi: Boolean, val recenterUi: Boolean, val paused: Boolean,
+        val stepIndex: Long, val stepCount: Long, override val auth: String?,
+    ) : DemoSwitchMessage
 }
 
 /** Authentication policy of this controller. [secret] null/empty means unsigned mode (only if [allowUnsigned]). */
@@ -46,7 +52,7 @@ object DemoSwitchProtocol {
     )
     val CONTROL_ACTIONS = setOf(
         "menu_open", "menu_close", "recenter", "restart", "scene", "haptics_on", "haptics_off",
-        "haptics_ui_show", "haptics_ui_hide", "recenter_ui_show", "recenter_ui_hide",
+        "haptics_ui_show", "haptics_ui_hide", "recenter_ui_show", "recenter_ui_hide", "tutorial_start",
     )
 
     private const val HEADER = "HAPBEAT-DEMO-SWITCH/1\n"
@@ -94,6 +100,18 @@ object DemoSwitchProtocol {
         field(this, "nonce", nonce); field(this, "current_demo_id", currentDemoId)
     }.toString()
 
+    fun canonicalQuery(controllerId: String, nonce: String): String = StringBuilder(HEADER + "QUERY\n").apply {
+        field(this, "version", "1"); field(this, "type", "QUERY"); field(this, "controller_id", controllerId); field(this, "nonce", nonce)
+    }.toString()
+
+    fun canonicalState(m: DemoSwitchMessage.State): String = StringBuilder(HEADER + "STATE\n").apply {
+        field(this, "version", "1"); field(this, "type", "STATE"); field(this, "controller_id", m.controllerId)
+        field(this, "nonce", m.nonce); field(this, "current_demo_id", m.currentDemoId)
+        field(this, "haptics_on", m.hapticsOn.toString()); field(this, "haptics_ui", m.hapticsUi.toString())
+        field(this, "recenter_ui", m.recenterUi.toString()); field(this, "paused", m.paused.toString())
+        field(this, "step_index", m.stepIndex.toString()); field(this, "step_count", m.stepCount.toString())
+    }.toString()
+
     fun canonical(message: DemoSwitchMessage): String = when (message) {
         is DemoSwitchMessage.Switch -> canonicalCommand(message.controllerId, message.seq, message.demoId)
         is DemoSwitchMessage.Control -> canonicalControl(message.controllerId, message.seq, message.demoId, message.action, message.sceneId)
@@ -102,6 +120,8 @@ object DemoSwitchProtocol {
         )
         is DemoSwitchMessage.Discover -> canonicalDiscover(message.controllerId, message.nonce)
         is DemoSwitchMessage.Here -> canonicalHere(message.controllerId, message.nonce, message.currentDemoId)
+        is DemoSwitchMessage.Query -> canonicalQuery(message.controllerId, message.nonce)
+        is DemoSwitchMessage.State -> canonicalState(message)
     }
 
     fun hmacHex(secret: String, canonical: String): String {
@@ -144,6 +164,11 @@ object DemoSwitchProtocol {
     fun buildDiscover(controllerId: String, nonce: String, config: AuthConfig): String = withAuth(
         linkedMapOf("version" to 1, "type" to "DISCOVER", "controller_id" to controllerId, "nonce" to nonce),
         config, canonicalDiscover(controllerId, nonce),
+    )
+
+    fun buildQuery(controllerId: String, nonce: String, config: AuthConfig): String = withAuth(
+        linkedMapOf("version" to 1, "type" to "QUERY", "controller_id" to controllerId, "nonce" to nonce),
+        config, canonicalQuery(controllerId, nonce),
     )
 
     // ---- parsing / schema validation ---------------------------------------------------------
@@ -195,6 +220,25 @@ object DemoSwitchProtocol {
                 if (!onlyFields(obj, HERE_FIELDS)) return null
                 DemoSwitchMessage.Here(controllerId, nonceField(obj) ?: return null, identifierField(obj, "current_demo_id") ?: return null, auth)
             }
+            "QUERY" -> {
+                if (!onlyFields(obj, DISCOVER_FIELDS)) return null
+                DemoSwitchMessage.Query(controllerId, nonceField(obj) ?: return null, auth)
+            }
+            "STATE" -> {
+                if (!onlyFields(obj, STATE_FIELDS)) return null
+                DemoSwitchMessage.State(
+                    controllerId = controllerId,
+                    nonce = nonceField(obj) ?: return null,
+                    currentDemoId = identifierField(obj, "current_demo_id") ?: return null,
+                    hapticsOn = boolField(obj, "haptics_on") ?: return null,
+                    hapticsUi = boolField(obj, "haptics_ui") ?: return null,
+                    recenterUi = boolField(obj, "recenter_ui") ?: return null,
+                    paused = boolField(obj, "paused") ?: return null,
+                    stepIndex = intField(obj, "step_index")?.takeIf { it in -1..32 } ?: return null,
+                    stepCount = intField(obj, "step_count")?.takeIf { it in 0..32 } ?: return null,
+                    auth = auth,
+                )
+            }
             else -> null
         }
     }
@@ -204,6 +248,7 @@ object DemoSwitchProtocol {
     private val STATUS_FIELDS = SWITCH_FIELDS + setOf("current_demo_id", "code", "message")
     private val DISCOVER_FIELDS = setOf("version", "type", "controller_id", "nonce")
     private val HERE_FIELDS = DISCOVER_FIELDS + "current_demo_id"
+    private val STATE_FIELDS = HERE_FIELDS + setOf("haptics_on", "haptics_ui", "recenter_ui", "paused", "step_index", "step_count")
 
     /** Required fields present and no field other than those plus optional auth. */
     private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>): Boolean =
@@ -211,6 +256,7 @@ object DemoSwitchProtocol {
 
     private fun stringField(obj: Map<String, JsonValue>, name: String): String? = (obj[name] as? JsonString)?.value
     private fun intField(obj: Map<String, JsonValue>, name: String): Long? = (obj[name] as? JsonNumber)?.longOrNull()
+    private fun boolField(obj: Map<String, JsonValue>, name: String): Boolean? = (obj[name] as? JsonBool)?.value
     private fun identifierField(obj: Map<String, JsonValue>, name: String): String? = stringField(obj, name)?.takeIf { isIdentifier(it) }
     private fun nonceField(obj: Map<String, JsonValue>): String? = stringField(obj, "nonce")?.takeIf { NONCE.matches(it) }
     private fun seqField(obj: Map<String, JsonValue>): Long? = intField(obj, "seq")?.takeIf { it in 1..MAX_SEQ }
@@ -249,6 +295,16 @@ object DemoSwitchProtocol {
         if (!isUnicastIpv4(source)) return false
         if (expectedSource != null && source != expectedSource) return false
         if (message.controllerId != controllerId || message.nonce !in activeNonces) return false
+        return authAccepted(message, config)
+    }
+
+    /** STATE acceptance: from the Quest the QUERY went to, own controller ID, that QUERY's nonce, auth rule. */
+    fun acceptState(
+        message: DemoSwitchMessage.State, source: String, controllerId: String, queryTarget: (nonce: String) -> String?,
+        config: AuthConfig,
+    ): Boolean {
+        if (message.controllerId != controllerId) return false
+        if (queryTarget(message.nonce) != source) return false
         return authAccepted(message, config)
     }
 
