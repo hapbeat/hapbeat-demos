@@ -23,7 +23,8 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 ```
 
 - APK: `app/build/outputs/apk/debug/app-debug.apk`
-- インストール: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
+- インストール: `tools\install-demo-remote.cmd` をダブルクリック（`-Build` を付けるとビルドから）。USB またはワイヤレスデバッグで見えている全スマホ・タブレットに入れて起動する（Quest は除外）
+- Wi-Fi でインストール（Android 11 以上）: スマホの「開発者向けオプション > ワイヤレスデバッグ」を ON。初回だけ「ペア設定コードによるデバイスのペア設定」に出る IP:ポートとコードで `powershell -File tools\install-demo-remote.ps1 -Pair 192.168.0.50:37123 -Code 123456`。以後はワイヤレスデバッグが ON で PC と同じ LAN にいれば、ケーブル無しで見つかる（mDNS）
 - `local.properties`（`sdk.dir=...`）は各 PC で用意する（commit しない）
 - scrcpy-server はビルド時に GitHub Releases から取得し、SHA-256 を検証して APK に同梱する（repo には置かない）。`tools/quest-mirror/scrcpy/scrcpy-server` に同じハッシュのファイルがあればそれを使う（オフラインビルド用）
 - ユニットテスト: `.\gradlew.bat :app:testDebugUnitTest`
