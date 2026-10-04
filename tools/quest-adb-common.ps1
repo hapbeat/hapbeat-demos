@@ -31,7 +31,11 @@ function Add-KnownQuestIp([string]$ip) {
 # Every USB-connected Quest: switch adb to TCP 5555 and connect over Wi-Fi. Returns the new ip:port serials.
 function Enable-QuestWifi([string]$adb) {
     $connected = @()
-    foreach ($usb in @(Get-OnlineDevices $adb | Where-Object { $_ -notmatch ':' })) {
+    # USB serials only (no ip:port, no mDNS "adb-..._adb-tls-connect._tcp." names), and Quests only:
+    # a phone on USB at the same time (e.g. for install-demo-remote) must not be switched to TCP adb.
+    $usbQuests = @(Get-OnlineDevices $adb | Where-Object { $_ -notmatch ':' -and $_ -notmatch '\._tcp\.?$' } |
+        Where-Object { (Get-QuestModel $adb $_) -match '^Quest' })
+    foreach ($usb in $usbQuests) {
         $wlan = & $adb -s $usb shell ip -f inet addr show wlan0 | Select-String 'inet (\d+\.\d+\.\d+\.\d+)'
         if (-not $wlan) { Write-Warning "$usb has no Wi-Fi address (wlan0). Join the same network as this PC."; continue }
         $ip = $wlan.Matches[0].Groups[1].Value
@@ -53,7 +57,8 @@ function Connect-KnownQuests([string]$adb) {
         if ("${ip}:5555" -in $online) { continue }
         & $adb connect "${ip}:5555" 2>&1 | Out-Null
     }
-    @(Get-OnlineDevices $adb | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+:\d+$' })
+    @(Get-OnlineDevices $adb | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+:\d+$' } |
+        Where-Object { (Get-QuestModel $adb $_) -match '^Quest' })
 }
 
 function Get-QuestModel([string]$adb, [string]$serial) {
