@@ -64,7 +64,7 @@ struct FHapbeatSessionPanelLayout
 /**
  * World-space Demo Session UI, driven by UHapbeatDemoSessionSubsystem every frame: the completion panel
  * (in front of the user below eye level, or at the demo's UHapbeatDemoSessionPanelAnchor), the pause panel
- * (in front of the user), the in-view haptics ON/OFF and 視線をリセット buttons (lower left of the view), plus a
+ * (in front of the user), the in-view haptics ON/OFF and 視線をリセット buttons (lower left of the view, side by side), plus a
  * thin ray from each tracked controller while the UI is visible. Panels stay where they appeared.
  *
  * Looks like the Unity package's panels (DemoSessionUi.cs): the same colours, Noto Sans CJK JP, sizes and vertical
@@ -127,6 +127,11 @@ public:
      * zone away, so it stays the user's facing while they glance down-left at a button.
      */
     float GetControlsYaw() const {return ControlsYaw;}
+    /**
+     * Centre of an in-view button for a controls heading (world yaw): the pair sits 15 deg left of it and 30 deg below
+     * the horizon, 45 cm from the eye; 視線をリセット (bRecenter) on the left, haptics on the right, 112 x 68 mm each.
+     */
+    static FVector InViewButtonLocation(const FVector& Eye,float ControlsYaw,bool bRecenter);
     FEvents Step(const FHapbeatSessionPointerInput& Input,const FVector& Eye,const FRotator& ViewRotation,float Dt);
 private:
     /** One floating panel's input and look state; its widget is CompletionPanel / PausePanel / HapticsButton / RecenterButton. */

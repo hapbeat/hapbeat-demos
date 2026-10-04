@@ -4,6 +4,7 @@
 #include "Tickable.h"
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchReceiver.h"
+#include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionPause.h"
 #include "HapbeatDemoSessionHandoff.h"
 #include "HapbeatDemoSessionSubsystem.generated.h"
@@ -16,6 +17,21 @@ struct FHapbeatSessionPointerInput;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
 
+/** Who handles a Demo Switch CONTROL action (UHapbeatDemoSessionSubsystem::RouteControl). */
+enum class EHapbeatControlRoute : uint8
+{
+    /** FAILED/not_allowed. */
+    NotAllowed,
+    /** The demo's RegisterControl handler. */
+    Registered,
+    /** The plugin's own: haptics_* (with supports.haptics_toggle), recenter, recenter_ui_*. */
+    Plugin,
+    /** menu_open / menu_close without a registered handler: the shared pause panel. */
+    SharedPause,
+    /** restart without a registered handler: the shared pause's 最初からやり直す. */
+    SharedRestart,
+};
+
 /**
  * Demo Session runtime (repos-core/hapbeat-contracts/specs/demo-session.md) and the Demo Switch receiver.
  *
@@ -27,7 +43,9 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FHapbeatDemoSessionFlag,bool);
  * Haptics ON/OFF (OnHapticsChanged) starts ON. With descriptor supports.haptics_toggle, the in-view button
  * shows while IsHapticsUiVisible() (ticket haptics_ui, or Demo Switch CONTROL haptics_ui_show/hide).
  *
- * The demo registers its CONTROL actions (restart / menu_open / menu_close) with RegisterControl.
+ * The demo registers its CONTROL actions (restart / menu_open / menu_close / tutorial_start) with RegisterControl.
+ * Without a registered handler, menu_open / menu_close open / close the shared pause and restart is the pause's
+ * 最初からやり直す, when the shared pause is enabled (RouteControl). QUERY is answered with GetSwitchState().
  *
  * 視線をリセット: the in-view button (shown while IsRecenterUiVisible(): ticket recenter_ui, or CONTROL
  * recenter_ui_show/hide) and CONTROL recenter call the demo's own start alignment (SetRecenterHandler), or else
@@ -132,6 +150,14 @@ public:
      */
     void RegisterControl(const FString& Action,const UObject* Owner,TFunction<bool()> Handler);
     void UnregisterControls(const UObject* Owner);
+    /**
+     * Demo Switch CONTROL routing: the plugin's own actions first, then a handler the demo registered (bRegistered),
+     * then the shared pause (menu_open / menu_close) and restart, when the shared pause is enabled. Anything else,
+     * e.g. tutorial_start without a registered handler, is not allowed.
+     */
+    static EHapbeatControlRoute RouteControl(const FString& Action,bool bRegistered,bool bPauseEnabled,bool bHapticsToggle);
+    /** What a Demo Switch STATE reports: haptics, the in-view buttons as drawn, the shared pause, the session step (-1 / 0 outside). */
+    FHapbeatDemoSwitchState GetSwitchState() const;
 
     /** "もう一度": restart the same step inside the demo (the panel is already closed). */
     FSimpleMulticastDelegate OnRestartRequested;

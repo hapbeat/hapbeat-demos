@@ -4,9 +4,10 @@
 class FSocket;
 class FInternetAddr;
 struct FHapbeatDemoSwitchMessage;
+struct FHapbeatDemoSwitchState;
 
 /**
- * Demo Switch UDP 7710 receiver for the foreground runtime: DISCOVER/HERE and CONTROL
+ * Demo Switch UDP 7710 receiver for the foreground runtime: DISCOVER/HERE, QUERY/STATE and CONTROL
  * (ACK -> operation on the game thread -> READY). SWITCH is answered FAILED/not_allowed.
  *
  * Settings: Saved/Config/HapbeatDemoSession.json ({"enabled", "shared_secret", "allow_unsigned",
@@ -22,6 +23,8 @@ public:
     TFunction<bool(const FString& Action)> IsAllowed;
     /** Runs an accepted CONTROL action; false -> FAILED/launch_failed. */
     TFunction<bool(const FString& Action)> Execute;
+    /** The runtime's current state for a STATE answer (QUERY is not answered without it). */
+    TFunction<FHapbeatDemoSwitchState()> GetState;
 
     ~FHapbeatDemoSwitchReceiver() {Stop();}
     /** Reads the settings and replay state. False when the receiver stays off. */

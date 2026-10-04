@@ -127,10 +127,12 @@ void FHapbeatDemoSwitchReceiver::Tick()
         FHapbeatDemoSwitchMessage M;if(!HapbeatDemoSwitchProtocol::Parse(Bytes,M)) continue;
         auto Status=[&](const TCHAR* Type,const TCHAR* Code){Send(HapbeatDemoSwitchProtocol::Status(M,DemoId,Type,Code,Secret),*Source);};
         if(!HapbeatDemoSwitchProtocol::Authenticate(M,Secret,bUnsigned)) {
-            if(M.Type!=TEXT("DISCOVER")) Status(TEXT("FAILED"),TEXT("invalid_auth"));
+            if(M.Type!=TEXT("DISCOVER")&&M.Type!=TEXT("QUERY")) Status(TEXT("FAILED"),TEXT("invalid_auth"));
             continue;
         }
         if(M.Type==TEXT("DISCOVER")) {Send(HapbeatDemoSwitchProtocol::Here(M,DemoId,Secret),*Source);continue;}
+        // QUERY changes nothing: no sequence, answered by unicast like DISCOVER.
+        if(M.Type==TEXT("QUERY")) {if(GetState) Send(HapbeatDemoSwitchProtocol::State(M,DemoId,GetState(),Secret),*Source);continue;}
         // Launching another application (SWITCH) is not part of this receiver.
         const bool Allowed=M.Type==TEXT("CONTROL")&&M.DemoId==DemoId&&IsAllowed&&IsAllowed(M.Action);
         if(!Allowed) {Status(TEXT("FAILED"),TEXT("not_allowed"));continue;}
