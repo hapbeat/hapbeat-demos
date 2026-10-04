@@ -4,7 +4,6 @@
 #include "Tickable.h"
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchReceiver.h"
-#include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionPause.h"
 #include "HapbeatDemoSessionHandoff.h"
 #include "HapbeatDemoSessionSubsystem.generated.h"

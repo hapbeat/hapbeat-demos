@@ -1,10 +1,9 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "HapbeatDemoSwitchProtocol.h"
 
 class FSocket;
 class FInternetAddr;
-struct FHapbeatDemoSwitchMessage;
-struct FHapbeatDemoSwitchState;
 
 /**
  * Demo Switch UDP 7710 receiver for the foreground runtime: DISCOVER/HERE, QUERY/STATE and CONTROL
