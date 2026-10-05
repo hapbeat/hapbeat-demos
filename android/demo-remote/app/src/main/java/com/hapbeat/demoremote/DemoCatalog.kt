@@ -115,14 +115,14 @@ object ControlCatalog {
         )),
         ControlGroup("Volley", listOf(
             // Same IDs as the Volley descriptor's scenes (block is its default).
-            ControlAction("スパイク＋ブロック", "scene", "block", VOLLEY_ID),
-            ControlAction("6人制の試合", "scene", "match", VOLLEY_ID),
-            ControlAction("レシーブ", "scene", "receive", VOLLEY_ID),
+            ControlAction("スパイク＋ブロック", "scene", "block", DemoCatalog.VOLLEY_ID),
+            ControlAction("6人制の試合", "scene", "match", DemoCatalog.VOLLEY_ID),
+            ControlAction("レシーブ", "scene", "receive", DemoCatalog.VOLLEY_ID),
         )),
         ControlGroup("Energy Duel", listOf(
-            ControlAction("チュートリアル", "scene", "tutorial", ENERGY_DUEL_ID),
-            ControlAction("試合", "scene", "match", ENERGY_DUEL_ID),
-            ControlAction("フリープレイ", "scene", "free", ENERGY_DUEL_ID),
+            ControlAction("チュートリアル", "scene", "tutorial", DemoCatalog.ENERGY_DUEL_ID),
+            ControlAction("試合", "scene", "match", DemoCatalog.ENERGY_DUEL_ID),
+            ControlAction("フリープレイ", "scene", "free", DemoCatalog.ENERGY_DUEL_ID),
         )),
     )
 }
