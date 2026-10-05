@@ -107,11 +107,19 @@ private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
 private fun ActionsAndLog(vm: RemoteViewModel) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
-    ActionButton(
-        "Hub を開く",
-        enabled = quest?.adb == AdbState.CONNECTED && hubInstalled,
-        modifier = Modifier.fillMaxWidth().height(64.dp),
-    ) { vm.launchApp(DemoCatalog.hub) }
+    // The two most urgent actions stay one tap away: back to the Hub, and pause (shared pause panel).
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ActionButton(
+            "Hub を開く",
+            enabled = quest?.adb == AdbState.CONNECTED && hubInstalled,
+            modifier = Modifier.weight(1f).height(64.dp),
+        ) { vm.launchApp(DemoCatalog.hub) }
+        ActionButton(
+            "メニューを開く",
+            enabled = vm.demoSwitchBlockReason == null,
+            modifier = Modifier.weight(1f).height(64.dp),
+        ) { vm.sendControl(ControlCatalog.menuOpen) }
+    }
     NoticeArea(vm)
     var tab by rememberSaveable { mutableIntStateOf(0) }
     TabRow(selectedTabIndex = tab) {
@@ -262,9 +270,12 @@ private fun ControlTab(vm: RemoteViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     StateSummary(vm.selectedQuest)
-    ButtonGrid(ControlCatalog.actions, columns = 2) { control, modifier ->
-        val allowed = enabled && (control.action != "scene" || isVolley)
-        ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
+    ControlCatalog.groups.forEach { group ->
+        Text(group.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
+        ButtonGrid(group.actions, columns = 2) { control, modifier ->
+            val allowed = enabled && (control.action != "scene" || isVolley)
+            ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
+        }
     }
 }
 

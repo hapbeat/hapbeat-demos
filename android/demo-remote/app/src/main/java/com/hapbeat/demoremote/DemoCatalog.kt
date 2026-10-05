@@ -13,7 +13,6 @@ object DemoCatalog {
     val apps: List<DemoApp> = listOf(
         DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
         DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley"),
-        DemoApp("gloveball_v2", "GloveBall", "jp.hapbeat.gloveballdemo.v2"),
         DemoApp("boxing", "Boxing", "com.hapbeat.boxing"),
         DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2"),
         DemoApp("trex-encounter", "T-Rex Encounter", "com.hapbeat.trexencounter"),
@@ -64,20 +63,33 @@ object DemoCatalog {
 /** One CONTROL button: action + scene_id (empty except for scene). */
 data class ControlAction(val label: String, val action: String, val sceneId: String = "")
 
+/** A titled row group on the 操作 tab. */
+data class ControlGroup(val title: String, val actions: List<ControlAction>)
+
 object ControlCatalog {
-    val actions: List<ControlAction> = listOf(
-        ControlAction("チュートリアル開始", "tutorial_start"),
-        ControlAction("最初から", "restart"),
-        ControlAction("メニューを開く", "menu_open"),
-        ControlAction("メニューを閉じる", "menu_close"),
-        ControlAction("視線リセット", "recenter"),
-        ControlAction("触覚 ON", "haptics_on"),
-        ControlAction("触覚 OFF", "haptics_off"),
-        ControlAction("触覚ボタン表示", "haptics_ui_show"),
-        ControlAction("触覚ボタン非表示", "haptics_ui_hide"),
-        ControlAction("リセットボタン表示", "recenter_ui_show"),
-        ControlAction("リセットボタン非表示", "recenter_ui_hide"),
-        ControlAction("Volley レシーブ", "scene", "receive"),
-        ControlAction("Volley ブロック", "scene", "block"),
+    val menuOpen = ControlAction("メニューを開く", "menu_open")
+
+    val groups: List<ControlGroup> = listOf(
+        ControlGroup("進行", listOf(
+            ControlAction("チュートリアル開始", "tutorial_start"),
+            ControlAction("最初から", "restart"),
+            menuOpen,
+            ControlAction("メニューを閉じる", "menu_close"),
+        )),
+        ControlGroup("視線・触覚", listOf(
+            ControlAction("視線リセット", "recenter"),
+            ControlAction("触覚 ON", "haptics_on"),
+            ControlAction("触覚 OFF", "haptics_off"),
+        )),
+        ControlGroup("HMD 内のボタン表示", listOf(
+            ControlAction("触覚ボタン 表示", "haptics_ui_show"),
+            ControlAction("触覚ボタン 非表示", "haptics_ui_hide"),
+            ControlAction("リセットボタン 表示", "recenter_ui_show"),
+            ControlAction("リセットボタン 非表示", "recenter_ui_hide"),
+        )),
+        ControlGroup("Volley", listOf(
+            ControlAction("レシーブ", "scene", "receive"),
+            ControlAction("ブロック", "scene", "block"),
+        )),
     )
 }
