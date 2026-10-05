@@ -12,6 +12,7 @@ import com.hapbeat.demoremote.adb.AdbConnectResult
 import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.QuestAdb
 import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.data.RemotePreset
 import com.hapbeat.demoremote.data.SavedQuest
 import com.hapbeat.demoremote.data.SettingsStore
 import com.hapbeat.demoremote.mirror.MirrorSession
@@ -104,6 +105,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
     var selectedIp by mutableStateOf(settings.selectedIp); private set
     val logs = mutableStateListOf<LogEntry>()
+    /** Session plans kept on this phone (the Hub's presets 1..3 are separate and edited in VR). */
+    val presets = mutableStateListOf<RemotePreset>().apply { addAll(settings.presets) }
     /** Fixed-area notice (text, isError). */
     var notice by mutableStateOf("" to false); private set
     var adbMessage by mutableStateOf(""); private set
@@ -679,13 +682,37 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
      * with [tutorial] "on" / "off" / null (descriptor default).
      */
     fun startSession(preset: Int? = null, demoId: String? = null, tutorial: String? = null) {
+        val title = if (preset != null) "Hub のプリセット $preset" else DemoCatalog.labelFor(demoId) +
+            when (tutorial) { "on" -> "（チュートリアルあり）"; "off" -> "（チュートリアルなし）"; else -> "" }
+        startThroughHub(title, DemoCatalog.hubSessionCommand(preset, demoId, tutorial))
+    }
+
+    /** Starts a remote preset as one Hub session (`steps`). */
+    fun startPreset(preset: RemotePreset) {
+        val command = try { DemoCatalog.hubPlanCommand(preset.steps) } catch (_: IllegalArgumentException) {
+            setNotice("プリセット「${preset.name}」を開始できません（デモ数・内容を確認してください）", true)
+            return
+        }
+        startThroughHub(preset.name, command)
+    }
+
+    fun savePreset(index: Int?, preset: RemotePreset) {
+        if (index != null && index in presets.indices) presets[index] = preset else presets.add(preset)
+        settings.presets = presets.toList()
+    }
+
+    fun deletePreset(index: Int) {
+        if (index !in presets.indices) return
+        presets.removeAt(index)
+        settings.presets = presets.toList()
+    }
+
+    private fun startThroughHub(title: String, command: String) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
-        val title = if (preset != null) "プリセット $preset" else DemoCatalog.labelFor(demoId) +
-            when (tutorial) { "on" -> "（チュートリアルあり）"; "off" -> "（チュートリアルなし）"; else -> "" }
         viewModelScope.launch {
             val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
-            val response = adbShell(quest.ip, DemoCatalog.hubSessionCommand(preset, demoId, tutorial))
+            val response = adbShell(quest.ip, command)
             if (response == null) {
                 updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
                 return@launch

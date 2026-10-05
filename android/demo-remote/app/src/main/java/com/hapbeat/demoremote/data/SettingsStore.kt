@@ -132,6 +132,10 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = prefs.getBoolean(KEY_MIRROR_ENABLED, false)
         set(value) { prefs.edit().putBoolean(KEY_MIRROR_ENABLED, value).apply() }
 
+    var presets: List<RemotePreset>
+        get() = PresetCodec.decode(prefs.getString(KEY_PRESETS, null))
+        set(value) { prefs.edit().putString(KEY_PRESETS, PresetCodec.encode(value)).apply() }
+
     var keepScreenOn: Boolean
         get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
         set(value) { prefs.edit().putBoolean(KEY_KEEP_SCREEN_ON, value).apply() }
@@ -144,6 +148,7 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_AUTH_CHOSEN = "auth_chosen"
         const val KEY_QUESTS = "quests"
         const val KEY_SELECTED_IP = "selected_ip"
+        const val KEY_PRESETS = "remote_presets"
         const val KEY_MIRROR_MAX_SIZE = "mirror_max_size"
         const val KEY_MIRROR_BIT_RATE = "mirror_bit_rate"
         const val KEY_MIRROR_FPS = "mirror_fps"

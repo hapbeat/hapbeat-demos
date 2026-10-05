@@ -61,7 +61,7 @@ import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 
 @Composable
-fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
+fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int?) -> Unit = {}) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -75,7 +75,7 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ControlColumn(vm, onOpenSettings)
+                    ControlColumn(vm, onOpenSettings, onEditPreset)
                 }
             }
         } else {
@@ -90,7 +90,7 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     QuestBar(vm, onOpenSettings)
-                    ActionsAndLog(vm)
+                    ActionsAndLog(vm, onEditPreset)
                 }
             }
         }
@@ -98,13 +98,13 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
+private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int?) -> Unit) {
     QuestBar(vm, onOpenSettings)
-    ActionsAndLog(vm)
+    ActionsAndLog(vm, onEditPreset)
 }
 
 @Composable
-private fun ActionsAndLog(vm: RemoteViewModel) {
+private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     // The two most urgent actions stay one tap away: back to the Hub, and pause (shared pause panel).
@@ -129,7 +129,7 @@ private fun ActionsAndLog(vm: RemoteViewModel) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (tab) {
-            0 -> SessionTab(vm)
+            0 -> SessionTab(vm, onEditPreset)
             1 -> SwitchTab(vm)
             2 -> ControlTab(vm)
             else -> LaunchTab(vm)
@@ -302,7 +302,7 @@ private fun StateSummary(quest: QuestState?) {
 }
 
 @Composable
-private fun SessionTab(vm: RemoteViewModel) {
+private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     val connected = quest?.adb == AdbState.CONNECTED && hubInstalled
@@ -312,12 +312,29 @@ private fun SessionTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Text("リモコンのプリセット", style = MaterialTheme.typography.titleSmall)
+    vm.presets.forEachIndexed { i, preset ->
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(preset.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(presetSummary(preset), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = { onEditPreset(i) }, modifier = Modifier.width(64.dp)) { Text("編集") }
+            ActionButton("開始", enabled = connected, modifier = Modifier.width(88.dp)) { vm.startPreset(preset) }
+        }
+    }
+    TextButton(onClick = { onEditPreset(null) }) { Text("＋ プリセットを作る") }
+    Text("Hub のプリセット（VR 内で編集）", style = MaterialTheme.typography.titleSmall)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("プリセット", style = MaterialTheme.typography.bodyMedium)
         (1..3).forEach { preset ->
             ActionButton("$preset", enabled = connected, modifier = Modifier.weight(1f)) { vm.startSession(preset = preset) }
         }
     }
+    Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
     var tutorial by rememberSaveable { mutableStateOf<String?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("チュートリアル", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))

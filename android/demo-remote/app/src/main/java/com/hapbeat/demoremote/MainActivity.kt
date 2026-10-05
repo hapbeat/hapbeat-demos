@@ -23,10 +23,11 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.hapbeat.demoremote.ui.AppTheme
 import com.hapbeat.demoremote.ui.LicenseScreen
+import com.hapbeat.demoremote.ui.PresetEditScreen
 import com.hapbeat.demoremote.ui.RemoteScreen
 import com.hapbeat.demoremote.ui.SettingsScreen
 
-enum class Screen { REMOTE, SETTINGS, LICENSES }
+enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RemoteViewModel by viewModels()
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme {
                 var screen by rememberSaveable { mutableStateOf(Screen.REMOTE) }
+                var editingPreset by rememberSaveable { mutableStateOf<Int?>(null) }
                 LaunchedEffect(viewModel.keepScreenOn) {
                     if (viewModel.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -52,7 +54,12 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                         when (screen) {
-                            Screen.REMOTE -> RemoteScreen(viewModel, onOpenSettings = { screen = Screen.SETTINGS })
+                            Screen.REMOTE -> RemoteScreen(
+                                viewModel,
+                                onOpenSettings = { screen = Screen.SETTINGS },
+                                onEditPreset = { editingPreset = it; screen = Screen.PRESET },
+                            )
+                            Screen.PRESET -> PresetEditScreen(viewModel, editingPreset, onDone = { screen = Screen.REMOTE })
                             Screen.SETTINGS -> SettingsScreen(
                                 viewModel,
                                 onBack = { screen = Screen.REMOTE },

@@ -1,5 +1,7 @@
 package com.hapbeat.demoremote
 
+import com.hapbeat.demoremote.protocol.MiniJson
+
 /**
  * Fixed demo table. adb launches only these packages; nothing received from the
  * network is ever used as a package name or shell command.
@@ -51,6 +53,29 @@ object DemoCatalog {
             }
             else -> throw IllegalArgumentException("preset or demoId")
         }
+        return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA '$json'"
+    }
+
+    /** Hub start extra limit (demo-session.md). */
+    const val HUB_START_MAX_BYTES = 4096
+
+    /**
+     * Starts a session with a plan built on this phone (`steps`, 1..32 demos, each with an optional
+     * tutorial option). Only fixed-table demo IDs and literal option values go into the JSON.
+     */
+    fun hubPlanCommand(steps: List<com.hapbeat.demoremote.data.PresetStep>): String {
+        require(steps.size in 1..32)
+        val json = MiniJson.write(linkedMapOf(
+            "version" to 1,
+            "steps" to steps.map { step ->
+                require(sessionApps.any { it.demoId == step.demoId })
+                require(step.tutorial == null || step.tutorial == "on" || step.tutorial == "off")
+                linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
+                    if (step.tutorial != null) put("options", linkedMapOf("tutorial" to step.tutorial))
+                }
+            },
+        ))
+        require(json.toByteArray(Charsets.UTF_8).size <= HUB_START_MAX_BYTES)
         return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA '$json'"
     }
 
