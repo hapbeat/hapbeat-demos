@@ -8,7 +8,25 @@
 #   powershell -ExecutionPolicy Bypass -File tools/install-demo-remote.ps1 [-Build] [-Apk <path>] [-NoLaunch]
 param([switch]$Build, [string]$Apk = '', [string]$Pair = '', [string]$Code = '', [switch]$NoLaunch)
 $ErrorActionPreference = 'Continue'
-. (Join-Path $PSScriptRoot 'quest-adb-common.ps1')
+
+# Self-contained (no shared helper): use the adb of the server that is already running, since a client of
+# another version restarts the server and drops every Wi-Fi device.
+function Get-RemoteAdb {
+    $running = Get-CimInstance Win32_Process -Filter "Name='adb.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and (Test-Path $_.ExecutablePath) } | Select-Object -First 1
+    if ($running) { return $running.ExecutablePath }
+    $cmd = Get-Command adb -ErrorAction SilentlyContinue
+    if (-not $cmd) { throw 'adb not found. Install Android platform-tools and add it to PATH.' }
+    cmd /c "`"$($cmd.Source)`" start-server >nul 2>&1"
+    return $cmd.Source
+}
+function Get-OnlineDevices([string]$adb) {
+    & $adb devices | Select-String '^(\S+)\s+device$' | ForEach-Object { $_.Matches[0].Groups[1].Value } |
+        Where-Object { $_ -notmatch '^emulator-' }
+}
+function Get-DeviceModel([string]$adb, [string]$serial) {
+    ((& $adb -s $serial shell getprop ro.product.model) -join '').Trim()
+}
 
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'android\demo-remote'
@@ -25,7 +43,7 @@ if ($Build -or -not (Test-Path $Apk)) {
 }
 if (-not (Test-Path $Apk)) { throw "APK not found: $Apk" }
 
-$adb = Get-QuestAdb
+$adb = Get-RemoteAdb
 if ($Pair) {
     if (-not $Code) { throw '-Pair needs -Code (the 6-digit code shown on the phone).' }
     & $adb pair $Pair $Code
@@ -39,7 +57,7 @@ foreach ($line in @(& $adb mdns services 2>$null)) {
 # One transport per physical phone (USB and Wi-Fi show the same serial number); Quests are skipped.
 $phones = [ordered]@{}
 foreach ($serial in @(Get-OnlineDevices $adb)) {
-    $model = Get-QuestModel $adb $serial
+    $model = Get-DeviceModel $adb $serial
     if ($model -match '^Quest') { continue }
     $id = ((& $adb -s $serial shell getprop ro.serialno) -join '').Trim()
     if (-not $id) { $id = $serial }
