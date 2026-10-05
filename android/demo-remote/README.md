@@ -40,7 +40,21 @@ Android 端末と Quest は **同じ LAN** に接続する。
 
 ## Quest 再起動後の Wi-Fi adb 復旧
 
-Quest を再起動すると Wi-Fi adb（5555）が無効になる。アプリに「Quest の Wi-Fi adb が無効です」と出たら、Quest を USB で PC に繋いで `tools/enable-quest-wifi-adb.cmd` をダブルクリックし、アプリで「adb 接続」を押す。Demo Switch の切替・操作は adb なしでも使える。
+Quest を再起動すると Wi-Fi adb（5555）が無効になる。アプリに「Quest の Wi-Fi adb が無効です」と出たら、次のどちらかで有効にし直す。Demo Switch の切替・操作は adb なしでも使える。
+
+**スマホと直結（PC 不要）**
+
+1. スマホと Quest を USB-C ケーブルで直結する（Quest を挿すとアプリが開く）
+2. スマホ側の通知で「USB の制御: このデバイス」を選ぶ（Quest 側がホストになっていると Quest が見えない）
+3. adb 状態の右の「USB で有効化」（または「設定 → USB で Wi-Fi adb を有効化」）→「有効化」を押す。スマホが `adb tcpip 5555` を実行する
+4. 初回はヘッドセット内に USB デバッグの許可ダイアログが出る。「このコンピューターから常に許可」にチェックして許可する（Wi-Fi adb と同じ鍵なので、一度許可すれば両方に効く）
+5. 成功すると Quest の IP を一覧に追加・選択し、数秒後に Wi-Fi adb で自動接続する。ケーブルは外してよい
+
+スマホが USB ホストになれない端末では使えない。
+
+**PC から**
+
+Quest を USB で PC に繋いで `tools/enable-quest-wifi-adb.cmd` をダブルクリックし、アプリで「adb 接続」を押す。
 
 ## 画面ミラー
 

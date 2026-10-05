@@ -1,16 +1,28 @@
 package com.hapbeat.demoremote
 
 import android.app.Application
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.os.Build
 import android.view.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hapbeat.demoremote.adb.AdbConnectResult
 import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.QuestAdb
+import com.hapbeat.demoremote.adb.UsbAdb
+import com.hapbeat.demoremote.adb.UsbAdbException
+import com.hapbeat.demoremote.adb.UsbAdbKey
 import com.hapbeat.demoremote.data.MirrorSettings
 import com.hapbeat.demoremote.data.RemotePreset
 import com.hapbeat.demoremote.data.SavedQuest
@@ -117,6 +129,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var keepScreenOn by mutableStateOf(settings.keepScreenOn); private set
     var discovering by mutableStateOf(false); private set
     var scanningAdb by mutableStateOf(false); private set
+    /** The last Wi-Fi adb connect to the selected Quest failed because port 5555 is closed (USB re-enable helps). */
+    var wifiAdbOff by mutableStateOf(false); private set
+    var usbDialogOpen by mutableStateOf(false); private set
+    var usbAdbRunning by mutableStateOf(false); private set
+    /** USB re-enable progress / result (text, isError), shown in a fixed area of the dialog. */
+    var usbAdbStatus by mutableStateOf("" to false); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -235,6 +253,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         settings.selectedIp = ip
         mirrorVideoSize = null
         adbMessage = ""
+        wifiAdbOff = false
         if (selectedQuest?.adb == AdbState.DISCONNECTED && foreground) connectAdb()
         updateMirror()
     }
@@ -610,6 +629,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 ticker.cancel()
             }
             val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+            if (ip == selectedIp) wifiAdbOff = result == AdbConnectResult.Unreachable
             if (result != AdbConnectResult.Connected) addLog(label, "adb 接続 $ip", null, LogState.ERROR, result.toString())
             when (result) {
                 AdbConnectResult.Connected -> {
@@ -619,7 +639,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     updateMirror()
                 }
                 AdbConnectResult.Unreachable -> adbFailed(ip,
-                    "Quest の Wi-Fi adb が無効です（Quest 再起動後など）。Quest を USB で PC に繋いで hapbeat-demos/tools/enable-quest-wifi-adb.cmd を実行してください")
+                    "Quest の Wi-Fi adb が無効です（再起動後など）。右の「USB で有効化」でスマホと直結して有効にしてください")
                 AdbConnectResult.AuthTimeout -> adbFailed(ip, "adb の許可が得られませんでした。ヘッドセット内の許可ダイアログを確認して再接続してください")
                 AdbConnectResult.Rejected -> adbFailed(ip, "adb の接続が拒否されました。ヘッドセット内で許可してから再接続してください")
                 is AdbConnectResult.Failed -> adbFailed(ip, "adb 接続に失敗しました（${result.reason}）")
@@ -766,6 +786,110 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Wi-Fi adb over USB -------------------------------------------------------------------------
+
+    fun openUsbDialog() {
+        if (!usbAdbRunning) usbAdbStatus = "" to false
+        usbDialogOpen = true
+    }
+
+    fun closeUsbDialog() {
+        usbDialogOpen = false
+    }
+
+    /** The activity was opened (or re-delivered) by a USB_DEVICE_ATTACHED intent for an ADB device. */
+    fun onUsbDeviceAttached() {
+        if (!usbAdbRunning) usbAdbStatus = "Quest が USB で接続されました。「有効化」を押してください" to false
+        usbDialogOpen = true
+    }
+
+    /**
+     * Phone as USB host: runs `adb tcpip 5555` on a directly connected Quest, then adds / selects its
+     * Wi-Fi IP and connects over Wi-Fi adb as usual.
+     */
+    fun enableWifiAdbOverUsb() {
+        if (usbAdbRunning) return
+        val app = getApplication<Application>()
+        usbAdbRunning = true
+        viewModelScope.launch {
+            try {
+                val manager = app.getSystemService(UsbManager::class.java)
+                val device = manager?.let { UsbAdb.findDevice(it) }
+                    ?: throw UsbAdbException("USB の Quest が見つかりません。直結し、スマホ側で「USB の制御: このデバイス」を選んでください")
+                usbAdbStatus = "USB の使用を許可してください" to false
+                if (!requestUsbPermission(manager, device)) throw UsbAdbException("USB の使用が許可されませんでした。もう一度押して許可してください")
+                usbAdbStatus = "Quest と通信中…" to false
+                val key = withContext(Dispatchers.IO) {
+                    try {
+                        keyPair // generates the key files on first use
+                        UsbAdbKey.read(app.filesDir)
+                    } catch (e: java.io.IOException) {
+                        throw UsbAdbException("adb の鍵を読み込めません（${e.javaClass.simpleName}）")
+                    } catch (e: java.security.GeneralSecurityException) {
+                        throw UsbAdbException("adb の鍵を読み込めません（${e.javaClass.simpleName}）")
+                    }
+                }
+                val ip = UsbAdb.enableWifiAdb(manager, device, key) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        usbAdbStatus = "ヘッドセット内で「このコンピューターから常に許可」にチェックして許可してください（最大 30 秒）" to false
+                    }
+                }
+                onUsbWifiAdbEnabled(ip)
+            } catch (e: UsbAdbException) {
+                usbAdbStatus = (e.message ?: "") to true
+                addLog("USB", "Wi-Fi adb を有効化", null, LogState.ERROR, e.message ?: "")
+            } finally {
+                usbAdbRunning = false
+            }
+        }
+    }
+
+    private suspend fun onUsbWifiAdbEnabled(ip: String) {
+        if (quests.none { it.ip == ip }) {
+            quests.add(QuestState(ip, nextLabel(), manual = true))
+            persistQuests()
+        }
+        addLog(quests.first { it.ip == ip }.label, "USB で Wi-Fi adb を有効化 $ip", null, LogState.READY)
+        // Any old Wi-Fi connection to this IP died with the adbd restart.
+        adbJob?.cancel()
+        adbConnections.remove(ip)?.close()
+        updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
+        if (selectedIp != ip) {
+            stopMirror()
+            selectedIp = ip
+            settings.selectedIp = ip
+            mirrorVideoSize = null
+        }
+        wifiAdbOff = false
+        usbAdbStatus = "有効にしました（$ip）。ケーブルを外して構いません" to false
+        usbDialogOpen = false
+        adbMessage = "Wi-Fi adb を有効にしました。接続します…"
+        // adbd restarts in TCP mode; give it a moment before the Wi-Fi connect.
+        delay(USB_TCPIP_SETTLE_MS)
+        connectAdb()
+    }
+
+    private suspend fun requestUsbPermission(manager: UsbManager, device: UsbDevice): Boolean {
+        if (manager.hasPermission(device)) return true
+        val app = getApplication<Application>()
+        val result = CompletableDeferred<Boolean>()
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                result.complete(intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false))
+            }
+        }
+        ContextCompat.registerReceiver(app, receiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED)
+        try {
+            // Mutable: the system adds EXTRA_DEVICE / EXTRA_PERMISSION_GRANTED. Explicit (package) as API 34 requires.
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+            val intent = PendingIntent.getBroadcast(app, 0, Intent(ACTION_USB_PERMISSION).setPackage(app.packageName), flags)
+            manager.requestPermission(device, intent)
+            return withTimeoutOrNull(USB_PERMISSION_WAIT_MS) { result.await() } ?: false
+        } finally {
+            app.unregisterReceiver(receiver)
+        }
+    }
+
     // ---- mirror ------------------------------------------------------------------------------------
 
     fun changeMirrorEnabled(enabled: Boolean) {
@@ -853,5 +977,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_LOGS = 20
         const val FOLLOW_AUTH_WAIT_MS = 3_000L
         const val QUERY_TIMEOUT_MS = 1_500L
+        const val USB_PERMISSION_WAIT_MS = 60_000L
+        const val USB_TCPIP_SETTLE_MS = 2_500L
+        const val ACTION_USB_PERMISSION = "com.hapbeat.demoremote.USB_PERMISSION"
     }
 }

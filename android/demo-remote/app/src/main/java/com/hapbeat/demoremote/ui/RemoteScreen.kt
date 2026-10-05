@@ -208,10 +208,23 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                 color = if (vm.adbMessage.isNotEmpty() && quest.adb == AdbState.DISCONNECTED) StatusRed else Color.Unspecified,
             )
             val connecting = quest.adb == AdbState.CONNECTING || quest.adb == AdbState.AUTH_WAIT
+            // Wi-Fi adb off (port 5555 closed): the button leads to the USB re-enable dialog instead.
+            val usbFix = quest.adb == AdbState.DISCONNECTED && vm.wifiAdbOff
             TextButton(
-                onClick = { if (connecting) vm.cancelAdbConnect() else vm.connectAdb() },
-                modifier = Modifier.width(112.dp),
-            ) { Text(if (connecting) "中止" else if (quest.adb == AdbState.CONNECTED) "adb 再接続" else "adb 接続") }
+                onClick = { if (connecting) vm.cancelAdbConnect() else if (usbFix) vm.openUsbDialog() else vm.connectAdb() },
+                modifier = Modifier.width(128.dp),
+            ) {
+                Text(
+                    when {
+                        connecting -> "中止"
+                        usbFix -> "USB で有効化"
+                        quest.adb == AdbState.CONNECTED -> "adb 再接続"
+                        else -> "adb 接続"
+                    },
+                    fontWeight = if (usbFix) FontWeight.Bold else null,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

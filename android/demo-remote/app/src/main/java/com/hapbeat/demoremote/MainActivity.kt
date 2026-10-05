@@ -1,5 +1,7 @@
 package com.hapbeat.demoremote
 
+import android.content.Intent
+import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -26,6 +28,7 @@ import com.hapbeat.demoremote.ui.LicenseScreen
 import com.hapbeat.demoremote.ui.PresetEditScreen
 import com.hapbeat.demoremote.ui.RemoteScreen
 import com.hapbeat.demoremote.ui.SettingsScreen
+import com.hapbeat.demoremote.ui.UsbAdbDialog
 
 enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET }
 
@@ -39,6 +42,7 @@ class MainActivity : ComponentActivity() {
             override fun onStart(owner: LifecycleOwner) = viewModel.onForeground()
             override fun onStop(owner: LifecycleOwner) = viewModel.onBackground()
         })
+        if (savedInstanceState == null) handleUsbIntent(intent)
         setContent {
             AppTheme {
                 var screen by rememberSaveable { mutableStateOf(Screen.REMOTE) }
@@ -67,9 +71,20 @@ class MainActivity : ComponentActivity() {
                             )
                             Screen.LICENSES -> LicenseScreen(onBack = { screen = Screen.SETTINGS })
                         }
+                        if (viewModel.usbDialogOpen) UsbAdbDialog(viewModel)
                     }
                 }
             }
         }
+    }
+
+    /** singleTop: a Quest plugged in while the app is open arrives here instead of a second activity. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleUsbIntent(intent)
+    }
+
+    private fun handleUsbIntent(intent: Intent?) {
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) viewModel.onUsbDeviceAttached()
     }
 }

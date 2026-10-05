@@ -51,6 +51,8 @@ fun SettingsScreen(vm: RemoteViewModel, onBack: () -> Unit, onOpenLicenses: () -
             HorizontalDivider()
             QuestListSection(vm)
             HorizontalDivider()
+            UsbAdbSection(vm)
+            HorizontalDivider()
             MirrorSection(vm)
             HorizontalDivider()
             LabeledSwitch("画面を常時 ON にする", vm.keepScreenOn, enabled = true, onChange = vm::setKeepScreenOnSetting)
@@ -152,6 +154,17 @@ private fun QuestRow(vm: RemoteViewModel, quest: QuestState) {
         ActionButton("保存", enabled = label.isNotBlank() && label != quest.label, outlined = true) { vm.renameQuest(quest.ip, label) }
         ActionButton("削除", enabled = true, outlined = true) { vm.removeQuest(quest.ip) }
     }
+}
+
+@Composable
+private fun UsbAdbSection(vm: RemoteViewModel) {
+    SectionTitle("Wi-Fi adb の復旧")
+    Text(
+        "Quest 再起動後は Wi-Fi adb が無効になります。スマホと Quest を USB-C で直結すると、PC なしで有効にできます。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ActionButton("USB で Wi-Fi adb を有効化", enabled = true, outlined = true) { vm.openUsbDialog() }
 }
 
 @Composable
