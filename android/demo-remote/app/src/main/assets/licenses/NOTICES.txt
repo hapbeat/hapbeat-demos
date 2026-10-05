@@ -1,0 +1,28 @@
+Hapbeat Demo Remote
+Copyright (c) Hapbeat. Licensed under the MIT License (hapbeat-demos repository LICENSE).
+
+This app includes the following third-party software.
+
+scrcpy-server v4.1
+  Copyright (C) 2018 Genymobile
+  Copyright (C) 2018-2026 Romain Vimont
+  Apache License 2.0 - https://github.com/Genymobile/scrcpy
+  Pushed to the Quest at runtime to stream the screen (unmodified release binary).
+
+dadb 2.0.0
+  Copyright mobile.dev inc.
+  Apache License 2.0 - https://github.com/mobile-dev-inc/dadb
+
+Okio
+  Copyright Square, Inc.
+  Apache License 2.0 - https://github.com/square/okio
+
+AndroidX / Jetpack Compose
+  Copyright The Android Open Source Project
+  Apache License 2.0 - https://developer.android.com/jetpack/androidx
+
+Kotlin standard library / kotlinx.coroutines
+  Copyright JetBrains s.r.o. and Kotlin Programming Language contributors
+  Apache License 2.0 - https://github.com/JetBrains/kotlin , https://github.com/Kotlin/kotlinx.coroutines
+
+The full text of the Apache License 2.0 follows.
