@@ -35,7 +35,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $demos = [ordered]@{
     hub        = @{ Package = 'jp.hapbeat.demohub';            File = 'DemoHub.apk';       Default = $true;  Source = 'unity/demo-hub/Builds/hapbeat-demo-hub.apk' }
     volley     = @{ Package = 'jp.hapbeat.volley';             File = 'Volley.apk';        Default = $true;  Source = 'unity/gloveball/Builds/Android/hapbeat-volley.apk' }
-    gloveball  = @{ Package = 'jp.hapbeat.gloveballdemo.v2';   File = 'GloveBall.apk';     Default = $true;  Source = 'unity/gloveball/tools/artifacts/gloveball_v2.apk' }
+    gloveball  = @{ Package = 'jp.hapbeat.gloveballdemo.v2';   File = 'GloveBall.apk';     Default = $false; Source = 'unity/gloveball/tools/artifacts/gloveball_v2.apk' }
     boxing     = @{ Package = 'com.hapbeat.boxing';            File = 'Boxing.apk';        Default = $true;  Source = 'unity/boxing-vr/Builds/HapbeatBoxing.apk' }
     handdemo   = @{ Package = 'com.Hapbeat.HapticHandDemo_G2'; File = 'HandDemo.apk';      Default = $true;  Source = 'unity/handdemo/Build/HandDemo-switch-fixed.apk' }
     safetymill = @{ Package = 'com.hapbeat.safetymill';        File = 'SafetyMillVR.apk';  Default = $true;  Source = 'unreal/safety-mill-vr/Builds/QuestHands/Android_ASTC/SafetyMillVR-arm64.apk' }
