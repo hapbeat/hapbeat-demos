@@ -187,7 +187,7 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("前面: ${if (quest.lastDemoId.isEmpty()) "-" else DemoCatalog.labelFor(quest.lastDemoId)}", Modifier.weight(1f), maxLines = 1)
-            Text("DS ${mark(quest.respondedLastRound)}")
+            Text("デモ応答 ${mark(quest.respondedLastRound)}")
             Text("adb ${if (quest.adb == AdbState.CONNECTED) "○" else "×"}")
             val battery = quest.battery
             Text(
