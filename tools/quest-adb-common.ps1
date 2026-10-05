@@ -3,6 +3,11 @@
 $script:QuestCacheFile = Join-Path $env:LOCALAPPDATA 'Hapbeat\quest-wifi-ip.txt'
 
 function Get-QuestAdb {
+    # Use the adb of the server that is already running (e.g. Unity's bundled one): a client of another
+    # version kills and restarts the server, which drops every Wi-Fi connection (Quest and phones alike).
+    $running = Get-CimInstance Win32_Process -Filter "Name='adb.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and (Test-Path $_.ExecutablePath) } | Select-Object -First 1
+    if ($running) { return $running.ExecutablePath }
     $cmd = Get-Command adb -ErrorAction SilentlyContinue
     if (-not $cmd) { throw 'adb not found. Install Android platform-tools and add it to PATH.' }
     # Start the server up front: its "daemon not running; starting now" stderr would otherwise surface as an
