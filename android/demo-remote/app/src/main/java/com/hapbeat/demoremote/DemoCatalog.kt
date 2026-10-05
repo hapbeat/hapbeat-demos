@@ -88,8 +88,10 @@ object ControlCatalog {
             ControlAction("リセットボタン 非表示", "recenter_ui_hide"),
         )),
         ControlGroup("Volley", listOf(
+            // Same IDs as the Volley descriptor's scenes (block is its default).
+            ControlAction("スパイク＋ブロック", "scene", "block"),
+            ControlAction("6人制の試合", "scene", "match"),
             ControlAction("レシーブ", "scene", "receive"),
-            ControlAction("ブロック", "scene", "block"),
         )),
     )
 }
