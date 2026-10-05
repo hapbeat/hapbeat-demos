@@ -58,6 +58,7 @@ namespace Hapbeat.DemoHub
         public const string StartRejected = "外部からの開始を受け付けませんでした: ";
         public const string StartNotInstalled = "未インストールです: ";
         public const string StartPresetEmpty = "プリセット {0} にインストール済みのデモがありません";
+        public const string StartStep = "ステップ {0}: ";
 
         public static IEnumerable<string> All => typeof(HubText).GetFields()
             .Where(f => f.IsLiteral && f.FieldType == typeof(string)).Select(f => (string)f.GetRawConstantValue());
@@ -209,7 +210,8 @@ namespace Hapbeat.DemoHub
                 ShowTopWithStatus(HubText.StartRejected + error);
                 return;
             }
-            Debug.Log("[Demo Hub] External start: " + (request.DemoId ?? "preset " + request.Preset));
+            Debug.Log("[Demo Hub] External start: " + (request.Steps != null ? "plan of " + request.Steps.Count + " steps"
+                : request.DemoId ?? "preset " + request.Preset));
             if (!DemoSession.LaunchTicket(ticket, out error, LaunchFailed)) LaunchFailed(error);
         }
 
