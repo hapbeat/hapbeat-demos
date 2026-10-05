@@ -136,6 +136,11 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = PresetCodec.decode(prefs.getString(KEY_PRESETS, null))
         set(value) { prefs.edit().putString(KEY_PRESETS, PresetCodec.encode(value)).apply() }
 
+    /** Hosts with Wi-Fi adb that turned out not to be a Quest (e.g. a phone left in `adb tcpip`). */
+    var ignoredAdbHosts: Set<String>
+        get() = prefs.getStringSet(KEY_IGNORED_ADB_HOSTS, emptySet())!!.toSet()
+        set(value) { prefs.edit().putStringSet(KEY_IGNORED_ADB_HOSTS, value).apply() }
+
     var keepScreenOn: Boolean
         get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
         set(value) { prefs.edit().putBoolean(KEY_KEEP_SCREEN_ON, value).apply() }
@@ -149,6 +154,7 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_QUESTS = "quests"
         const val KEY_SELECTED_IP = "selected_ip"
         const val KEY_PRESETS = "remote_presets"
+        const val KEY_IGNORED_ADB_HOSTS = "ignored_adb_hosts"
         const val KEY_MIRROR_MAX_SIZE = "mirror_max_size"
         const val KEY_MIRROR_BIT_RATE = "mirror_bit_rate"
         const val KEY_MIRROR_FPS = "mirror_fps"

@@ -269,6 +269,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (i >= 0) quests[i] = block(quests[i])
     }
 
+    private fun unconfirmedLabel(ip: String) = "未確認 ." + ip.substringAfterLast('.')
+
     /** "HMD #n" with the smallest unused n ("Quest n" would read like a model name). */
     private fun nextLabel(): String {
         val used = quests.mapNotNull { Regex("^HMD #(\\d+)$").find(it.label)?.groupValues?.get(1)?.toInt() }.toSet()
@@ -327,9 +329,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val local = withContext(Dispatchers.IO) { DemoSwitchSocket.localIpv4(getApplication(), wifi.network) } ?: return@launch
                 val hosts = AdbPortScanner.subnetHosts(local.address.address, local.prefixLength)
-                val open = AdbPortScanner.scan(hosts).toSet()
+                val ignored = settings.ignoredAdbHosts
+                val open = AdbPortScanner.scan(hosts).filter { it !in ignored }.toSet()
+                // Port 5555 alone does not prove a Quest (a phone left in `adb tcpip` answers too): such a host is
+                // shown as unconfirmed until adb reports its model.
                 open.filter { ip -> quests.none { it.ip == ip } }.forEach { ip ->
-                    quests.add(QuestState(ip, nextLabel()))
+                    quests.add(QuestState(ip, unconfirmedLabel(ip)))
                 }
                 quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
                 if (open.isNotEmpty()) persistQuests()
@@ -656,6 +661,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshAdbInfo(ip: String) {
         val model = adbShell(ip, "getprop ro.product.model")?.output?.let { QuestAdb.parseModel(it) } ?: return
+        if (!model.startsWith("Quest")) {
+            // Not a headset: drop it and skip it in later scans.
+            addLog(ip, "$model は Quest ではないため一覧から外しました", null, LogState.INFO)
+            settings.ignoredAdbHosts = settings.ignoredAdbHosts + ip
+            removeQuest(ip)
+            return
+        }
+        if (quests.firstOrNull { it.ip == ip }?.label == unconfirmedLabel(ip)) updateQuest(ip) { it.copy(label = nextLabel()) }
         val serial = adbShell(ip, "getprop ro.serialno")?.output?.trim() ?: return
         adoptSerial(ip, serial)
         val packages = adbShell(ip, "pm list packages")?.output?.let { QuestAdb.parsePackages(it) } ?: return
