@@ -78,9 +78,26 @@ object AdbProtocol {
     /** DigestInfo + token: the block RSA PKCS#1 v1.5 signs for AUTH(SIGNATURE). */
     fun signatureInput(token: ByteArray): ByteArray = SHA1_DIGEST_INFO + token
 
-    /** PKCS#1 v1.5 signature over [signatureInput] (private-key "encryption", like dadb's signPayload). */
-    fun sign(key: PrivateKey, token: ByteArray): ByteArray =
-        Cipher.getInstance("RSA/ECB/PKCS1Padding").apply { init(Cipher.ENCRYPT_MODE, key) }.doFinal(signatureInput(token))
+    /** EMSA-PKCS1-v1_5 block: 00 01 FF..FF 00 DigestInfo token, [size] bytes (the RSA modulus length). */
+    fun signatureBlock(token: ByteArray, size: Int): ByteArray {
+        val input = signatureInput(token)
+        return ByteArray(size) { 0xFF.toByte() }.also {
+            it[0] = 0
+            it[1] = 1
+            it[size - input.size - 1] = 0
+            input.copyInto(it, size - input.size)
+        }
+    }
+
+    /**
+     * PKCS#1 v1.5 signature over [signatureInput]. The padding is built here and the key is applied with
+     * NoPadding, exactly like dadb's signPayload (proven against the Quest over Wi-Fi), rather than relying on
+     * the provider's private-key PKCS1Padding mode.
+     */
+    fun sign(key: PrivateKey, token: ByteArray): ByteArray {
+        val size = ((key as java.security.interfaces.RSAKey).modulus.bitLength() + 7) / 8
+        return Cipher.getInstance("RSA/ECB/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }.doFinal(signatureBlock(token, size))
+    }
 
     /** "service" + NUL, as OPEN expects. */
     fun servicePayload(service: String): ByteArray = service.toByteArray(Charsets.UTF_8) + 0.toByte()
