@@ -11,6 +11,7 @@ data class DemoApp(val demoId: String, val label: String, val packageName: Strin
 object DemoCatalog {
     const val HUB_ID = "demo_hub"
     const val VOLLEY_ID = "volley"
+    const val ENERGY_DUEL_ID = "energy-duel"
 
     val apps: List<DemoApp> = listOf(
         DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
@@ -19,7 +20,7 @@ object DemoCatalog {
         DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2"),
         DemoApp("trex-encounter", "T-Rex Encounter", "com.hapbeat.trexencounter"),
         DemoApp("safety-mill", "Safety Mill", "com.hapbeat.safetymill"),
-        DemoApp("energy-duel", "Energy Duel", "jp.hapbeat.energyduel"),
+        DemoApp(ENERGY_DUEL_ID, "Energy Duel", "jp.hapbeat.energyduel"),
         DemoApp("fps", "FPS", "com.hapbeat.fpsdemo"),
     )
 
@@ -85,8 +86,8 @@ object DemoCatalog {
             "${app.packageName} | tail -n 1) && am start -n \"\$c\""
 }
 
-/** One CONTROL button: action + scene_id (empty except for scene). */
-data class ControlAction(val label: String, val action: String, val sceneId: String = "")
+/** One CONTROL button: action + scene_id (empty except for scene). [demoId]: only for that foreground demo. */
+data class ControlAction(val label: String, val action: String, val sceneId: String = "", val demoId: String? = null)
 
 /** A titled row group on the 操作 tab. */
 data class ControlGroup(val title: String, val actions: List<ControlAction>)
@@ -114,9 +115,14 @@ object ControlCatalog {
         )),
         ControlGroup("Volley", listOf(
             // Same IDs as the Volley descriptor's scenes (block is its default).
-            ControlAction("スパイク＋ブロック", "scene", "block"),
-            ControlAction("6人制の試合", "scene", "match"),
-            ControlAction("レシーブ", "scene", "receive"),
+            ControlAction("スパイク＋ブロック", "scene", "block", VOLLEY_ID),
+            ControlAction("6人制の試合", "scene", "match", VOLLEY_ID),
+            ControlAction("レシーブ", "scene", "receive", VOLLEY_ID),
+        )),
+        ControlGroup("Energy Duel", listOf(
+            ControlAction("チュートリアル", "scene", "tutorial", ENERGY_DUEL_ID),
+            ControlAction("試合", "scene", "match", ENERGY_DUEL_ID),
+            ControlAction("フリープレイ", "scene", "free", ENERGY_DUEL_ID),
         )),
     )
 }

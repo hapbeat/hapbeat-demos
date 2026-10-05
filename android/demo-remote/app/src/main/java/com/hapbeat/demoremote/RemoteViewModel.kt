@@ -501,8 +501,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     "Demo Switch 受信アプリが前面にいません（Hub は『Hub を開く』で起動できます）")
                 return@launch
             }
-            if (control.action == "scene" && current != DemoCatalog.VOLLEY_ID) {
-                addLog(quest.label, control.label, null, LogState.ERROR, "前面アプリが Volley ではありません（${DemoCatalog.labelFor(current)}）")
+            if (control.demoId != null && current != control.demoId) {
+                addLog(quest.label, control.label, null, LogState.ERROR,
+                    "前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
                 return@launch
             }
             val seq = reserveSeq() ?: return@launch

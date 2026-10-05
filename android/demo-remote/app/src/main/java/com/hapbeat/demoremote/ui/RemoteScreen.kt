@@ -263,7 +263,7 @@ private fun SwitchTab(vm: RemoteViewModel) {
 @Composable
 private fun ControlTab(vm: RemoteViewModel) {
     val enabled = vm.demoSwitchBlockReason == null
-    val isVolley = vm.selectedQuest?.lastDemoId == DemoCatalog.VOLLEY_ID
+    val current = vm.selectedQuest?.lastDemoId
     Text(
         "送信前に前面アプリを確認し、そのアプリへ送ります",
         style = MaterialTheme.typography.bodySmall,
@@ -273,7 +273,7 @@ private fun ControlTab(vm: RemoteViewModel) {
     ControlCatalog.groups.forEach { group ->
         Text(group.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
         ButtonGrid(group.actions, columns = 2) { control, modifier ->
-            val allowed = enabled && (control.action != "scene" || isVolley)
+            val allowed = enabled && (control.demoId == null || control.demoId == current)
             ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
         }
     }
