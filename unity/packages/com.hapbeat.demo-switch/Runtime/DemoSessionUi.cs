@@ -429,6 +429,30 @@ namespace Hapbeat.DemoSwitch
             set => _scaler.dynamicPixelsPerUnit = value;
         }
 
+        /// <summary>
+        /// Height of one line of the panel font at <paramref name="fontSize"/> in canvas units (millimetres), as laid out at
+        /// this panel's <see cref="GlyphPixelsPerMillimetre"/>. Text boxes truncate vertically, so a box shorter than this
+        /// drops the whole line: every text box must be at least this tall for its font size (a button label for its
+        /// smallest best-fit size).
+        /// </summary>
+        public float LineHeight(int fontSize)
+        {
+            var scale = GlyphPixelsPerMillimetre;
+            var settings = new TextGenerationSettings
+            {
+                font = DemoSessionFont.Get(),
+                fontSize = fontSize,
+                scaleFactor = scale,
+                lineSpacing = 1f,
+                color = Color.white,
+                pivot = new Vector2(0.5f, 0.5f),
+                textAnchor = TextAnchor.MiddleCenter,
+                horizontalOverflow = HorizontalWrapMode.Overflow,
+                verticalOverflow = VerticalWrapMode.Overflow,
+            };
+            return new TextGenerator().GetPreferredHeight("あ", settings) / scale;
+        }
+
         /// <summary>A plain coloured rectangle (e.g. an insertion line); removed with the other content.</summary>
         public Image AddRect(Vector2 centre, Vector2 size, Color color)
         {
@@ -636,6 +660,8 @@ namespace Hapbeat.DemoSwitch
         public const float Distance = 0.55f;
         public const float Drop = 0.12f;
         private const float Width = 440f;
+        /// <summary>At least one line of the font at size 34 (<see cref="DemoSessionPanel.LineHeight"/>, about 49.3).</summary>
+        private const float HeadingHeight = 52f;
         private const float ButtonHeight = 68f;
         private const float ButtonGap = 14f;
         private DemoSessionPanel _panel;
@@ -651,13 +677,13 @@ namespace Hapbeat.DemoSwitch
             var step = ticket.Steps[ticket.Index];
             var buttons = step.Retry ? 2 : 1;
             // Fixed slots: heading, progress, buttons, and a reserved error line (no layout shift).
-            var height = 28f + 46f + 34f + 18f + buttons * (ButtonHeight + ButtonGap) + 52f + 16f;
+            var height = 28f + HeadingHeight + 34f + 18f + buttons * (ButtonHeight + ButtonGap) + 52f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Session Completion", new Vector2(Width, height));
             var completion = panel.gameObject.AddComponent<DemoSessionCompletionPanel>();
             completion._panel = panel;
-            var y = height * 0.5f - 28f - 23f;
-            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 46), "体験完了", 34, Color.white);
-            y -= 23f + 17f;
+            var y = height * 0.5f - 28f - HeadingHeight * 0.5f;
+            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, HeadingHeight), "体験完了", 34, Color.white);
+            y -= HeadingHeight * 0.5f + 17f;
             panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 34), (ticket.Index + 1) + " / " + ticket.Steps.Count, 22, new Color(0.7f, 0.82f, 0.92f));
             y -= 17f + 18f + ButtonHeight * 0.5f;
             var size = new Vector2(Width - 60, ButtonHeight);

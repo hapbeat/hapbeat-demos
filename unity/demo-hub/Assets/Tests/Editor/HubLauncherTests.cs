@@ -194,6 +194,59 @@ namespace Hapbeat.DemoHub.Tests
             }
         }
 
+        /// <summary>Text boxes truncate vertically: each must hold its explicit lines at its font size (best-fit labels at their smallest size).</summary>
+        static void AssertTextsFitTheirLines(DemoHubController controller, string what)
+        {
+            var panel = controller.Panel;
+            var texts = panel.GetComponentsInChildren<UnityEngine.UI.Text>(true);
+            Assert.That(texts, Is.Not.Empty, what);
+            foreach (var text in texts)
+            {
+                var size = text.resizeTextForBestFit ? text.resizeTextMinSize : text.fontSize;
+                var lines = Mathf.Max(1, text.text.Split('\n').Length);
+                Assert.That(text.rectTransform.rect.height, Is.GreaterThanOrEqualTo(lines * panel.LineHeight(size)),
+                    what + ": \"" + text.text + "\" (size " + size + ", " + lines + " line(s))");
+            }
+        }
+
+        [Test]
+        public void EveryHubTextBoxIsAtLeastItsLinesTall()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "top, nothing to show");
+
+                controller.Preset(1).Add(_volley);
+                controller.Settings.VisiblePresets.Add(1);
+                controller.Settings.VisibleDemos.UnionWith(new[] { "volley", "boxing", "trex-encounter" });
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "top");
+
+                controller.Settings.StaffWaiting = true;
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "staff waiting");
+                controller.Settings.StaffWaiting = false;
+
+                controller.Show(DemoHubController.HubScreen.Manage);
+                controller.SelectTab(1);
+                AssertTextsFitTheirLines(controller, "manage, empty plan");
+                controller.SelectTab(0);
+                AssertTextsFitTheirLines(controller, "manage, step hint");
+                controller.SelectStep(0);
+                AssertTextsFitTheirLines(controller, "manage, step editor");
+                controller.SelectTab(DemoHubController.TilesTab);
+                AssertTextsFitTheirLines(controller, "manage, tiles");
+
+                controller.Show(DemoHubController.HubScreen.Finished);
+                AssertTextsFitTheirLines(controller, "finished");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void ManageScreenShowsAll32StepsWithoutPages()
         {

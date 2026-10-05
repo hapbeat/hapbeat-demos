@@ -1322,5 +1322,53 @@ namespace Hapbeat.DemoSwitch.Tests
             foreach (var character in "体験完了もう一度次へ：デモを終了触覚ONOFF起動できませんでした/0123456789一時停止再開最初からやり直すHubに戻る視線をリセット")
                 Assert.That(font.HasCharacter(character), Is.True, character.ToString());
         }
+
+        /// <summary>
+        /// Text boxes truncate vertically, so a box shorter than one line of its font size shows nothing (the
+        /// 34-size headings in 46 mm boxes were blank). Every box must hold its explicit lines at its font size
+        /// (a best-fit button label at its smallest size).
+        /// </summary>
+        internal static void AssertTextsFitTheirLines(DemoSessionPanel panel, string what)
+        {
+            var texts = panel.GetComponentsInChildren<UnityEngine.UI.Text>(true);
+            Assert.That(texts, Is.Not.Empty, what);
+            foreach (var text in texts)
+            {
+                var size = text.resizeTextForBestFit ? text.resizeTextMinSize : text.fontSize;
+                var lines = Mathf.Max(1, text.text.Split('\n').Length);
+                Assert.That(text.rectTransform.rect.height, Is.GreaterThanOrEqualTo(lines * panel.LineHeight(size)),
+                    what + ": \"" + text.text + "\" (size " + size + ", " + lines + " line(s))");
+            }
+        }
+
+        [Test]
+        public void EveryPanelTextBoxIsAtLeastItsLinesTall()
+        {
+            Assert.That(DemoSessionTicket.TryParse(AtIndex(0), out var ticket, out var error), Is.True, error);
+            var next = new DemoSessionNext(ticket.Steps[1]);
+            var panels = new List<DemoSessionPanel>();
+            try
+            {
+                var heading = DemoSessionPanel.Create("test panel", Vector2.one);
+                panels.Add(heading);
+                Assert.That(heading.LineHeight(34), Is.GreaterThan(46f), "One line at size 34 is taller than the old 46 mm heading box.");
+
+                panels.Add(DemoPausePanel.Create(true, next).Panel);
+                panels.Add(DemoPausePanel.Create(true, new DemoSessionNext(null)).Panel);
+                panels.Add(DemoSessionCompletionPanel.Create(ticket, next).Panel);
+                foreach (var label in new[] { DemoSessionHapticsButton.Label(true), DemoSessionHapticsButton.Label(false), DemoSessionRecenterButton.Label })
+                {
+                    var corner = DemoSessionPanel.Create("corner", DemoSessionCornerButtons.PanelSize);
+                    panels.Add(corner);
+                    corner.AddButton(Vector2.zero, DemoSessionCornerButtons.ButtonSize, label, DemoSessionCornerButtons.FontSize, null);
+                }
+                foreach (var panel in panels.Skip(1)) AssertTextsFitTheirLines(panel, panel.name);
+            }
+            finally
+            {
+                foreach (var panel in panels)
+                    if (panel != null) Object.DestroyImmediate(panel.gameObject);
+            }
+        }
     }
 }

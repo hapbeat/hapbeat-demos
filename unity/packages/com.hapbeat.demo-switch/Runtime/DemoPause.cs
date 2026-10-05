@@ -312,6 +312,8 @@ namespace Hapbeat.DemoSwitch
         public const float Distance = 0.55f;
         public const float Drop = 0.12f;
         private const float Width = 440f;
+        /// <summary>At least one line of the font at size 34 (<see cref="DemoSessionPanel.LineHeight"/>, about 49.3).</summary>
+        private const float HeadingHeight = 52f;
         private const float ButtonHeight = 68f;
         private const float ButtonGap = 14f;
         private DemoSessionPanel _panel;
@@ -330,13 +332,13 @@ namespace Hapbeat.DemoSwitch
         {
             var buttons = 2 + (next.HasValue ? 1 : 0) + (withHub ? 1 : 0);
             // Fixed slots: heading, buttons, and a reserved error line (no layout shift).
-            var height = 28f + 46f + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
+            var height = 28f + HeadingHeight + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Pause", new Vector2(Width, height));
             var pause = panel.gameObject.AddComponent<DemoPausePanel>();
             pause._panel = panel;
-            var y = height * 0.5f - 28f - 23f;
-            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 46), "一時停止", 34, Color.white);
-            y -= 23f + 18f + ButtonHeight * 0.5f;
+            var y = height * 0.5f - 28f - HeadingHeight * 0.5f;
+            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, HeadingHeight), "一時停止", 34, Color.white);
+            y -= HeadingHeight * 0.5f + 18f + ButtonHeight * 0.5f;
             var size = new Vector2(Width - 60, ButtonHeight);
             pause.ResumeButton = panel.AddButton(new Vector2(0, y), size, "再開", 24, DemoPause.Resume);
             y -= ButtonHeight + ButtonGap;
