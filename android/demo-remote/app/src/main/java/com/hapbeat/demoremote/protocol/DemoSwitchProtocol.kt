@@ -28,6 +28,8 @@ sealed interface DemoSwitchMessage {
     data class Query(override val controllerId: String, val nonce: String, override val auth: String?) : DemoSwitchMessage
     data class State(
         override val controllerId: String, val nonce: String, val currentDemoId: String,
+        /** false while the demo is running but not the focused app (menu, pause, boundary setup): SWITCH / CONTROL are refused. */
+        val foreground: Boolean,
         val hapticsOn: Boolean, val hapticsUi: Boolean, val recenterUi: Boolean, val paused: Boolean,
         val stepIndex: Long, val stepCount: Long, override val auth: String?,
     ) : DemoSwitchMessage
@@ -44,6 +46,8 @@ object DemoSwitchProtocol {
     const val MAX_PAYLOAD_BYTES = 1024
     const val MAX_SEQ = 9007199254740991L
     const val MAX_STATUS_MESSAGE_BYTES = 256
+    /** FAILED / not_allowed message of a runtime that is running but not in the foreground. */
+    const val NOT_IN_FOREGROUND_MESSAGE = "not in foreground"
 
     val STATUS_TYPES = setOf("ACK", "READY", "FAILED")
     val STATUS_CODES = setOf(
@@ -107,6 +111,7 @@ object DemoSwitchProtocol {
     fun canonicalState(m: DemoSwitchMessage.State): String = StringBuilder(HEADER + "STATE\n").apply {
         field(this, "version", "1"); field(this, "type", "STATE"); field(this, "controller_id", m.controllerId)
         field(this, "nonce", m.nonce); field(this, "current_demo_id", m.currentDemoId)
+        field(this, "foreground", m.foreground.toString())
         field(this, "haptics_on", m.hapticsOn.toString()); field(this, "haptics_ui", m.hapticsUi.toString())
         field(this, "recenter_ui", m.recenterUi.toString()); field(this, "paused", m.paused.toString())
         field(this, "step_index", m.stepIndex.toString()); field(this, "step_count", m.stepCount.toString())
@@ -230,6 +235,7 @@ object DemoSwitchProtocol {
                     controllerId = controllerId,
                     nonce = nonceField(obj) ?: return null,
                     currentDemoId = identifierField(obj, "current_demo_id") ?: return null,
+                    foreground = boolField(obj, "foreground") ?: return null,
                     hapticsOn = boolField(obj, "haptics_on") ?: return null,
                     hapticsUi = boolField(obj, "haptics_ui") ?: return null,
                     recenterUi = boolField(obj, "recenter_ui") ?: return null,
@@ -248,7 +254,7 @@ object DemoSwitchProtocol {
     private val STATUS_FIELDS = SWITCH_FIELDS + setOf("current_demo_id", "code", "message")
     private val DISCOVER_FIELDS = setOf("version", "type", "controller_id", "nonce")
     private val HERE_FIELDS = DISCOVER_FIELDS + "current_demo_id"
-    private val STATE_FIELDS = HERE_FIELDS + setOf("haptics_on", "haptics_ui", "recenter_ui", "paused", "step_index", "step_count")
+    private val STATE_FIELDS = HERE_FIELDS + setOf("foreground", "haptics_on", "haptics_ui", "recenter_ui", "paused", "step_index", "step_count")
 
     /** Required fields present and no field other than those plus optional auth. */
     private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>): Boolean =

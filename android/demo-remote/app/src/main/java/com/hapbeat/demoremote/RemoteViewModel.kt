@@ -164,6 +164,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var wifiDiag by mutableStateOf("Wi-Fi 未接続"); private set
     /** Diagnostics line 2: last discovery round and 5555 scan. */
     var discoveryDiag by mutableStateOf("探索 --:--:--　／ 5555 走査 --:--:--"); private set
+    /** Quest Wi-Fi as read over USB ("ip/prefix SSID"), shown after the phone's Wi-Fi on diagnostics line 1; "" before. */
+    var usbQuestDiag by mutableStateOf(""); private set
+    /** USB devices the phone sees (VID:PID / interfaces) in the last USB run: one small line in the dialog. */
+    var usbDeviceDetail by mutableStateOf(""); private set
     /** Result of the last log copy / clear in settings. */
     var logToolStatus by mutableStateOf(""); private set
 
@@ -189,6 +193,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val ignoredAdbHosts = mutableSetOf<String>()
     private var lastDiscovery = ""
     private var lastScan = ""
+    /** A scan was asked for while one was running (e.g. Wi-Fi changed mid-scan): run once more right after it. */
+    private var adbRescanRequested = false
+    private var noticeClearJob: Job? = null
     private var lastUsbSuccessAtMs = 0L
     private var lastUsbSuccessIp: String? = null
     private var usbCloseJob: Job? = null
@@ -405,7 +412,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
      * answer DISCOVER) can still be selected for "Hub を開く" and the mirror. TCP connect only.
      */
     private fun scanAdbHosts() {
-        if (scanningAdb) return
+        if (scanningAdb) {
+            adbRescanRequested = true
+            return
+        }
         scanningAdb = true
         viewModelScope.launch {
             try {
@@ -434,6 +444,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     target.adb == AdbState.DISCONNECTED) connectAdb(manual = false)
             } finally {
                 scanningAdb = false
+                if (adbRescanRequested) {
+                    adbRescanRequested = false
+                    scanAdbHosts()
+                }
             }
         }
     }
@@ -591,8 +605,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             }
             "FAILED" -> {
                 command.terminal = true
-                val detail = if (status.message.isEmpty()) status.code else "${status.code}: ${status.message}"
+                val notForeground = status.message == DemoSwitchProtocol.NOT_IN_FOREGROUND_MESSAGE
+                val detail = when {
+                    notForeground -> NOT_FOREGROUND_TEXT
+                    status.message.isEmpty() -> status.code
+                    else -> "${status.code}: ${status.message}"
+                }
                 updateLog(command.logId) { it.copy(state = LogState.FAILED, detail = detail) }
+                // Refresh the "非前面" display.
+                if (notForeground) queryState(command.ip)
             }
         }
     }
@@ -616,10 +637,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         val config = authConfig
         if (!config.canSend) return
+        val content = "切替 → ${DemoCatalog.labelFor(demoId)}"
+        if (refusedNotForeground(quest.ip, quest.label, content)) return
         viewModelScope.launch {
             val seq = reserveSeq() ?: return@launch
             val payload = DemoSwitchProtocol.buildSwitch(controllerId, seq, demoId, config)
-            send(quest, seq, demoId, "切替 → ${DemoCatalog.labelFor(demoId)}", payload, SWITCH_TIMEOUT_MS, "")
+            send(quest, seq, demoId, content, payload, SWITCH_TIMEOUT_MS, "")
         }
     }
 
@@ -632,9 +655,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             val current = probeForegroundDemo(quest.ip, config)
             if (current == null) {
                 addLog(quest.label, control.label, null, LogState.ERROR,
-                    "応答なし（デモが前面にない／HMD 未装着／届いていない）")
+                    "応答なし（デモが起動していない／スリープ／届いていない）")
                 return@launch
             }
+            // A demo answers DISCOVER even when it is not in the foreground, but then refuses CONTROL.
+            if (refusedNotForeground(quest.ip, quest.label, control.label)) return@launch
             if (control.demoId != null && current != control.demoId) {
                 addLog(quest.label, control.label, null, LogState.ERROR,
                     "前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
@@ -644,6 +669,17 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             val payload = DemoSwitchProtocol.buildControl(controllerId, seq, current, control.action, control.sceneId, config)
             send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, CONTROL_TIMEOUT_MS, control.action)
         }
+    }
+
+    /**
+     * The last STATE from [ip] says its demo is not in the foreground (menu, pause, boundary setup), where
+     * SWITCH / CONTROL are refused: logs why instead of sending, and asks for a fresh STATE.
+     */
+    private fun refusedNotForeground(ip: String, label: String, content: String): Boolean {
+        if (quests.firstOrNull { it.ip == ip }?.remoteState?.foreground != false) return false
+        addLog(label, content, null, LogState.ERROR, NOT_FOREGROUND_TEXT)
+        queryState(ip)
+        return true
     }
 
     private suspend fun probeForegroundDemo(ip: String, config: AuthConfig): String? {
@@ -735,8 +771,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         logToolStatus = "ログを消去しました"
     }
 
+    /** The notice clears itself after [NOTICE_CLEAR_MS] so an old message does not stay on screen; the file log keeps it. */
     private fun setNotice(text: String, error: Boolean) {
         notice = text to error
+        noticeClearJob?.cancel()
+        if (text.isEmpty()) return
+        fileLog("通知: $text")
+        noticeClearJob = viewModelScope.launch {
+            delay(NOTICE_CLEAR_MS)
+            notice = "" to false
+        }
     }
 
     // ---- adb -------------------------------------------------------------------------------------
@@ -988,6 +1032,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         usbCloseJob?.cancel()
         usbDialogOpen = false
         usbAttempted = false
+        usbDeviceDetail = ""
     }
 
     /** Status area before a run: the fix for a peripheral-side phone / USB debugging off, or how it starts. */
@@ -1112,9 +1157,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 val manager = app.getSystemService(UsbManager::class.java) ?: throw UsbAdbException(UsbLinkJudge.notFoundText(UsbLink.NONE))
                 val devices = UsbAdb.describeDevices(manager)
                 fileLog("USB: ${UsbLinkJudge.statusText(link)}${if (devices.isEmpty()) "" else "（${devices.joinToString(" / ")}）"}")
-                val device = UsbAdb.findDevice(manager) ?: throw UsbAdbException(
-                    UsbLinkJudge.notFoundText(link) + if (link == UsbLink.HOST_NO_ADB) "\n${devices.joinToString(" / ")}" else "",
-                )
+                // Device details go to their own small line in the dialog (the three-line status area would cut them).
+                usbDeviceDetail = devices.joinToString(" / ")
+                val device = UsbAdb.findDevice(manager) ?: throw UsbAdbException(UsbLinkJudge.notFoundText(link))
                 usbAdbStatus = "USB の使用を許可してください" to false
                 if (!requestUsbPermission(manager, device)) throw UsbAdbException("USB の使用が許可されませんでした。「もう一度試す」を押して許可してください")
                 usbAdbStatus = "Quest と通信中…" to false
@@ -1149,9 +1194,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         lastUsbSuccessIp = ip
         addLog("USB", "USB で Wi-Fi adb を有効化 $ip", null, LogState.READY,
             "${result.ip}/${result.prefixLength} SSID ${result.ssid.ifEmpty { "不明" }}${if (result.alreadyEnabled) "・すでに有効（tcpip 省略）" else ""}")
+        val ssid = result.ssid.ifEmpty { "SSID 不明" }
+        usbQuestDiag = "USB: Quest $ip/${result.prefixLength} $ssid"
         // Wi-Fi adb cannot work across networks: say so instead of timing out on the Wi-Fi connect.
         val local = DemoSwitchSocket.localIpv4(getApplication(), wifi.network)
-        val ssid = result.ssid.ifEmpty { "SSID 不明" }
         val mismatch = when {
             // Here the phone is the one to fix, not the Quest.
             local == null -> "スマホが Wi-Fi に繋がっていません。スマホを Quest と同じ Wi-Fi（$ssid）に繋いでください"
@@ -1176,7 +1222,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             mirrorVideoSize = null
         }
         wifiAdbOff = false
-        usbAdbStatus = "完了。ケーブルを外してください（Quest $ip）" to false
+        usbAdbStatus = "完了。ケーブルを外してください（Quest $ip/${result.prefixLength} $ssid）" to false
         // Keep the dialog up long enough to read the result.
         usbCloseJob = viewModelScope.launch {
             delay(USB_DONE_CLOSE_MS)
@@ -1338,6 +1384,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val USB_WIFI_ATTEMPTS = 6
         const val USB_WIFI_RETRY_MS = 1_500L
         const val USB_DONE_CLOSE_MS = 3_000L
+        const val NOTICE_CLEAR_MS = 15_000L
+        const val NOT_FOREGROUND_TEXT = "Quest のデモが前面にありません（HMD 内でメニューや一時停止を閉じてください）"
         const val ACTION_USB_PERMISSION = "com.hapbeat.demoremote.USB_PERMISSION"
         // Hidden UsbManager constants, written as strings.
         const val ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE"

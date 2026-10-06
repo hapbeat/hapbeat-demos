@@ -174,12 +174,16 @@ private fun QuestBar(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
     DiagnosticsLines(vm)
 }
 
-/** Fixed two small lines for on-site diagnosis: the phone's Wi-Fi, then the last discovery / 5555 scan. */
+/**
+ * Fixed two small lines for on-site diagnosis: the phone's Wi-Fi (and the Quest's, once read over USB),
+ * then the last discovery / 5555 scan.
+ */
 @Composable
 private fun DiagnosticsLines(vm: RemoteViewModel) {
+    val wifi = vm.wifiDiag + if (vm.usbQuestDiag.isEmpty()) "" else "　／ ${vm.usbQuestDiag}"
     // labelSmall (11sp / line 16sp): a bare fontSize would keep bodyLarge's 24sp line height. One line each = fixed height.
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-        listOf(vm.wifiDiag, vm.discoveryDiag).forEach {
+        listOf(wifi, vm.discoveryDiag).forEach {
             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -198,7 +202,10 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
             style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("前面: ${if (quest.lastDemoId.isEmpty()) "-" else DemoCatalog.labelFor(quest.lastDemoId)}", Modifier.weight(1f), maxLines = 1)
+            // "デモ応答 ○" means running; STATE tells whether it is actually in front (commands are refused otherwise).
+            val front = if (quest.lastDemoId.isEmpty()) "-" else DemoCatalog.labelFor(quest.lastDemoId) +
+                if (quest.remoteState?.foreground == false) "（非前面: メニュー・一時停止・境界設定など）" else ""
+            Text("前面: $front", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("デモ応答 ${mark(quest.respondedLastRound)}")
             Text("adb ${if (quest.adb == AdbState.CONNECTED) "○" else "×"}")
             val battery = quest.battery
@@ -269,24 +276,21 @@ private fun StatusDot(color: Color) {
 
 // ---- notice / tabs -------------------------------------------------------------------------
 
+/** Fixed two-line area. A low HMD battery takes the first line of its own, so another notice cannot hide it. */
 @Composable
 private fun NoticeArea(vm: RemoteViewModel) {
     val reason = vm.demoSwitchBlockReason
     val battery = vm.selectedQuest?.battery
-    val (text, error) = when {
-        reason != null -> reason to true
-        vm.notice.first.isNotEmpty() -> vm.notice
-        battery != null && battery <= 20 -> "HMD の電池が少なくなっています（$battery%）" to true
-        else -> vm.notice
+    val (text, error) = if (reason != null) reason to true else vm.notice
+    val color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(Modifier.fillMaxWidth().height(40.dp)) {
+        if (battery != null && battery <= 20) {
+            Text("HMD の電池が少なくなっています（$battery%）", style = MaterialTheme.typography.bodySmall, color = StatusRed, maxLines = 1)
+            Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
     }
-    Text(
-        text,
-        Modifier.fillMaxWidth().height(40.dp),
-        style = MaterialTheme.typography.bodySmall,
-        color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
 }
 
 @Composable
@@ -331,7 +335,7 @@ private fun StateSummary(quest: QuestState?) {
     val lines = if (state != null) {
         listOf(
             "触覚 ${onOff(state.hapticsOn)}　触覚ボタン ${shown(state.hapticsUi)}　リセットボタン ${shown(state.recenterUi)}",
-            (if (state.paused) "一時停止中" else "進行中") +
+            (if (state.foreground) "" else "非前面　") + (if (state.paused) "一時停止中" else "進行中") +
                 (if (state.stepCount > 0) "　セッション ${state.stepIndex + 1}/${state.stepCount}" else "　セッション外"),
         )
     } else {

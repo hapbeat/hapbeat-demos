@@ -43,6 +43,15 @@ fun UsbAdbDialog(vm: RemoteViewModel) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Fixed small line: the USB devices of the last run (VID:PID / interfaces); the log has the full text.
+                Text(
+                    vm.usbDeviceDetail.ifEmpty { " " },
+                    Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 // Fixed three-line area: progress and errors change the text only.
                 Text(
                     status,

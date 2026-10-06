@@ -14,7 +14,7 @@ class StateQueryTest {
 
     // fixtures/sample-demo-switch-messages.json: unsigned_query / unsigned_state
     private val fixtureState = """{"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef",""" +
-        """"current_demo_id":"handdemo","haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,""" +
+        """"current_demo_id":"handdemo","foreground":true,"haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,""" +
         """"step_index":1,"step_count":3}"""
 
     private fun parse(json: String) = DemoSwitchProtocol.parse(json.toByteArray())
@@ -25,6 +25,7 @@ class StateQueryTest {
         assertTrue(query is DemoSwitchMessage.Query)
         val state = parse(fixtureState) as DemoSwitchMessage.State
         assertEquals("handdemo", state.currentDemoId)
+        assertTrue(state.foreground)
         assertTrue(state.hapticsOn)
         assertFalse(state.paused)
         assertEquals(1L, state.stepIndex)
@@ -44,6 +45,15 @@ class StateQueryTest {
         assertNull(parse(fixtureState.replace("\"step_count\":3", "\"step_count\":33")))
         assertNull(parse(fixtureState.replace("}", ",\"extra\":0}")))
         assertNull(parse(fixtureState.replace(",\"paused\":false", "")))
+        assertNull(parse(fixtureState.replace("\"foreground\":true", "\"foreground\":\"true\"")))
+    }
+
+    @Test
+    fun stateWithoutForegroundIsRejected() {
+        // foreground is required since the contract change; the older STATE shape is invalid.
+        assertNull(parse(fixtureState.replace("\"foreground\":true,", "")))
+        val background = parse(fixtureState.replace("\"foreground\":true", "\"foreground\":false")) as DemoSwitchMessage.State
+        assertFalse(background.foreground)
     }
 
     @Test
@@ -53,12 +63,18 @@ class StateQueryTest {
             DemoSwitchProtocol.hmacHex("test-secret", DemoSwitchProtocol.canonicalQuery("remote-pixel", "0123456789abcdef")),
         )
         val state = DemoSwitchMessage.State(
-            "remote-pixel", "0123456789abcdef", "handdemo", hapticsOn = true, hapticsUi = false, recenterUi = false,
+            "remote-pixel", "0123456789abcdef", "handdemo", foreground = true, hapticsOn = true, hapticsUi = false, recenterUi = false,
             paused = false, stepIndex = -1, stepCount = 0, auth = null,
         )
         assertEquals(
-            "1b60ce011a2974c1579f2770d4feabb499cef4dd196f55257c463345a366ab11",
+            "37f5a4884c014734dd4c77b93b87418c3c3cd864e7bb0cd066d8e7016bb8b0b0",
             DemoSwitchProtocol.hmacHex("test-secret", DemoSwitchProtocol.canonicalState(state)),
+        )
+        // foreground sits between current_demo_id and haptics_on in the canonical bytes.
+        assertTrue(DemoSwitchProtocol.canonicalState(state).contains("current_demo_id=8:handdemo\nforeground=4:true\nhaptics_on=4:true\n"))
+        assertEquals(
+            "6864d05e315970013450041be0a46d3e36c0eef5a71431bda2c194539473b0d1",
+            DemoSwitchProtocol.hmacHex("test-secret", DemoSwitchProtocol.canonicalState(state.copy(foreground = false))),
         )
     }
 
