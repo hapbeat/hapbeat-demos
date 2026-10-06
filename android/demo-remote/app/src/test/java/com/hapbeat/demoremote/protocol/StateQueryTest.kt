@@ -99,9 +99,14 @@ class StateQueryTest {
         assertEquals(prefix + """'{"version":1,"preset":2}'""", DemoCatalog.hubSessionCommand(preset = 2))
         assertEquals(prefix + """'{"version":1,"demo_id":"handdemo"}'""", DemoCatalog.hubSessionCommand(demoId = "handdemo"))
         assertEquals(
-            prefix + """'{"version":1,"demo_id":"handdemo","options":{"tutorial":"on"}}'""",
-            DemoCatalog.hubSessionCommand(demoId = "handdemo", tutorial = "on"),
+            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"60"}}'""",
+            DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "60")),
         )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun hubSessionRejectsUnknownOption() {
+        DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "120"))
     }
 
     @Test(expected = IllegalArgumentException::class)

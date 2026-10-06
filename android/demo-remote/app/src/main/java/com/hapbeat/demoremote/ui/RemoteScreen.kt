@@ -1,7 +1,11 @@
 package com.hapbeat.demoremote.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -52,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.hapbeat.demoremote.AdbState
 import com.hapbeat.demoremote.ControlCatalog
 import com.hapbeat.demoremote.DemoCatalog
@@ -59,6 +65,8 @@ import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 @Composable
 fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int?) -> Unit = {}) {
@@ -373,7 +381,10 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
             ActionButton("開始", enabled = connected, modifier = Modifier.width(88.dp)) { vm.startPreset(preset) }
         }
     }
-    TextButton(onClick = { onEditPreset(null) }) { Text("＋ プリセットを作る") }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = { onEditPreset(null) }, modifier = Modifier.weight(1f)) { Text("＋ プリセットを作る") }
+        QrImportButton(vm, Modifier.weight(1f))
+    }
     Text("Hub のプリセット（VR 内で編集）", style = MaterialTheme.typography.titleSmall)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("プリセット", style = MaterialTheme.typography.bodyMedium)
@@ -382,19 +393,55 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
         }
     }
     Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
-    var tutorial by rememberSaveable { mutableStateOf<String?>(null) }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("チュートリアル", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        listOf(null to "既定", "on" to "あり", "off" to "なし").forEach { (value, label) ->
-            FilterChip(selected = tutorial == value, onClick = { tutorial = value }, label = { Text(label) })
-        }
-    }
+    // Pick a demo, then its descriptor options (same table as the preset editor), then start.
+    var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
+    var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
     ButtonGrid(DemoCatalog.sessionApps, columns = 2) { app, modifier ->
-        val installed = quest?.installed?.contains(app.packageName) == true
-        ActionButton(app.label, enabled = connected && installed, modifier = modifier) {
-            vm.startSession(demoId = app.demoId, tutorial = tutorial)
-        }
+        FilterChip(
+            selected = chosen == app.demoId,
+            onClick = { chosen = app.demoId },
+            label = { Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            modifier = modifier.height(48.dp),
+        )
     }
+    OptionChooser(DemoCatalog.optionsFor(chosen), options) { options = it }
+    val app = DemoCatalog.sessionApps.first { it.demoId == chosen }
+    val installed = quest?.installed?.contains(app.packageName) == true
+    ActionButton("このデモで始める", enabled = connected && installed, modifier = Modifier.fillMaxWidth()) {
+        vm.startSession(demoId = chosen, options = options)
+    }
+}
+
+/**
+ * Reads a showcase QR with the in-app scanner (zxing-android-embedded). The camera permission is asked
+ * right before the first scan; the result goes to the import confirmation dialog.
+ */
+@Composable
+private fun QrImportButton(vm: RemoteViewModel, modifier: Modifier) {
+    val context = LocalContext.current
+    val scan = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let(vm::importFromQr)
+    }
+    val scanOptions = {
+        ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("ショーケースのプリセットの QR を枠に入れてください")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scan.launch(scanOptions()) else vm.onQrCameraDenied()
+    }
+    TextButton(
+        onClick = {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                scan.launch(scanOptions())
+            } else {
+                permission.launch(Manifest.permission.CAMERA)
+            }
+        },
+        modifier = modifier,
+    ) { Text("QR から取り込む") }
 }
 
 @Composable

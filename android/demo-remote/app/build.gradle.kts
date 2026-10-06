@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0-d2"
+        versionName = "0.1.0-d3"
     }
 
     buildTypes {
@@ -102,6 +102,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("dev.mobile:dadb:2.0.0")
+    // In-app QR reading (Apache-2.0, bundles ZXing core; no Google Play Services).
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     testImplementation("junit:junit:4.13.2")
 }

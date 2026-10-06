@@ -1,6 +1,8 @@
 package com.hapbeat.demoremote.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -27,11 +30,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hapbeat.demoremote.DemoCatalog
+import com.hapbeat.demoremote.DemoOption
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.PresetStep
 import com.hapbeat.demoremote.data.RemotePreset
 
-/** Builds a remote preset: name, demos in order, tutorial per demo. [index] null = new preset. */
+/** Builds a remote preset: name, demos in order, options and retry per demo. [index] null = new preset. */
 @Composable
 fun PresetEditScreen(vm: RemoteViewModel, index: Int?, onDone: () -> Unit) {
     val original = index?.let { vm.presets.getOrNull(it) }
@@ -55,7 +59,7 @@ fun PresetEditScreen(vm: RemoteViewModel, index: Int?, onDone: () -> Unit) {
             steps.forEachIndexed { i, step ->
                 StepRow(
                     i, step,
-                    onTutorial = { steps[i] = step.copy(tutorial = it) },
+                    onChange = { steps[i] = it },
                     onUp = { if (i > 0) { steps.removeAt(i); steps.add(i - 1, step) } },
                     onDown = { if (i < steps.lastIndex) { steps.removeAt(i); steps.add(i + 1, step) } },
                     onRemove = { steps.removeAt(i) },
@@ -85,7 +89,7 @@ fun PresetEditScreen(vm: RemoteViewModel, index: Int?, onDone: () -> Unit) {
 
 @Composable
 private fun StepRow(
-    i: Int, step: PresetStep, onTutorial: (String?) -> Unit, onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit,
+    i: Int, step: PresetStep, onChange: (PresetStep) -> Unit, onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -94,22 +98,41 @@ private fun StepRow(
             TextButton(onClick = onDown, modifier = Modifier.width(48.dp)) { Text("↓") }
             TextButton(onClick = onRemove, modifier = Modifier.width(56.dp)) { Text("削除") }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("チュートリアル", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            TUTORIAL_CHOICES.forEach { (value, label) ->
-                FilterChip(selected = step.tutorial == value, onClick = { onTutorial(value) }, label = { Text(label) })
+        OptionChooser(DemoCatalog.optionsFor(step.demoId), step.options) { onChange(step.copy(options = it)) }
+        Row(Modifier.fillMaxWidth().clickable { onChange(step.copy(retry = !step.retry)) }, verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = step.retry, onCheckedChange = { onChange(step.copy(retry = it)) })
+            Text("失敗時にやり直す", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/**
+ * One row per descriptor option of a demo: "既定" (key left out, the demo decides) or one of its values.
+ * Shared by the preset editor and the single-demo start. Demos without options show nothing.
+ */
+@Composable
+fun OptionChooser(options: List<DemoOption>, values: Map<String, String>, onChange: (Map<String, String>) -> Unit) {
+    options.forEach { option ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(option.label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(selected = option.id !in values, onClick = { onChange(values - option.id) }, label = { Text("既定") })
+                option.values.forEach { v ->
+                    FilterChip(selected = values[option.id] == v.value, onClick = { onChange(values + (option.id to v.value)) }, label = { Text(v.label) })
+                }
             }
         }
     }
 }
 
-/** Tutorial option choices shared by the single-demo start and the preset editor. */
-val TUTORIAL_CHOICES: List<Pair<String?, String>> = listOf(null to "既定", "on" to "あり", "off" to "なし")
-
 /** Hub ticket limit (demo-session.md: steps 1..32). */
 const val MAX_STEPS = 32
 
-/** "Hand Demo（T）→ T-Rex Encounter" style one-line summary of a preset. */
-fun presetSummary(preset: RemotePreset): String = preset.steps.joinToString(" → ") { step ->
-    DemoCatalog.labelFor(step.demoId) + when (step.tutorial) { "on" -> "（T あり）"; "off" -> "（T なし）"; else -> "" }
+/** "Energy Duel（チュートリアル: なし）" plus "・やり直しなし" when retry is off. */
+fun stepSummary(step: PresetStep): String {
+    val options = DemoCatalog.optionSummary(step.demoId, step.options)
+    return DemoCatalog.labelFor(step.demoId) + (if (options.isEmpty()) "" else "（$options）") + if (step.retry) "" else "・やり直しなし"
 }
+
+/** "Hand Demo → Energy Duel（モード: 試合）" style one-line summary of a preset. */
+fun presetSummary(preset: RemotePreset): String = preset.steps.joinToString(" → ") { stepSummary(it) }

@@ -7,5 +7,7 @@ Hapbeat Demo Remote のソースは hapbeat-demos repo の MIT ライセンス�
 | [scrcpy-server](https://github.com/Genymobile/scrcpy) v4.1 | Copyright (C) 2018 Genymobile / Copyright (C) 2018-2026 Romain Vimont | Apache-2.0 | 画面ミラー（未改変のリリースバイナリを実行時に Quest へ転送） |
 | [dadb](https://github.com/mobile-dev-inc/dadb) 2.0.0 | mobile.dev inc. | Apache-2.0 | Wi-Fi adb クライアント |
 | [Okio](https://github.com/square/okio) | Square, Inc. | Apache-2.0 | dadb の I/O |
+| [zxing-android-embedded](https://github.com/journeyapps/zxing-android-embedded) 4.3.0 | ZXing authors / Journey Mobile | Apache-2.0 | プリセット取り込みの QR 読み取り |
+| [ZXing core](https://github.com/zxing/zxing) 3.4.1 | ZXing authors | Apache-2.0 | QR のデコード（zxing-android-embedded が使用） |
 | [AndroidX / Jetpack Compose](https://developer.android.com/jetpack/androidx) | The Android Open Source Project | Apache-2.0 | UI |
 | [Kotlin](https://github.com/JetBrains/kotlin) / [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | JetBrains s.r.o. and contributors | Apache-2.0 | 言語ランタイム |

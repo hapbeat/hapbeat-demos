@@ -26,6 +26,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.hapbeat.demoremote.ui.AppTheme
 import com.hapbeat.demoremote.ui.LicenseScreen
 import com.hapbeat.demoremote.ui.PresetEditScreen
+import com.hapbeat.demoremote.ui.PresetImportDialog
 import com.hapbeat.demoremote.ui.RemoteScreen
 import com.hapbeat.demoremote.ui.SettingsScreen
 import com.hapbeat.demoremote.ui.UsbAdbDialog
@@ -42,7 +43,7 @@ class MainActivity : ComponentActivity() {
             override fun onStart(owner: LifecycleOwner) = viewModel.onForeground()
             override fun onStop(owner: LifecycleOwner) = viewModel.onBackground()
         })
-        if (savedInstanceState == null) handleUsbIntent(intent)
+        if (savedInstanceState == null) handleIntent(intent)
         setContent {
             AppTheme {
                 var screen by rememberSaveable { mutableStateOf(Screen.REMOTE) }
@@ -72,19 +73,24 @@ class MainActivity : ComponentActivity() {
                             Screen.LICENSES -> LicenseScreen(onBack = { screen = Screen.SETTINGS })
                         }
                         if (viewModel.usbDialogOpen) UsbAdbDialog(viewModel)
+                        PresetImportDialog(viewModel)
                     }
                 }
             }
         }
     }
 
-    /** singleTop: a Quest plugged in while the app is open arrives here instead of a second activity. */
+    /** singleTop: a Quest plugged in or a preset link opened while the app is open arrives here instead of a second activity. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleUsbIntent(intent)
+        handleIntent(intent)
     }
 
-    private fun handleUsbIntent(intent: Intent?) {
-        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) viewModel.onUsbDeviceAttached()
+    private fun handleIntent(intent: Intent?) {
+        when (intent?.action) {
+            UsbManager.ACTION_USB_DEVICE_ATTACHED -> viewModel.onUsbDeviceAttached()
+            // hapbeat-remote://preset?d=<token> from the showcase page; only shows the confirmation dialog.
+            Intent.ACTION_VIEW -> intent.dataString?.let(viewModel::importFromLink)
+        }
     }
 }

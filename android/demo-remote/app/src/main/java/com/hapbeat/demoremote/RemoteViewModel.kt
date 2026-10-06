@@ -31,10 +31,12 @@ import com.hapbeat.demoremote.adb.UsbLink
 import com.hapbeat.demoremote.adb.UsbLinkJudge
 import com.hapbeat.demoremote.adb.UsbWifiAdbResult
 import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.data.PresetTransfer
 import com.hapbeat.demoremote.data.RemoteLogFile
 import com.hapbeat.demoremote.data.RemotePreset
 import com.hapbeat.demoremote.data.SavedQuest
 import com.hapbeat.demoremote.data.SettingsStore
+import com.hapbeat.demoremote.data.TransferResult
 import com.hapbeat.demoremote.mirror.MirrorSession
 import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
@@ -138,6 +140,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     val logs = mutableStateListOf<LogEntry>()
     /** Session plans kept on this phone (the Hub's presets 1..3 are separate and edited in VR). */
     val presets = mutableStateListOf<RemotePreset>().apply { addAll(settings.presets) }
+    /** Presets read from a QR / link and waiting for the user's confirmation (or the reason they were refused). */
+    var pendingImport by mutableStateOf<TransferResult?>(null); private set
     /** Fixed-area notice (text, isError). */
     var notice by mutableStateOf("" to false); private set
     var adbMessage by mutableStateOf(""); private set
@@ -939,12 +943,17 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Starts a Demo Session through the Hub (adb + the Hub's start extra): [preset] 1..3, or one [demoId]
-     * with [tutorial] "on" / "off" / null (descriptor default).
+     * with descriptor [options] (missing keys = the demo's defaults).
      */
-    fun startSession(preset: Int? = null, demoId: String? = null, tutorial: String? = null) {
+    fun startSession(preset: Int? = null, demoId: String? = null, options: Map<String, String> = emptyMap()) {
+        val summary = if (demoId == null) "" else DemoCatalog.optionSummary(demoId, options)
         val title = if (preset != null) "Hub のプリセット $preset" else DemoCatalog.labelFor(demoId) +
-            when (tutorial) { "on" -> "（チュートリアルあり）"; "off" -> "（チュートリアルなし）"; else -> "" }
-        startThroughHub(title, DemoCatalog.hubSessionCommand(preset, demoId, tutorial))
+            if (summary.isEmpty()) "" else "（$summary）"
+        val command = try { DemoCatalog.hubSessionCommand(preset, demoId, options) } catch (_: IllegalArgumentException) {
+            setNotice("「$title」を開始できません（設定を確認してください）", true)
+            return
+        }
+        startThroughHub(title, command)
     }
 
     /** Starts a remote preset as one Hub session (`steps`). */
@@ -965,6 +974,49 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (index !in presets.indices) return
         presets.removeAt(index)
         settings.presets = presets.toList()
+    }
+
+    // ---- preset transfer (QR / link from the web showcase) ----
+
+    /** Text read by the in-app QR scanner. Only the showcase link is accepted. */
+    fun importFromQr(text: String) {
+        val token = PresetTransfer.tokenFromQr(text)
+        pendingImport = if (token == null) TransferResult.Rejected("プリセットの QR ではありません") else PresetTransfer.decodeToken(token)
+        logImport("QR")
+    }
+
+    /** `hapbeat-remote://preset?d=...` opened from the browser. Other URIs are ignored. */
+    fun importFromLink(uri: String) {
+        val token = PresetTransfer.tokenFromLink(uri) ?: return
+        pendingImport = PresetTransfer.decodeToken(token)
+        logImport("リンク")
+    }
+
+    fun onQrCameraDenied() {
+        setNotice("カメラが許可されていないため QR を読めません", true)
+    }
+
+    /** The user approved: stores the presets (nothing is started). [choices]: per preset, for a name already in use. */
+    fun confirmImport(choices: List<PresetTransfer.NameConflict>) {
+        val imported = (pendingImport as? TransferResult.Accepted)?.presets ?: return
+        val merged = PresetTransfer.merge(presets.toList(), imported, choices)
+        presets.clear()
+        presets.addAll(merged)
+        settings.presets = merged
+        pendingImport = null
+        setNotice("プリセットを ${imported.size} 件取り込みました", false)
+    }
+
+    fun dismissImport() {
+        pendingImport = null
+    }
+
+    private fun logImport(source: String) {
+        when (val result = pendingImport) {
+            is TransferResult.Accepted -> fileLog("取り込み（$source）: ${result.presets.size} 件を確認待ち")
+            is TransferResult.Rejected -> fileLog("取り込み（$source）: 拒否 ${result.message}")
+            null -> Unit
+        }
     }
 
     private fun startThroughHub(title: String, command: String) {

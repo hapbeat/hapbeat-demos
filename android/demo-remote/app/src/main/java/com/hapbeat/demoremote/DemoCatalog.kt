@@ -1,26 +1,54 @@
 package com.hapbeat.demoremote
 
+import com.hapbeat.demoremote.data.PresetStep
 import com.hapbeat.demoremote.protocol.MiniJson
+
+/** One value of a demo option ([label]: the descriptor's Japanese label). */
+data class OptionValue(val value: String, val label: String)
+
+/** One option of a demo's descriptor (`options[]`): [id], Japanese [label], [default] and the allowed [values]. */
+data class DemoOption(val id: String, val label: String, val default: String, val values: List<OptionValue>)
 
 /**
  * Fixed demo table. adb launches only these packages; nothing received from the
  * network is ever used as a package name or shell command.
+ * [options]: copy of the demo's descriptor options, the only option keys and values sent to the Hub.
  */
-data class DemoApp(val demoId: String, val label: String, val packageName: String)
+data class DemoApp(val demoId: String, val label: String, val packageName: String, val options: List<DemoOption> = emptyList())
 
 object DemoCatalog {
     const val HUB_ID = "demo_hub"
     const val VOLLEY_ID = "volley"
     const val ENERGY_DUEL_ID = "energy-duel"
 
+    // Descriptor options copied from each demo's hapbeat-demo-session.json (Unity: Assets/StreamingAssets,
+    // Unreal: Config/HapbeatDemoSession). Update together with the descriptor.
+    private val ENERGY_DUEL_OPTIONS = listOf(
+        DemoOption("tutorial", "チュートリアル", "on", listOf(OptionValue("on", "あり"), OptionValue("off", "なし"))),
+        DemoOption("round_seconds", "試合の長さ", "30", listOf(OptionValue("30", "30秒"), OptionValue("60", "60秒"))),
+        DemoOption("difficulty", "相手の強さ", "normal", listOf(OptionValue("normal", "ふつう"), OptionValue("strong", "強い"))),
+        DemoOption("mode", "モード", "match", listOf(OptionValue("match", "試合"), OptionValue("free", "フリープレイ"))),
+    )
+    private val VOLLEY_OPTIONS = listOf(
+        DemoOption("scene", "モード", "block", listOf(
+            OptionValue("block", "スパイク＋ブロック"), OptionValue("match", "6人制の試合"), OptionValue("receive", "レシーブ"),
+        )),
+        // The descriptor marks points for scene block / match and balls for receive (`when`); both are accepted here.
+        DemoOption("points", "点数", "7", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取"))),
+        DemoOption("balls", "球数", "10", listOf(OptionValue("10", "10球"), OptionValue("20", "20球"))),
+    )
+    private val BOXING_OPTIONS = listOf(
+        DemoOption("round", "ラウンド", "90", listOf(OptionValue("60", "60秒"), OptionValue("90", "90秒"))),
+    )
+
     val apps: List<DemoApp> = listOf(
         DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
-        DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley"),
-        DemoApp("boxing", "Boxing", "com.hapbeat.boxing"),
+        DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley", VOLLEY_OPTIONS),
+        DemoApp("boxing", "Boxing", "com.hapbeat.boxing", BOXING_OPTIONS),
         DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2"),
         DemoApp("trex-encounter", "T-Rex Encounter", "com.hapbeat.trexencounter"),
         DemoApp("safety-mill", "Safety Mill", "com.hapbeat.safetymill"),
-        DemoApp(ENERGY_DUEL_ID, "Energy Duel", "jp.hapbeat.energyduel"),
+        DemoApp(ENERGY_DUEL_ID, "Energy Duel", "jp.hapbeat.energyduel", ENERGY_DUEL_OPTIONS),
         DemoApp("fps", "FPS", "com.hapbeat.fpsdemo"),
     )
 
@@ -32,53 +60,87 @@ object DemoCatalog {
     /** Demo IDs that can start a one-demo Hub session (everything but the Hub itself). */
     val sessionApps: List<DemoApp> get() = apps.filter { it.demoId != HUB_ID }
 
+    /** Descriptor options of a session demo (empty for unknown IDs). */
+    fun optionsFor(demoId: String): List<DemoOption> = sessionApps.firstOrNull { it.demoId == demoId }?.options.orEmpty()
+
+    /** "チュートリアル: なし、モード: 試合" for the options that are set (empty when all are the descriptor default). */
+    fun optionSummary(demoId: String, options: Map<String, String>): String = optionsFor(demoId).mapNotNull { option ->
+        val value = options[option.id] ?: return@mapNotNull null
+        "${option.label}: ${option.values.firstOrNull { it.value == value }?.label ?: value}"
+    }.joinToString("、")
+
+    /** Identifier / option value patterns of demo-session.md (demo-remote-preset.schema.json). */
+    val IDENTIFIER = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
+    val OPTION_VALUE = Regex("^[a-z0-9][a-z0-9._-]{0,31}$")
+    const val MAX_OPTIONS = 8
+
+    /**
+     * Throws IllegalArgumentException unless [demoId] is a session demo and every option key / value is in its
+     * descriptor table. The patterns are checked first, so nothing outside `[a-z0-9._-]` gets further.
+     */
+    fun requireValidStep(demoId: String, options: Map<String, String>) {
+        require(IDENTIFIER.matches(demoId))
+        require(options.size <= MAX_OPTIONS)
+        options.forEach { (key, value) -> require(IDENTIFIER.matches(key) && OPTION_VALUE.matches(value)) }
+        require(sessionApps.any { it.demoId == demoId })
+        val table = optionsFor(demoId)
+        options.forEach { (key, value) -> require(table.any { o -> o.id == key && o.values.any { it.value == value } }) }
+    }
+
     private const val HUB_COMPONENT = "jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity"
     private const val HUB_START_EXTRA = "com.hapbeat.demo_hub.start"
 
     /**
      * Starts a Demo Session through the Hub's external start extra (demo-session.md「Hub を外部から起動して
-     * セッションを始める」): a preset 1..3, or one demo with an optional tutorial option ("on" / "off").
-     * The JSON is built only from the fixed table and literals, so it never contains a single quote.
+     * セッションを始める」): a preset 1..3, or one demo with descriptor [options] (empty = all defaults).
      */
-    fun hubSessionCommand(preset: Int? = null, demoId: String? = null, tutorial: String? = null): String {
+    fun hubSessionCommand(preset: Int? = null, demoId: String? = null, options: Map<String, String> = emptyMap()): String {
         val json = when {
             preset != null -> {
                 require(preset in 1..3)
-                "{\"version\":1,\"preset\":$preset}"
+                MiniJson.write(linkedMapOf("version" to 1, "preset" to preset))
             }
             demoId != null -> {
-                require(sessionApps.any { it.demoId == demoId })
-                require(tutorial == null || tutorial == "on" || tutorial == "off")
-                val options = if (tutorial == null) "" else ",\"options\":{\"tutorial\":\"$tutorial\"}"
-                "{\"version\":1,\"demo_id\":\"$demoId\"$options}"
+                requireValidStep(demoId, options)
+                MiniJson.write(linkedMapOf<String, Any?>("version" to 1, "demo_id" to demoId).apply {
+                    if (options.isNotEmpty()) put("options", LinkedHashMap(options))
+                })
             }
             else -> throw IllegalArgumentException("preset or demoId")
         }
-        return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA '$json'"
+        return hubStartCommand(json)
     }
 
     /** Hub start extra limit (demo-session.md). */
     const val HUB_START_MAX_BYTES = 4096
 
     /**
-     * Starts a session with a plan built on this phone (`steps`, 1..32 demos, each with an optional
-     * tutorial option). Only fixed-table demo IDs and literal option values go into the JSON.
+     * Starts a session with a plan built on this phone (`steps`, 1..32 demos). The JSON is rebuilt from the
+     * validated steps (demo_id, options, retry); a preset's name never goes into it.
      */
-    fun hubPlanCommand(steps: List<com.hapbeat.demoremote.data.PresetStep>): String {
+    fun hubPlanCommand(steps: List<PresetStep>): String {
         require(steps.size in 1..32)
         val json = MiniJson.write(linkedMapOf(
             "version" to 1,
             "steps" to steps.map { step ->
-                require(sessionApps.any { it.demoId == step.demoId })
-                require(step.tutorial == null || step.tutorial == "on" || step.tutorial == "off")
+                requireValidStep(step.demoId, step.options)
                 linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
-                    if (step.tutorial != null) put("options", linkedMapOf("tutorial" to step.tutorial))
+                    if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
+                    if (!step.retry) put("retry", false)
                 }
             },
         ))
         require(json.toByteArray(Charsets.UTF_8).size <= HUB_START_MAX_BYTES)
-        return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA '$json'"
+        return hubStartCommand(json)
     }
+
+    private fun hubStartCommand(json: String): String = "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA ${shellQuote(json)}"
+
+    /**
+     * One POSIX single-quoted shell word (' becomes '\''). Validated values cannot contain a quote; this is
+     * defense in depth on top of the pattern check (demo-session.md).
+     */
+    fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
     /** Shell command that resolves the launcher activity of [app] and starts it. */
     fun launchCommand(app: DemoApp): String =

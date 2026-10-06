@@ -1,0 +1,226 @@
+{
+  "valid": {
+    "version": 1,
+    "presets": [
+      {
+        "name": "XR Kaigi A",
+        "steps": [
+          {
+            "demo_id": "energy-duel",
+            "options": {
+              "tutorial": "on"
+            }
+          },
+          {
+            "demo_id": "volley",
+            "options": {
+              "scene": "match"
+            },
+            "retry": false
+          }
+        ]
+      },
+      {
+        "name": "短縮コース",
+        "steps": [
+          {
+            "demo_id": "handdemo"
+          },
+          {
+            "demo_id": "trex-encounter"
+          }
+        ]
+      }
+    ]
+  },
+  "valid_token": "v1.eyJ2ZXJzaW9uIjoxLCJwcmVzZXRzIjpbeyJuYW1lIjoiWFIgS2FpZ2kgQSIsInN0ZXBzIjpbeyJkZW1vX2lkIjoiaGFuZGRlbW8ifV19XX0",
+  "valid_token_json": {
+    "version": 1,
+    "presets": [
+      {
+        "name": "XR Kaigi A",
+        "steps": [
+          {
+            "demo_id": "handdemo"
+          }
+        ]
+      }
+    ]
+  },
+  "invalid": [
+    {
+      "version": 2,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": []
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a\nb",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": []
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "Hand-Demo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "handdemo",
+              "title": "x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "volley",
+              "options": {
+                "scene": "../x"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ],
+      "extra": true
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a\n",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": " ",
+          "steps": [
+            {
+              "demo_id": "handdemo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "presets": [
+        {
+          "name": "a",
+          "steps": [
+            {
+              "demo_id": "volley",
+              "options": {
+                "scene": "x';reboot;'"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "invalid_tokens": [
+    "",
+    "v2.eyJ2ZXJzaW9uIjoxfQ",
+    "eyJ2ZXJzaW9uIjoxfQ",
+    "v1.eyJ2ZXJzaW9uIjoxfQ==",
+    "v1.eyJ2ZXJzaW9uIjoxfQ+/",
+    "v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "v1.__8"
+  ],
+  "invalid_tokens_note": "Rejected before schema validation: empty, unknown version prefix, missing prefix, padding, non-base64url characters, longer than 937 characters, bytes that are not valid UTF-8 (0xFF 0xFF)."
+}

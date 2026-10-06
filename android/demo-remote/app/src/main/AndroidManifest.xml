@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- In-app QR reading of showcase presets; asked at runtime right before the scan. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <!-- The phone acts as USB host to re-enable the Quest's Wi-Fi adb (optional: tablets without host mode still install). -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
@@ -29,6 +33,18 @@
             <meta-data
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/adb_device_filter" />
+            <!-- Preset link from the showcase (demo-session.md): hapbeat-remote://preset?d=<token>. No https App Links yet. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hapbeat-remote" android:host="preset" />
+            </intent-filter>
         </activity>
+        <!-- zxing-android-embedded scanner: follow the phone's orientation instead of the library's landscape lock. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
     </application>
 </manifest>
