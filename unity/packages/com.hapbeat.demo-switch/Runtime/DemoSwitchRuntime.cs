@@ -6,15 +6,27 @@ using UnityEngine;
 
 namespace Hapbeat.DemoSwitch
 {
+    /// <summary>
+    /// Keeps UDP 7710 bound while the process lives (contracts: Transport and lifecycle). Out of the foreground
+    /// (<see cref="OnApplicationFocus"/> false or <see cref="OnApplicationPause"/> true) it still answers DISCOVER
+    /// and QUERY (STATE `foreground: false`) but refuses SWITCH / CONTROL; only a hand-over stops the listener.
+    /// </summary>
     internal sealed class DemoSwitchRuntime : MonoBehaviour
     {
+        /// <summary>A failed bind (e.g. the previous application's socket still open) is retried every 0.25 s for 5 s.</summary>
+        internal const float BindRetryIntervalSeconds = 0.25f;
+        internal const int BindRetryAttempts = 20;
+        internal const string NotForegroundMessage = "not in foreground";
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private DemoSwitchSettings _settings;
         private DemoSwitchUdpTransport _transport;
         private DemoSwitchSequenceGuard _sequenceGuard;
         private IDemoSwitchLaunchAdapter _launcher;
+        private readonly DemoSwitchMulticastLock _multicastLock = new DemoSwitchMulticastLock();
         private bool _foreground = true;
         private bool _listenerStarted;
+        private Coroutine _bindRetry;
+        private Coroutine _control;
         private DemoSwitchLaunchContext? _pendingLaunchContext;
         private float _nextDropLogTime;
         private bool _controlBusy;
@@ -40,7 +52,7 @@ namespace Hapbeat.DemoSwitch
             _transport = new DemoSwitchUdpTransport();
             _sequenceGuard = new DemoSwitchSequenceGuard(new PlayerPrefsSequenceStore());
             _launcher = DemoSwitchLaunchAdapter.Create();
-            StartForegroundReceiver();
+            StartReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
             gameObject.AddComponent<DemoSessionRecenterButton>();
@@ -137,6 +149,11 @@ namespace Hapbeat.DemoSwitch
                 SendFailure(datagram.Source, command, "unsigned_disabled", "Unsigned command mode is disabled.");
                 return;
             }
+            if (!_foreground)
+            {
+                SendFailure(datagram.Source, command, "not_allowed", NotForegroundMessage);
+                return;
+            }
             if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished)
             {
                 SendFailure(datagram.Source, command, "not_allowed", "An operation is in progress.");
@@ -196,7 +213,7 @@ namespace Hapbeat.DemoSwitch
 
         private void HandleQuery(string json, IPEndPoint source)
         {
-            var result = DemoSwitchQueryHandler.Handle(json, query => BuildState(query, _settings.CurrentDemoId), _settings.SharedSecret,
+            var result = DemoSwitchQueryHandler.Handle(json, query => BuildState(query, _settings.CurrentDemoId, _foreground), _settings.SharedSecret,
                 _settings.AllowUnsignedOnIsolatedLan);
             if (!result.ShouldReply)
             {
@@ -215,14 +232,14 @@ namespace Hapbeat.DemoSwitch
         }
 
         /// <summary>
-        /// STATE values: haptics output (<see cref="DemoSession.HapticsEnabled"/>), whether the haptics button is shown
-        /// (the descriptor supports the toggle and haptics UI is on), the 視線をリセット button, the shared pause or a
-        /// scene's <see cref="IDemoAppMenuState"/>, and the active session's step (-1 / 0 outside a session).
+        /// STATE values: whether this runtime is in the foreground, haptics output (<see cref="DemoSession.HapticsEnabled"/>),
+        /// whether the haptics button is shown (the descriptor supports the toggle and haptics UI is on), the 視線をリセット
+        /// button, the shared pause or a scene's <see cref="IDemoAppMenuState"/>, and the active session's step (-1 / 0 outside a session).
         /// </summary>
-        internal static DemoSwitchState BuildState(DemoSwitchQuery query, string currentDemoId)
+        internal static DemoSwitchState BuildState(DemoSwitchQuery query, string currentDemoId, bool foreground)
         {
             var ticket = DemoSession.IsActive ? DemoSession.Ticket : null;
-            return new DemoSwitchState(query.ControllerId, query.Nonce, currentDemoId, DemoSession.HapticsEnabled,
+            return new DemoSwitchState(query.ControllerId, query.Nonce, currentDemoId, foreground, DemoSession.HapticsEnabled,
                 DemoSession.SupportsHapticsToggle && DemoSession.HapticsUiVisible, DemoSession.RecenterUiVisible,
                 DemoPause.IsPaused || IsAppMenuOpen(), ticket != null ? ticket.Index : -1, ticket != null ? ticket.Steps.Count : 0);
         }
@@ -270,7 +287,7 @@ namespace Hapbeat.DemoSwitch
             { SendFailure(source,command,"replay","seq was already accepted or is older."); return; }
             _controlBusy = true;
             SendStatus(source,new DemoSwitchStatus("ACK",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
-            StartCoroutine(ExecuteControl(adapter,command,source));
+            _control = StartCoroutine(ExecuteControl(adapter,command,source));
         }
 
         private IEnumerator ExecuteControl(IDemoAppControls adapter, DemoSwitchCommand command, IPEndPoint source)
@@ -316,14 +333,62 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
-        private void StartForegroundReceiver()
+        /// <summary>
+        /// Reads a launch context (at start, and a new Intent each time this application comes to the front) and binds
+        /// 7710 unless it is bound. A failed bind is retried (<see cref="RetryBind"/>); READY or FAILED/listener_failed
+        /// for a launch context follows the final result. Nothing starts again after a hand-over.
+        /// </summary>
+        private void StartReceiver()
         {
+            if (DemoAppHandoff.IsFinished) return;
             CaptureLaunchContext();
-            if (!TryStartListener(out var error))
+            if (_listenerStarted) { ReportReady(); return; }
+            if (_bindRetry != null) return;
+            if (!TryValidateReceiver(out var error))
             {
                 ReportListenerFailure(error);
                 return;
             }
+            error = TryBind();
+            if (error == null) { OnListenerStarted(); return; }
+            Debug.LogWarning("[Demo Switch] Could not bind UDP " + _settings.Port + " (" + error + "); retrying every " +
+                BindRetryIntervalSeconds + " s, " + BindRetryAttempts + " times.");
+            _bindRetry = StartCoroutine(RetryBind(TryBind, OnBindRetryFinished));
+        }
+
+        /// <summary>
+        /// Calls <paramref name="bind"/> (null = bound, otherwise the error) every <see cref="BindRetryIntervalSeconds"/>,
+        /// at most <see cref="BindRetryAttempts"/> times, and reports the result with the number of retries made.
+        /// </summary>
+        internal static IEnumerator RetryBind(Func<string> bind, Action<string, int> onFinished)
+        {
+            string error = null;
+            for (var attempt = 1; attempt <= BindRetryAttempts; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(BindRetryIntervalSeconds);
+                error = bind();
+                if (error == null) { onFinished(null, attempt); yield break; }
+            }
+            onFinished(error, BindRetryAttempts);
+        }
+
+        private void OnBindRetryFinished(string error, int attempts)
+        {
+            _bindRetry = null;
+            if (error == null)
+            {
+                Debug.Log("[Demo Switch] Bound UDP " + _settings.Port + " after " + attempts + " retries.");
+                OnListenerStarted();
+                return;
+            }
+            Debug.LogError("[Demo Switch] Could not bind UDP " + _settings.Port + " after " + attempts + " retries: " + error);
+            ReportListenerFailure(error);
+        }
+
+        private void OnListenerStarted()
+        {
+            _listenerStarted = true;
+            _multicastLock.Acquire();
             ReportReady();
         }
 
@@ -355,11 +420,9 @@ namespace Hapbeat.DemoSwitch
                     "listener_failed", error));
         }
 
-        private bool TryStartListener(out string error)
+        private bool TryValidateReceiver(out string error)
         {
             error = null;
-            if (!_foreground) { error = "Application is not in the foreground."; return false; }
-            if (_listenerStarted) return true;
             if (_settings == null) { error = "Settings were not loaded."; return false; }
             if (!_settings.ReceiverEnabled) { error = "Receiver is disabled in settings."; return false; }
             if (!DemoSwitchProtocol.IsIdentifier(_settings.CurrentDemoId))
@@ -378,43 +441,55 @@ namespace Hapbeat.DemoSwitch
                 }
                 Debug.LogWarning("[Demo Switch] Unsigned mode is enabled. Use only on an isolated demo LAN.");
             }
+            return true;
+        }
 
+        /// <summary>Null when 7710 is bound, otherwise the socket error.</summary>
+        private string TryBind()
+        {
             try
             {
                 _transport.Start(_settings.Port);
-                _listenerStarted = true;
-                return true;
+                return null;
             }
             catch (Exception exception)
             {
-                Debug.LogError("[Demo Switch] Could not bind UDP " + _settings.Port + ": " + exception.Message);
-                error = exception.Message;
-                return false;
+                return exception.Message;
             }
         }
 
+        /// <summary>Hand-over or teardown: stops a bind retry, releases 7710 and the multicast lock.</summary>
         private void StopListener()
         {
+            if (_bindRetry != null) { StopCoroutine(_bindRetry); _bindRetry = null; }
+            _multicastLock.Release();
             if (!_listenerStarted) return;
             _transport.Stop();
             _listenerStarted = false;
         }
 
+        // Focus and pause only set the foreground state; the listener keeps running (DISCOVER / QUERY are answered).
         private void OnApplicationFocus(bool hasFocus)
         {
             _foreground = hasFocus;
-            if (hasFocus) StartForegroundReceiver(); else StopListener();
+            if (hasFocus) StartReceiver();
         }
 
         private void OnApplicationPause(bool paused)
         {
             _foreground = !paused;
-            if (paused) { StopAllCoroutines(); _controlBusy = false; StopListener(); }
-            else StartForegroundReceiver();
+            if (paused)
+            {
+                if (_control != null) StopCoroutine(_control);
+                _control = null;
+                _controlBusy = false;
+            }
+            else StartReceiver();
         }
 
         private void OnDestroy()
         {
+            StopListener();
             _transport?.Dispose();
             if (Instance == this) Instance = null;
         }

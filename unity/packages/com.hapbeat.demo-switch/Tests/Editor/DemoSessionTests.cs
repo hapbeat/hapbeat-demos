@@ -421,8 +421,10 @@ namespace Hapbeat.DemoSwitch.Tests
         public void StateReportsHapticsButtonsPauseAndStep()
         {
             var query = new DemoSwitchQuery("remote-pixel", "0123456789abcdef", "");
-            var state = DemoSwitchRuntime.BuildState(query, "volley");
+            var state = DemoSwitchRuntime.BuildState(query, "volley", true);
             Assert.That(state.CurrentDemoId, Is.EqualTo("volley"));
+            Assert.That(state.Foreground, Is.True);
+            Assert.That(DemoSwitchRuntime.BuildState(query, "volley", false).Foreground, Is.False);
             Assert.That(state.HapticsOn, Is.True);
             Assert.That(state.HapticsUi, Is.False);
             Assert.That(state.RecenterUi, Is.False);
@@ -431,7 +433,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(state.StepCount, Is.Zero);
 
             DemoSession.SetHapticsUiVisible(true);
-            Assert.That(DemoSwitchRuntime.BuildState(query, "volley").HapticsUi, Is.False, "No haptics toggle: the button is not shown.");
+            Assert.That(DemoSwitchRuntime.BuildState(query, "volley", true).HapticsUi, Is.False, "No haptics toggle: the button is not shown.");
 
             DemoSession.ResetForTests(_platform, "volley", Volley());
             Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
@@ -439,7 +441,7 @@ namespace Hapbeat.DemoSwitch.Tests
             DemoSession.SetRecenterUiVisible(true);
             DemoSession.SetHapticsEnabled(false);
             DemoPause.Pause();
-            state = DemoSwitchRuntime.BuildState(query, "volley");
+            state = DemoSwitchRuntime.BuildState(query, "volley", true);
             Assert.That(state.HapticsOn, Is.False);
             Assert.That(state.HapticsUi, Is.True);
             Assert.That(state.RecenterUi, Is.True);
@@ -447,15 +449,15 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(state.StepIndex, Is.Zero);
             Assert.That(state.StepCount, Is.EqualTo(2));
             DemoPause.Resume();
-            Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.False);
+            Assert.That(DemoSwitchRuntime.BuildState(query, "volley", true).Paused, Is.False);
 
             var go = new GameObject("own menu");
             try
             {
                 var menu = go.AddComponent<OwnMenu>();
-                Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.False);
+                Assert.That(DemoSwitchRuntime.BuildState(query, "volley", true).Paused, Is.False);
                 menu.Open = true;
-                Assert.That(DemoSwitchRuntime.BuildState(query, "volley").Paused, Is.True, "The app's own menu pause.");
+                Assert.That(DemoSwitchRuntime.BuildState(query, "volley", true).Paused, Is.True, "The app's own menu pause.");
             }
             finally { Object.DestroyImmediate(go); }
         }

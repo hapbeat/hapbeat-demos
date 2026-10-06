@@ -221,7 +221,7 @@ namespace Hapbeat.DemoSwitch.Tests
 
         // hapbeat-contracts fixtures/sample-demo-switch-messages.json unsigned_query / unsigned_state (spec example).
         const string QueryExample = "{\"version\":1,\"type\":\"QUERY\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\"}";
-        const string StateExample = "{\"version\":1,\"type\":\"STATE\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"current_demo_id\":\"handdemo\",\"haptics_on\":true,\"haptics_ui\":false,\"recenter_ui\":false,\"paused\":false,\"step_index\":1,\"step_count\":3}";
+        const string StateExample = "{\"version\":1,\"type\":\"STATE\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"current_demo_id\":\"handdemo\",\"foreground\":true,\"haptics_on\":true,\"haptics_ui\":false,\"recenter_ui\":false,\"paused\":false,\"step_index\":1,\"step_count\":3}";
 
         [Test]
         public void QueryAndStateMatchTheSpecExampleAndHmacVectors()
@@ -232,18 +232,18 @@ namespace Hapbeat.DemoSwitch.Tests
                 "HAPBEAT-DEMO-SWITCH/1\nQUERY\nversion=1:1\ntype=5:QUERY\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n"));
             Assert.That(DemoSwitchProtocol.ComputeAuth(query.Query, Secret), Is.EqualTo("f64cd6fb617ef3fee7968a8580765b6c527467203174e221be5c7da4de1190c2"));
 
-            var state = new DemoSwitchState("remote-pixel", "0123456789abcdef", "handdemo", true, false, false, false, 1, 3);
+            var state = new DemoSwitchState("remote-pixel", "0123456789abcdef", "handdemo", true, true, false, false, false, 1, 3);
             Assert.That(DemoSwitchProtocol.SerializeState(state, string.Empty), Is.EqualTo(StateExample), "Field order and values as the example.");
             Assert.That(DemoSwitchProtocol.Canonicalize(state), Is.EqualTo(
                 "HAPBEAT-DEMO-SWITCH/1\nSTATE\nversion=1:1\ntype=5:STATE\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n" +
-                "current_demo_id=8:handdemo\nhaptics_on=4:true\nhaptics_ui=5:false\nrecenter_ui=5:false\npaused=5:false\nstep_index=1:1\nstep_count=1:3\n"));
-            Assert.That(DemoSwitchProtocol.ComputeAuth(state, Secret), Is.EqualTo("1c4beefa4a7fbc8de87f2a7498e38e5821557dfae27fa88a7e1f0cda7c5672df"));
+                "current_demo_id=8:handdemo\nforeground=4:true\nhaptics_on=4:true\nhaptics_ui=5:false\nrecenter_ui=5:false\npaused=5:false\nstep_index=1:1\nstep_count=1:3\n"));
+            Assert.That(DemoSwitchProtocol.ComputeAuth(state, Secret), Is.EqualTo("caa7b81fcda55d2c6433ca9d027781e19f8c8b5dd3e2efde3dd9a47bc72f0110"));
 
-            var outside = new DemoSwitchState("remote-pixel", "0123456789abcdef", "demo_hub", false, true, true, true, -1, 0);
+            var outside = new DemoSwitchState("remote-pixel", "0123456789abcdef", "demo_hub", false, false, true, true, true, -1, 0);
             Assert.That(DemoSwitchProtocol.Canonicalize(outside), Is.EqualTo(
                 "HAPBEAT-DEMO-SWITCH/1\nSTATE\nversion=1:1\ntype=5:STATE\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n" +
-                "current_demo_id=8:demo_hub\nhaptics_on=5:false\nhaptics_ui=4:true\nrecenter_ui=4:true\npaused=4:true\nstep_index=2:-1\nstep_count=1:0\n"));
-            Assert.That(DemoSwitchProtocol.ComputeAuth(outside, Secret), Is.EqualTo("5db6ac7dca4a1f10b26ae03c7ae4e51e5b853f676e33cf053645a95d61817a38"));
+                "current_demo_id=8:demo_hub\nforeground=5:false\nhaptics_on=5:false\nhaptics_ui=4:true\nrecenter_ui=4:true\npaused=4:true\nstep_index=2:-1\nstep_count=1:0\n"));
+            Assert.That(DemoSwitchProtocol.ComputeAuth(outside, Secret), Is.EqualTo("bb2fd68c3209269ad1f06719b6c8aa9d8173a3ecf19cec429e4bc0773cb0325f"));
 
             var signed = DemoSwitchProtocol.ParseState(DemoSwitchProtocol.SerializeState(outside, Secret));
             Assert.That(signed.Success, Is.True, signed.ErrorMessage);
@@ -274,12 +274,14 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchProtocol.ParseState(StateExample.Replace("\"step_index\":1", "\"step_index\":-2")).Success, Is.False);
             Assert.That(DemoSwitchProtocol.ParseState(StateExample.Replace("\"step_count\":3", "\"step_count\":33")).Success, Is.False);
             Assert.That(DemoSwitchProtocol.ParseState(StateExample.Replace(",\"haptics_ui\":false", "")).Success, Is.False);
+            Assert.That(DemoSwitchProtocol.ParseState(StateExample.Replace(",\"foreground\":true", "")).Success, Is.False);
+            Assert.That(DemoSwitchProtocol.ParseState(StateExample.Replace("\"foreground\":true", "\"foreground\":\"yes\"")).Success, Is.False);
         }
 
         [Test]
         public void QueryHandlerUsesTheDiscoveryAuthenticationPolicy()
         {
-            DemoSwitchState Answer(DemoSwitchQuery q) => new DemoSwitchState(q.ControllerId, q.Nonce, "handdemo", true, false, false, false, 1, 3);
+            DemoSwitchState Answer(DemoSwitchQuery q) => new DemoSwitchState(q.ControllerId, q.Nonce, "handdemo", true, true, false, false, false, 1, 3);
             var signedJson = QueryExample.Substring(0, QueryExample.Length - 1) + ",\"auth\":\"f64cd6fb617ef3fee7968a8580765b6c527467203174e221be5c7da4de1190c2\"}";
             var invalidJson = QueryExample.Substring(0, QueryExample.Length - 1) + ",\"auth\":\"" + new string('0', 64) + "\"}";
 
@@ -293,7 +295,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(signed.ShouldReply, Is.True);
             var state = DemoSwitchProtocol.ParseState(signed.ResponseJson);
             Assert.That(state.Success, Is.True, state.ErrorMessage);
-            Assert.That(state.State.Auth, Is.EqualTo("1c4beefa4a7fbc8de87f2a7498e38e5821557dfae27fa88a7e1f0cda7c5672df"));
+            Assert.That(state.State.Auth, Is.EqualTo("caa7b81fcda55d2c6433ca9d027781e19f8c8b5dd3e2efde3dd9a47bc72f0110"));
         }
 
         [TestCase("tutorial_start","",true)]

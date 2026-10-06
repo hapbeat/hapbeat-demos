@@ -99,15 +99,16 @@ namespace Hapbeat.DemoSwitch
         public string Auth { get; }
     }
 
-    /// <summary>The foreground runtime's answer to <see cref="DemoSwitchQuery"/> (contracts: State query).</summary>
+    /// <summary>The runtime's answer to <see cref="DemoSwitchQuery"/> (contracts: State query).</summary>
     internal sealed class DemoSwitchState
     {
-        public DemoSwitchState(string controllerId, string nonce, string currentDemoId, bool hapticsOn, bool hapticsUi,
+        public DemoSwitchState(string controllerId, string nonce, string currentDemoId, bool foreground, bool hapticsOn, bool hapticsUi,
             bool recenterUi, bool paused, int stepIndex, int stepCount, string auth = "")
         {
             ControllerId = controllerId;
             Nonce = nonce;
             CurrentDemoId = currentDemoId;
+            Foreground = foreground;
             HapticsOn = hapticsOn;
             HapticsUi = hapticsUi;
             RecenterUi = recenterUi;
@@ -120,6 +121,8 @@ namespace Hapbeat.DemoSwitch
         public string ControllerId { get; }
         public string Nonce { get; }
         public string CurrentDemoId { get; }
+        /// <summary>False while the runtime is not the focused foreground app; SWITCH / CONTROL are then refused.</summary>
+        public bool Foreground { get; }
         public bool HapticsOn { get; }
         public bool HapticsUi { get; }
         public bool RecenterUi { get; }
@@ -223,7 +226,7 @@ namespace Hapbeat.DemoSwitch
         private static readonly string[] QueryFields = { "version", "type", "controller_id", "nonce", "auth" };
         private static readonly string[] StateFields =
         {
-            "version", "type", "controller_id", "nonce", "current_demo_id", "haptics_on", "haptics_ui", "recenter_ui",
+            "version", "type", "controller_id", "nonce", "current_demo_id", "foreground", "haptics_on", "haptics_ui", "recenter_ui",
             "paused", "step_index", "step_count", "auth"
         };
         /// <summary>Schema bound of `step_index` / `step_count` (a ticket has at most 32 steps).</summary>
@@ -498,6 +501,7 @@ namespace Hapbeat.DemoSwitch
                     !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
                     !TryString(value, "nonce", out var nonce) || !IsNonce(nonce) ||
                     !TryString(value, "current_demo_id", out var currentDemoId) || !IsIdentifier(currentDemoId) ||
+                    !TryBoolean(value, "foreground", out var foreground) ||
                     !TryBoolean(value, "haptics_on", out var hapticsOn) || !TryBoolean(value, "haptics_ui", out var hapticsUi) ||
                     !TryBoolean(value, "recenter_ui", out var recenterUi) || !TryBoolean(value, "paused", out var paused) ||
                     !TryInteger(value, "step_index", out var stepIndex) || !TryInteger(value, "step_count", out var stepCount) ||
@@ -511,7 +515,7 @@ namespace Hapbeat.DemoSwitch
                     auth = token.Value<string>();
                     if (!IsLowerHexMac(auth)) return new StateParseResult(null, "STATE auth is invalid.");
                 }
-                return new StateParseResult(new DemoSwitchState(controllerId, nonce, currentDemoId, hapticsOn, hapticsUi, recenterUi,
+                return new StateParseResult(new DemoSwitchState(controllerId, nonce, currentDemoId, foreground, hapticsOn, hapticsUi, recenterUi,
                     paused, (int)stepIndex, (int)stepCount, auth), null);
             }
             catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
@@ -534,6 +538,7 @@ namespace Hapbeat.DemoSwitch
                 ["controller_id"] = state.ControllerId,
                 ["nonce"] = state.Nonce,
                 ["current_demo_id"] = state.CurrentDemoId,
+                ["foreground"] = state.Foreground,
                 ["haptics_on"] = state.HapticsOn,
                 ["haptics_ui"] = state.HapticsUi,
                 ["recenter_ui"] = state.RecenterUi,
@@ -597,6 +602,7 @@ namespace Hapbeat.DemoSwitch
             "HAPBEAT-DEMO-SWITCH/1\nSTATE\n" +
             Field("version", "1") + Field("type", "STATE") + Field("controller_id", state.ControllerId) +
             Field("nonce", state.Nonce) + Field("current_demo_id", state.CurrentDemoId) +
+            Field("foreground", BooleanText(state.Foreground)) +
             Field("haptics_on", BooleanText(state.HapticsOn)) + Field("haptics_ui", BooleanText(state.HapticsUi)) +
             Field("recenter_ui", BooleanText(state.RecenterUi)) + Field("paused", BooleanText(state.Paused)) +
             Field("step_index", state.StepIndex.ToString(CultureInfo.InvariantCulture)) +
