@@ -3,7 +3,9 @@ package com.hapbeat.demoremote.adb
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.net.DemoSwitchSocket
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QuestAdbParseTest {

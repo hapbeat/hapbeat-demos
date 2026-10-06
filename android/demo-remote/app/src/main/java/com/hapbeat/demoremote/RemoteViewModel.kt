@@ -156,8 +156,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var usbAdbRunning by mutableStateOf(false); private set
     /** USB re-enable progress / result (text, isError), shown in a fixed area of the dialog. */
     var usbAdbStatus by mutableStateOf("" to false); private set
-    /** The phone's side of the USB link, refreshed while the dialog is open. */
+    /** The phone's side of the USB link, refreshed while the app is in the foreground. */
     var usbLink by mutableStateOf(UsbLink.NONE); private set
+    /** A USB run has started since the dialog was opened ("始める" vs "もう一度試す"). */
+    var usbAttempted by mutableStateOf(false); private set
     /** Diagnostics line 1: the phone's Wi-Fi address and gateway. */
     var wifiDiag by mutableStateOf("Wi-Fi 未接続"); private set
     /** Diagnostics line 2: last discovery round and 5555 scan. */
@@ -191,6 +193,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var lastUsbSuccessIp: String? = null
     private var usbCloseJob: Job? = null
     private var usbWatch: BroadcastReceiver? = null
+    /** The dialog was already brought up for the current peripheral-side connection (once per cable). */
+    private var peripheralPrompted = false
+    /** Hosts the IP-follow already tried (key not trusted, another serial): not offered the key again. Memory only; "再探索" clears it. */
+    private val followTriedHosts = mutableSetOf<String>()
+    /** The selected Quest's last adb failure was an automatic connect ("接続待ち"): reconnect when its 5555 opens. */
+    private var autoAdbFailedIp: String? = null
 
     // ---- lifecycle ----------------------------------------------------------------------
 
@@ -231,6 +239,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (selectedQuest?.adb == AdbState.DISCONNECTED) connectAdb(manual = false)
         updateMirror()
+        // A phone left on the peripheral side never gets ATTACHED: watch the USB link while visible.
+        startUsbWatch()
+        onUsbLink(refreshUsbLink(), changed = false)
     }
 
     fun onBackground() {
@@ -243,6 +254,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         socket.close()
         activeNonces.clear()
         stopMirror()
+        stopUsbWatch()
     }
 
     override fun onCleared() {
@@ -383,6 +395,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     // ---- discovery -------------------------------------------------------------------------
 
     fun rediscover() {
+        followTriedHosts.clear()
         viewModelScope.launch { runDiscoveryRound() }
         scanAdbHosts()
     }
@@ -411,9 +424,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 open.filter { ip -> quests.none { it.ip == ip } }.forEach { ip ->
                     quests.add(QuestState(ip, unconfirmedLabel(ip)))
                 }
+                val wasOpen = selectedQuest?.adbPortOpen
                 quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
                 if (open.isNotEmpty()) persistQuests()
                 followSelectedQuest(open)
+                // "接続待ち" after an automatic failure: connect again once the selected Quest's 5555 opens (woke up, back on Wi-Fi).
+                val target = selectedQuest
+                if (foreground && target != null && target.ip == autoAdbFailedIp && target.ip in open && wasOpen != true &&
+                    target.adb == AdbState.DISCONNECTED) connectAdb(manual = false)
             } finally {
                 scanningAdb = false
             }
@@ -501,7 +519,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * The selected Quest is gone from its saved IP (DHCP gave it a new one): try the other hosts with
      * Wi-Fi adb open and re-select the one with the same serial. A headset that already trusts this
-     * phone answers at once; others time out quickly and are left alone.
+     * phone answers at once; others time out quickly and are left alone (not tried again until "再探索").
      */
     private suspend fun followSelectedQuest(open: Set<String>) {
         val target = selectedQuest ?: return
@@ -510,6 +528,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         for (ip in open) {
             val entry = quests.firstOrNull { it.ip == ip }
             if (entry != null && (entry.serial.isNotEmpty() || entry.adb != AdbState.DISCONNECTED)) continue
+            // Once per host: the periodic rescan must not show another headset's USB debugging dialog every 30 s.
+            if (!followTriedHosts.add(ip)) continue
             val adb = QuestAdb(ip, keys)
             if (adb.connect(onAuthWaiting = {}, authWaitMs = FOLLOW_AUTH_WAIT_MS) != AdbConnectResult.Connected) continue
             val serial = runCatching { adb.shell("getprop ro.serialno").output.trim() }.getOrDefault("")
@@ -775,15 +795,17 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
         when (result) {
             AdbConnectResult.Connected -> {
+                if (autoAdbFailedIp == ip) autoAdbFailedIp = null
                 updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
                 setAdbMessage("")
                 refreshAdbInfo(ip)
                 updateMirror()
             }
+            // Short enough for the three-line area beside the button; README has the details.
             AdbConnectResult.PortClosed -> adbFailed(ip, manual,
-                "Quest の Wi-Fi 接続（adb）が切れています（Quest の再起動後など）。スマホと Quest を USB ケーブルでつなぐと、自動で有効にします")
+                "Quest の Wi-Fi adb が切れています（再起動後など）。USB ケーブルでつなぐと戻ります")
             AdbConnectResult.HostUnreachable -> adbFailed(ip, manual,
-                "Quest（$ip）に届きません。HMD を被って画面を点ける／スマホと Quest が同じ Wi-Fi か（下の診断行）／ルーターの端末間通信の遮断を確認")
+                "Quest（$ip）に届きません（スリープ／別の Wi-Fi／端末間通信の遮断）")
             AdbConnectResult.AuthTimeout -> adbFailed(ip, manual, "adb の許可が得られませんでした。ヘッドセット内の許可ダイアログを確認して再接続してください")
             AdbConnectResult.Rejected -> adbFailed(ip, manual, "adb の接続が拒否されました。ヘッドセット内で許可してから再接続してください")
             is AdbConnectResult.Failed -> adbFailed(ip, manual, "adb 接続に失敗しました（${result.reason}）")
@@ -797,7 +819,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Manual failures are red; automatic ones read as gray "waiting" with the same guidance. */
     private fun adbFailed(ip: String, manual: Boolean, message: String) {
         updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
-        if (ip == selectedIp) setAdbMessage(if (manual) message else "接続待ち: $message", error = manual)
+        if (ip == selectedIp) {
+            autoAdbFailedIp = if (manual) null else ip
+            setAdbMessage(if (manual) message else "接続待ち: $message", error = manual)
+        }
     }
 
     private fun setAdbMessage(text: String, error: Boolean = false) {
@@ -831,7 +856,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshAdbInfo(ip: String) {
         val model = adbShell(ip, "getprop ro.product.model")?.output?.let { QuestAdb.parseModel(it) } ?: return
-        if (!model.startsWith("Quest")) {
+        if (!QuestAdb.isQuestModel(model)) {
             // Not a headset: drop it and skip it in later scans.
             addLog(ip, "$model は Quest ではないため一覧から外しました", null, LogState.INFO)
             ignoredAdbHosts += ip
@@ -945,22 +970,56 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Wi-Fi adb over USB -------------------------------------------------------------------------
 
+    /** From the main screen / settings: starts at once when a Quest is already plugged in, else says what to do. */
     fun openUsbDialog() {
-        if (!usbAdbRunning) usbAdbStatus = "" to false
         showUsbDialog()
+        if (usbAdbRunning) return
+        val link = usbLink
+        if (link == UsbLink.HOST_QUEST && !usbAutoStartBlocked()) enableWifiAdbOverUsb() else usbAdbStatus = usbIdleStatus(link)
     }
 
     private fun showUsbDialog() {
         usbCloseJob?.cancel()
         usbDialogOpen = true
         refreshUsbLink()
-        startUsbWatch()
     }
 
     fun closeUsbDialog() {
         usbCloseJob?.cancel()
         usbDialogOpen = false
-        stopUsbWatch()
+        usbAttempted = false
+    }
+
+    /** Status area before a run: the fix for a peripheral-side phone / USB debugging off, or how it starts. */
+    private fun usbIdleStatus(link: UsbLink): Pair<String, Boolean> = when (link) {
+        UsbLink.PERIPHERAL, UsbLink.HOST_NO_ADB -> UsbLinkJudge.notFoundText(link) to true
+        UsbLink.HOST_QUEST -> "Quest を認識しています。「始める」で始まります" to false
+        UsbLink.NONE -> "Quest を USB でつなぐと始まります" to false
+    }
+
+    /** Running, under 20 s since the last success, or that success's Wi-Fi connection is up. */
+    private fun usbAutoStartBlocked(): Boolean {
+        val sinceSuccess = System.currentTimeMillis() - lastUsbSuccessAtMs
+        val connectedAfterSuccess = lastUsbSuccessIp?.let { ip -> quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTED } == true
+        return usbAdbRunning || sinceSuccess < USB_REATTACH_IGNORE_MS || connectedAfterSuccess
+    }
+
+    /**
+     * The USB link was read again (watch / foreground). A phone on the peripheral side gets no ATTACHED, so the
+     * dialog is brought up once per such connection with the fix; while it is open, a [changed] link to a
+     * problem state shows its fix. Nothing is touched during a run or while "完了" is on screen.
+     */
+    private fun onUsbLink(link: UsbLink, changed: Boolean) {
+        if (link != UsbLink.PERIPHERAL) peripheralPrompted = false
+        if (!foreground || usbAdbRunning || usbCloseJob?.isActive == true) return
+        if (link == UsbLink.PERIPHERAL && !peripheralPrompted) {
+            peripheralPrompted = true
+            fileLog("USB: スマホが周辺機器側のためダイアログを表示")
+            showUsbDialog()
+            usbAdbStatus = usbIdleStatus(link)
+        } else if (usbDialogOpen && changed && (link == UsbLink.PERIPHERAL || link == UsbLink.HOST_NO_ADB)) {
+            usbAdbStatus = usbIdleStatus(link)
+        }
     }
 
     /**
@@ -969,11 +1028,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
      * re-enumerates and sends ATTACHED again) or its Wi-Fi connection is up.
      */
     fun onUsbDeviceAttached() {
-        val sinceSuccess = System.currentTimeMillis() - lastUsbSuccessAtMs
-        val connectedAfterSuccess = lastUsbSuccessIp?.let { ip -> quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTED } == true
-        if (usbAdbRunning || sinceSuccess < USB_REATTACH_IGNORE_MS || connectedAfterSuccess) {
-            fileLog("USB: Quest の接続を検出（自動開始なし: 実行中=$usbAdbRunning 成功から ${sinceSuccess / 1000} 秒 Wi-Fi 接続済み=$connectedAfterSuccess）")
-            if (usbDialogOpen) refreshUsbLink()
+        if (usbAutoStartBlocked()) {
+            fileLog("USB: Quest の接続を検出（自動開始なし: 実行中=$usbAdbRunning 成功から ${(System.currentTimeMillis() - lastUsbSuccessAtMs) / 1000} 秒）")
+            refreshUsbLink()
             return
         }
         showUsbDialog()
@@ -1007,16 +1064,18 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         null
     }
 
-    /** Follows USB / power changes while the dialog is open, so the USB status line stays current. */
+    /**
+     * Follows USB / power changes while the app is in the foreground: keeps the USB status line current and
+     * catches a phone on the peripheral side, which never receives ATTACHED.
+     */
     private fun startUsbWatch() {
         if (usbWatch != null) return
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && refreshUsbLink() == UsbLink.HOST_QUEST) {
-                    onUsbDeviceAttached()
-                } else {
-                    refreshUsbLink()
-                }
+                val previous = usbLink
+                val link = refreshUsbLink()
+                if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && link == UsbLink.HOST_QUEST) onUsbDeviceAttached()
+                else onUsbLink(link, changed = link != previous)
             }
         }
         val filter = IntentFilter().apply {
@@ -1045,6 +1104,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (usbAdbRunning) return
         val app = getApplication<Application>()
         usbAdbRunning = true
+        usbAttempted = true
         usbCloseJob?.cancel()
         viewModelScope.launch {
             try {
@@ -1091,9 +1151,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             "${result.ip}/${result.prefixLength} SSID ${result.ssid.ifEmpty { "不明" }}${if (result.alreadyEnabled) "・すでに有効（tcpip 省略）" else ""}")
         // Wi-Fi adb cannot work across networks: say so instead of timing out on the Wi-Fi connect.
         val local = DemoSwitchSocket.localIpv4(getApplication(), wifi.network)
-        if (local == null || !DemoSwitchSocket.inSubnet(ip, local.address.address, local.prefixLength)) {
-            val phone = local?.let { "${it.address.hostAddress}/${it.prefixLength}" } ?: "Wi-Fi 未接続"
-            val text = "Quest は別のネットワークにいます（Quest $ip ${result.ssid.ifEmpty { "SSID 不明" }} / スマホ $phone）。Quest の Wi-Fi を確認してください"
+        val ssid = result.ssid.ifEmpty { "SSID 不明" }
+        val mismatch = when {
+            // Here the phone is the one to fix, not the Quest.
+            local == null -> "スマホが Wi-Fi に繋がっていません。スマホを Quest と同じ Wi-Fi（$ssid）に繋いでください"
+            !DemoSwitchSocket.inSubnet(ip, local.address.address, local.prefixLength) ->
+                "Quest は別のネットワークにいます（Quest $ip $ssid / スマホ ${local.address.hostAddress}/${local.prefixLength}）。Quest の Wi-Fi を確認してください"
+            else -> null
+        }
+        if (mismatch != null) {
+            val text = mismatch
             usbAdbStatus = text to true
             addLog("USB", "Wi-Fi 接続を中止", null, LogState.ERROR, text)
             return

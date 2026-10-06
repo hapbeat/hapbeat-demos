@@ -55,9 +55,9 @@ fun UsbAdbDialog(vm: RemoteViewModel) {
             }
         },
         confirmButton = {
-            // Fixed label and width; disabled while a run is going.
+            // Fixed width (fits the longer label); disabled while a run is going.
             TextButton(onClick = vm::enableWifiAdbOverUsb, enabled = !vm.usbAdbRunning, modifier = Modifier.width(120.dp)) {
-                Text("もう一度試す", maxLines = 1)
+                Text(if (vm.usbAttempted) "もう一度試す" else "始める", maxLines = 1)
             }
         },
         dismissButton = {

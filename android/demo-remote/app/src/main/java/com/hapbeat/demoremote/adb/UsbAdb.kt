@@ -340,8 +340,8 @@ class UsbAdb private constructor(
         }
 
         /**
-         * Connects over USB, reads the Wi-Fi IP / prefix / SSID and runs `tcpip:5555` unless adbd already
-         * listens on it. [onStep] gets one line per step (called on the IO thread).
+         * Connects over USB, checks the model is a Quest, reads the Wi-Fi IP / prefix / SSID and runs
+         * `tcpip:5555` unless adbd already listens on it. [onStep] gets one line per step (called on the IO thread).
          * Throws [UsbAdbException] with a user-facing message.
          */
         suspend fun enableWifiAdb(
@@ -351,6 +351,10 @@ class UsbAdb private constructor(
                 try {
                     open(manager, device).use { adb ->
                         adb.connect(key, onAuthWaiting)
+                        // Any Android with USB debugging matches the ADB filter: never run tcpip on a non-Quest.
+                        val model = QuestAdb.parseModel(adb.runService("shell:getprop ro.product.model"))
+                        onStep("getprop ro.product.model = ${model.ifEmpty { "(空)" }}")
+                        if (!QuestAdb.isQuestModel(model)) throw UsbAdbException("Quest ではありません（${model.ifEmpty { "機種不明" }}）")
                         val tcpPort = adb.runService("shell:getprop service.adb.tcp.port").trim()
                         onStep("getprop service.adb.tcp.port = ${tcpPort.ifEmpty { "(空)" }}")
                         val inet = adb.wlanInet() ?: throw UsbAdbException("Quest の Wi-Fi IP を取得できません。Quest が Wi-Fi に繋がっているか確認してください")

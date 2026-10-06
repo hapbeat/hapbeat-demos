@@ -137,6 +137,9 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
 
         fun parseModel(output: String): String = output.trim()
 
+        /** ro.product.model of a Meta headset ("Quest 3", "Quest 3S", …); anything else is not a Quest. */
+        fun isQuestModel(model: String): Boolean = model.startsWith("Quest")
+
         /**
          * Why the TCP connect to 5555 failed. Refused means the headset answered without adbd listening;
          * a timeout / no route means nothing answered. Android also reports ENETUNREACH as a

@@ -177,9 +177,10 @@ private fun QuestBar(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
 /** Fixed two small lines for on-site diagnosis: the phone's Wi-Fi, then the last discovery / 5555 scan. */
 @Composable
 private fun DiagnosticsLines(vm: RemoteViewModel) {
-    Column(Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 8.dp)) {
+    // labelSmall (11sp / line 16sp): a bare fontSize would keep bodyLarge's 24sp line height. One line each = fixed height.
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         listOf(vm.wifiDiag, vm.discoveryDiag).forEach {
-            Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -240,7 +241,7 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                 Text(
                     when {
                         connecting -> "中止"
-                        usbFix -> "USB で有効化"
+                        usbFix -> "USB でつなぐ"
                         quest.adb == AdbState.CONNECTED -> "adb 再接続"
                         else -> "adb 接続"
                     },
