@@ -2,6 +2,7 @@ package com.hapbeat.demoremote.adb
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -77,11 +78,30 @@ class AdbProtocolTest {
     }
 
     @Test
-    fun parsesWlanIpv4() {
+    fun parsesWlanInet() {
         val output = "30: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 3000\r\n" +
             "    inet 192.168.0.42/24 brd 192.168.0.255 scope global wlan0\r\n" +
             "       valid_lft forever preferred_lft forever\r\n"
-        assertEquals("192.168.0.42", AdbProtocol.parseWlanIpv4(output))
-        assertNull(AdbProtocol.parseWlanIpv4("Device \"wlan0\" does not exist.\n"))
+        assertEquals(WlanInet("192.168.0.42", 24), AdbProtocol.parseWlanInet(output))
+        assertEquals(WlanInet("10.0.2.15", 22), AdbProtocol.parseWlanInet("    inet 10.0.2.15/22 scope global wlan0"))
+        assertNull(AdbProtocol.parseWlanInet("Device \"wlan0\" does not exist.\n"))
+    }
+
+    @Test
+    fun parsesWifiSsidLoosely() {
+        assertEquals("DemoLAN", AdbProtocol.parseWifiSsid("Wifi is enabled\nWifi is connected to \"DemoLAN\"\nWifiInfo: SSID: \"DemoLAN\", BSSID: aa"))
+        assertEquals("Booth 5G", AdbProtocol.parseWifiSsid("WifiInfo: SSID: \"Booth 5G\", BSSID: 02:00:00:00:00:00, MAC: x"))
+        assertEquals("plain", AdbProtocol.parseWifiSsid("mWifiInfo SSID: plain, BSSID: 11:22"))
+        assertEquals("", AdbProtocol.parseWifiSsid("WifiInfo: SSID: <unknown ssid>, BSSID: x"))
+        assertEquals("", AdbProtocol.parseWifiSsid("Wifi is disabled\n"))
+        assertEquals("", AdbProtocol.parseWifiSsid(""))
+    }
+
+    @Test
+    fun tcpPortGetprop() {
+        assertTrue(AdbProtocol.isTcpPortSet("5555\r\n", 5555))
+        assertFalse(AdbProtocol.isTcpPortSet("\n", 5555))
+        assertFalse(AdbProtocol.isTcpPortSet("-1", 5555))
+        assertFalse(AdbProtocol.isTcpPortSet("55555", 5555))
     }
 }

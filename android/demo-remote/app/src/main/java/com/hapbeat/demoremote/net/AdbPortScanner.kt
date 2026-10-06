@@ -18,7 +18,9 @@ import java.net.Socket
  */
 object AdbPortScanner {
     const val PORT = 5555
-    private const val TIMEOUT_MS = 400
+    const val TIMEOUT_MS = 400
+    /** Second try for a saved Quest whose port looked closed: a slow or just-woken headset. */
+    const val SAVED_RETRY_TIMEOUT_MS = 1500
     private const val PARALLEL = 64
 
     /** Host addresses of [address]/[prefixLength] except network, broadcast and [address] itself; empty above /22. */
@@ -32,14 +34,14 @@ object AdbPortScanner {
         }
     }
 
-    suspend fun scan(hosts: List<String>): List<String> = withContext(Dispatchers.IO) {
+    suspend fun scan(hosts: List<String>, timeoutMs: Int = TIMEOUT_MS): List<String> = withContext(Dispatchers.IO) {
         val permits = Semaphore(PARALLEL)
         coroutineScope {
             hosts.map { host ->
                 async {
                     permits.withPermit {
                         try {
-                            Socket().use { it.connect(InetSocketAddress(host, PORT), TIMEOUT_MS) }
+                            Socket().use { it.connect(InetSocketAddress(host, PORT), timeoutMs) }
                             host
                         } catch (_: IOException) {
                             null

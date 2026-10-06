@@ -14,22 +14,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hapbeat.demoremote.RemoteViewModel
+import com.hapbeat.demoremote.adb.UsbLinkJudge
 
-/** Re-enables the Quest's Wi-Fi adb with this phone as the USB host (instead of a PC). */
+/** Restores the Quest's Wi-Fi adb with this phone as the USB host (instead of a PC). Starts by itself on plug-in. */
 @Composable
 fun UsbAdbDialog(vm: RemoteViewModel) {
     val (status, error) = vm.usbAdbStatus
     AlertDialog(
         onDismissRequest = vm::closeUsbDialog,
-        title = { Text("USB で Wi-Fi adb を有効化") },
+        title = { Text("Quest と USB でつなぐ") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Quest を再起動すると、スマホからの Wi-Fi 接続（adb）が切れます。USB ケーブルで一度つなぐと元に戻ります",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 listOf(
-                    "1. スマホと Quest を USB-C ケーブルで直結",
-                    "2. スマホ側の通知で「USB の制御: このデバイス」を選ぶ（Quest 側がホストだと見えません）",
-                    "3. 「有効化」を押す",
-                    "4. 初回はヘッドセット内で「常に許可」にチェックして許可",
+                    "1. スマホと Quest を USB-C ケーブル（データ対応）でつなぐ",
+                    "2. 自動で始まります。初めてのスマホでは HMD を被り、「USB デバッグを許可」で「常に許可」にチェックして許可する",
+                    "3. 「完了」と出たらケーブルを外す",
                 ).forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                // Fixed one-line USB status: what the phone currently sees on the cable.
+                Text(
+                    "USB の状態: ${UsbLinkJudge.statusText(vm.usbLink)}",
+                    Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 // Fixed three-line area: progress and errors change the text only.
                 Text(
                     status,
@@ -42,9 +55,9 @@ fun UsbAdbDialog(vm: RemoteViewModel) {
             }
         },
         confirmButton = {
-            // Fixed width so the label swap does not move the buttons.
-            TextButton(onClick = vm::enableWifiAdbOverUsb, enabled = !vm.usbAdbRunning, modifier = Modifier.width(96.dp)) {
-                Text(if (vm.usbAdbRunning) "実行中" else "有効化")
+            // Fixed label and width; disabled while a run is going.
+            TextButton(onClick = vm::enableWifiAdbOverUsb, enabled = !vm.usbAdbRunning, modifier = Modifier.width(120.dp)) {
+                Text("もう一度試す", maxLines = 1)
             }
         },
         dismissButton = {

@@ -29,8 +29,10 @@ object AdbKeys {
 
 sealed interface AdbConnectResult {
     data object Connected : AdbConnectResult
-    /** TCP 5555 refused / timed out: Wi-Fi adb is off (e.g. after a Quest reboot). */
-    data object Unreachable : AdbConnectResult
+    /** TCP 5555 refused: the Quest is there but Wi-Fi adb is off (e.g. after a Quest reboot). */
+    data object PortClosed : AdbConnectResult
+    /** No answer from the host (timeout / no route): asleep, another network, or client isolation. */
+    data object HostUnreachable : AdbConnectResult
     /** No answer to the USB debugging dialog within the wait time (or cancelled). */
     data object AuthTimeout : AdbConnectResult
     data object Rejected : AdbConnectResult
@@ -52,15 +54,15 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
      */
     suspend fun connect(onAuthWaiting: () -> Unit, authWaitMs: Long = AUTH_WAIT_MS): AdbConnectResult {
         close()
-        val reachable = withContext(Dispatchers.IO) {
+        val unreachable = withContext(Dispatchers.IO) {
             try {
                 Socket().use { it.connect(InetSocketAddress(ip, PORT), CONNECT_TIMEOUT_MS) }
-                true
-            } catch (_: IOException) {
-                false
+                null
+            } catch (e: IOException) {
+                classifyTcpFailure(e)
             }
         }
-        if (!reachable) return AdbConnectResult.Unreachable
+        if (unreachable != null) return unreachable
 
         val candidate = Dadb.create(ip, PORT, keyPair, CONNECT_TIMEOUT_MS, 0)
         // Detached: a blocked handshake read cannot be interrupted; dadb only exposes its socket
@@ -85,7 +87,7 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
                 candidate.close()
                 return when {
                     error is AdbAuthException -> AdbConnectResult.Rejected
-                    error.cause is java.net.ConnectException || error is java.net.ConnectException -> AdbConnectResult.Unreachable
+                    error.cause is java.net.ConnectException || error is java.net.ConnectException -> AdbConnectResult.PortClosed
                     else -> AdbConnectResult.Failed(error.javaClass.simpleName)
                 }
             }
@@ -134,6 +136,31 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
         const val SHELL_TIMEOUT_MS = 10_000L
 
         fun parseModel(output: String): String = output.trim()
+
+        /**
+         * Why the TCP connect to 5555 failed. Refused means the headset answered without adbd listening;
+         * a timeout / no route means nothing answered. Android also reports ENETUNREACH as a
+         * ConnectException, so that one is told apart by its message.
+         */
+        fun classifyTcpFailure(e: IOException): AdbConnectResult = when (e) {
+            is java.net.ConnectException ->
+                if (e.message.orEmpty().let { it.contains("ENETUNREACH") || it.contains("unreachable", ignoreCase = true) }) {
+                    AdbConnectResult.HostUnreachable
+                } else {
+                    AdbConnectResult.PortClosed
+                }
+            else -> AdbConnectResult.HostUnreachable // SocketTimeoutException, NoRouteToHostException, others
+        }
+
+        /** One line for the Quest details: developer mode, adb, build and time since boot. */
+        fun describeState(developer: String, adbEnabled: String, build: String, uptimeSeconds: Long?): String {
+            val uptime = uptimeSeconds?.let { "起動から ${it / 3600}時間${(it % 3600) / 60}分" } ?: "起動時間 不明"
+            return "開発者 ${developer.trim().ifEmpty { "?" }}・adb ${adbEnabled.trim().ifEmpty { "?" }}・$uptime・${build.trim().ifEmpty { "build 不明" }}"
+        }
+
+        /** `cat /proc/uptime` -> seconds since boot, or null. */
+        fun parseUptimeSeconds(output: String): Long? =
+            output.trim().substringBefore(' ').toDoubleOrNull()?.toLong()
 
         /** `dumpsys battery` -> level (0..100) or null. */
         fun parseBatteryLevel(output: String): Int? =

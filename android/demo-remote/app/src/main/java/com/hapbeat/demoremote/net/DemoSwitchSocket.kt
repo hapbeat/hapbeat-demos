@@ -74,17 +74,32 @@ class DemoSwitchSocket(
     }
 
     companion object {
-        /** Subnet broadcast of [network]'s IPv4 address (Wi-Fi when bound); 255.255.255.255 if unknown. */
-        fun broadcastAddress(context: Context, network: Network?): String {
-            val la = localIpv4(context, network) ?: return LIMITED_BROADCAST
-            return subnetBroadcast(la.address.address, la.prefixLength) ?: LIMITED_BROADCAST
+        /**
+         * This device's IPv4 address and prefix on the Wi-Fi [network]; null without Wi-Fi (never the
+         * mobile network, where a broadcast or subnet scan would be meaningless).
+         */
+        fun localIpv4(context: Context, network: Network?): LinkAddress? {
+            if (network == null) return null
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+            val link = cm.getLinkProperties(network) ?: return null
+            return link.linkAddresses.firstOrNull { it.address is Inet4Address }
         }
 
-        /** This device's IPv4 address and prefix on [network] (Wi-Fi when bound). */
-        fun localIpv4(context: Context, network: Network?): LinkAddress? {
+        /** IPv4 default gateway of the Wi-Fi [network], or null. */
+        fun gatewayIpv4(context: Context, network: Network?): String? {
+            if (network == null) return null
             val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
-            val link = cm.getLinkProperties(network ?: cm.activeNetwork) ?: return null
-            return link.linkAddresses.firstOrNull { it.address is Inet4Address }
+            val link = cm.getLinkProperties(network) ?: return null
+            return link.routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway?.hostAddress
+        }
+
+        /** True when the IPv4 [ip] is inside [network]/[prefixLength]. */
+        fun inSubnet(ip: String, network: ByteArray, prefixLength: Int): Boolean {
+            if (!DemoSwitchProtocol.isUnicastIpv4(ip) || network.size != 4 || prefixLength !in 0..32) return false
+            val target = ip.split('.').fold(0L) { acc, part -> (acc shl 8) or part.toLong() }
+            val base = network.fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xff) }
+            val mask = if (prefixLength == 0) 0L else (0xffffffffL shl (32 - prefixLength)) and 0xffffffffL
+            return (target and mask) == (base and mask)
         }
 
         fun subnetBroadcast(address: ByteArray, prefixLength: Int): String? {

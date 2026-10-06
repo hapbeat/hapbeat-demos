@@ -102,9 +102,70 @@ object AdbProtocol {
     /** "service" + NUL, as OPEN expects. */
     fun servicePayload(service: String): ByteArray = service.toByteArray(Charsets.UTF_8) + 0.toByte()
 
-    /** `ip -4 addr show wlan0` -> the IPv4 address, or null. */
-    fun parseWlanIpv4(output: String): String? =
-        Regex("""inet (\d{1,3}(?:\.\d{1,3}){3})/""").find(output)?.groupValues?.get(1)
+    /** `ip -4 addr show wlan0` -> the IPv4 address and prefix length, or null. */
+    fun parseWlanInet(output: String): WlanInet? =
+        Regex("""inet (\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})""").find(output)?.let {
+            WlanInet(it.groupValues[1], it.groupValues[2].toInt())
+        }
+
+    /** SSID from `cmd wifi status` (the format varies by release, so it is read loosely); "" when not found. */
+    fun parseWifiSsid(output: String): String {
+        val ssid = Regex("""connected to "([^"]*)"""").find(output)?.groupValues?.get(1)
+            ?: Regex("""SSID: "([^"]*)"""").find(output)?.groupValues?.get(1)
+            ?: Regex("""(?<![A-Za-z])SSID: ([^,\r\n]+)""").find(output)?.groupValues?.get(1)?.trim()
+        return ssid?.takeUnless { it.isEmpty() || it == "<unknown ssid>" } ?: ""
+    }
+
+    /** `getprop service.adb.tcp.port` already set to [port]: adbd listens on Wi-Fi, so `tcpip` can be skipped. */
+    fun isTcpPortSet(getpropOutput: String, port: Int): Boolean = getpropOutput.trim() == port.toString()
+}
+
+data class WlanInet(val address: String, val prefixLength: Int)
+
+/** What the USB step found and did, for the log and the subnet check. */
+data class UsbWifiAdbResult(
+    val ip: String,
+    val prefixLength: Int,
+    /** "" when it could not be read. */
+    val ssid: String,
+    /** `tcpip` was skipped because service.adb.tcp.port was already 5555. */
+    val alreadyEnabled: Boolean,
+)
+
+/** The phone's side of the USB link, as far as the system tells it. */
+enum class UsbLink { HOST_QUEST, HOST_NO_ADB, PERIPHERAL, NONE }
+
+object UsbLinkJudge {
+    /**
+     * [adbDevice]: an attached device exposes an ADB interface. [otherDevices]: attached devices without one.
+     * [usbConnected] / [hostConnected]: extras "connected" / "host_connected" of the sticky USB_STATE
+     * (null when missing). [pluggedUsb]: BATTERY_PLUGGED_USB, used only when USB_STATE does not decide it.
+     */
+    fun judge(adbDevice: Boolean, otherDevices: Int, usbConnected: Boolean?, hostConnected: Boolean?, pluggedUsb: Boolean?): UsbLink =
+        when {
+            adbDevice -> UsbLink.HOST_QUEST
+            otherDevices > 0 -> UsbLink.HOST_NO_ADB
+            usbConnected == false -> UsbLink.NONE
+            usbConnected == true && hostConnected == false -> UsbLink.PERIPHERAL
+            usbConnected == true && hostConnected == true -> UsbLink.NONE
+            pluggedUsb == true -> UsbLink.PERIPHERAL
+            else -> UsbLink.NONE
+        }
+
+    /** Fixed one-line status in the dialog. */
+    fun statusText(link: UsbLink): String = when (link) {
+        UsbLink.HOST_QUEST -> "スマホがホスト（Quest を認識）"
+        UsbLink.HOST_NO_ADB -> "Quest は見えるが USB デバッグ無効"
+        UsbLink.PERIPHERAL -> "スマホが周辺機器側（Quest 側がホスト）"
+        UsbLink.NONE -> "未接続"
+    }
+
+    /** Why no ADB device can be used, shown when the USB step cannot start. */
+    fun notFoundText(link: UsbLink): String = when (link) {
+        UsbLink.HOST_NO_ADB -> "Quest は見えていますが USB デバッグが無効です（Quest の開発者モードを確認）"
+        UsbLink.PERIPHERAL -> "スマホが周辺機器側になっています。ケーブルを挿し直すか、スマホの通知の『USB の制御』で『このデバイス』を選んでください"
+        UsbLink.HOST_QUEST, UsbLink.NONE -> "Quest が見つかりません（データ通信できる USB-C ケーブルか、Quest の電源を確認）"
+    }
 }
 
 /**
@@ -179,8 +240,8 @@ class UsbAdb private constructor(
         }
     }
 
-    /** The headset's Wi-Fi IPv4. */
-    fun wifiIpv4(): String? = AdbProtocol.parseWlanIpv4(runService("shell:ip -4 addr show wlan0"))
+    /** The headset's Wi-Fi IPv4 and prefix. */
+    fun wlanInet(): WlanInet? = AdbProtocol.parseWlanInet(runService("shell:ip -4 addr show wlan0"))
 
     /** `adb tcpip [port]`: adbd restarts in TCP mode and this USB connection ends. */
     fun enableTcpip(port: Int): String = runService("tcpip:$port", allowDrop = true)
@@ -255,6 +316,14 @@ class UsbAdb private constructor(
         /** First attached device that exposes an ADB interface. */
         fun findDevice(manager: UsbManager): UsbDevice? = manager.deviceList.values.firstOrNull { adbInterface(it) != null }
 
+        /** "VID:PID 2833:0183 if ff/42/01, 08/06/50" per attached device: what the phone sees on USB. */
+        fun describeDevices(manager: UsbManager): List<String> = manager.deviceList.values.map { d ->
+            val interfaces = (0 until d.interfaceCount).map { d.getInterface(it) }.joinToString(", ") {
+                "%02x/%02x/%02x".format(it.interfaceClass, it.interfaceSubclass, it.interfaceProtocol)
+            }
+            "VID:PID %04x:%04x if %s".format(d.vendorId, d.productId, interfaces.ifEmpty { "-" })
+        }
+
         /** Opens and claims the ADB interface; the caller must already hold USB permission for [device]. */
         fun open(manager: UsbManager, device: UsbDevice): UsbAdb {
             val intf = adbInterface(device) ?: throw UsbAdbException("USB デバッグのインターフェースがありません（Quest の開発者モードを確認）")
@@ -271,20 +340,38 @@ class UsbAdb private constructor(
         }
 
         /**
-         * Connects over USB, reads the Wi-Fi IP and runs `tcpip:5555`. Returns the Quest's IPv4.
+         * Connects over USB, reads the Wi-Fi IP / prefix / SSID and runs `tcpip:5555` unless adbd already
+         * listens on it. [onStep] gets one line per step (called on the IO thread).
          * Throws [UsbAdbException] with a user-facing message.
          */
-        suspend fun enableWifiAdb(manager: UsbManager, device: UsbDevice, key: UsbAdbKey, onAuthWaiting: () -> Unit): String =
+        suspend fun enableWifiAdb(
+            manager: UsbManager, device: UsbDevice, key: UsbAdbKey, onAuthWaiting: () -> Unit, onStep: (String) -> Unit,
+        ): UsbWifiAdbResult =
             withContext(Dispatchers.IO) {
                 try {
                     open(manager, device).use { adb ->
                         adb.connect(key, onAuthWaiting)
-                        val ip = adb.wifiIpv4() ?: throw UsbAdbException("Quest の Wi-Fi IP を取得できません。Quest が Wi-Fi に繋がっているか確認してください")
-                        val reply = adb.enableTcpip(TCPIP_PORT)
-                        if (!reply.contains("restarting")) {
-                            throw UsbAdbException("Wi-Fi adb を有効にできませんでした（${reply.trim().take(80).ifEmpty { "応答なし" }}）")
+                        val tcpPort = adb.runService("shell:getprop service.adb.tcp.port").trim()
+                        onStep("getprop service.adb.tcp.port = ${tcpPort.ifEmpty { "(空)" }}")
+                        val inet = adb.wlanInet() ?: throw UsbAdbException("Quest の Wi-Fi IP を取得できません。Quest が Wi-Fi に繋がっているか確認してください")
+                        // Best effort: the SSID only helps the diagnosis.
+                        val ssid = try {
+                            AdbProtocol.parseWifiSsid(adb.runService("shell:cmd wifi status"))
+                        } catch (_: UsbAdbException) {
+                            ""
                         }
-                        ip
+                        onStep("Quest wlan0 ${inet.address}/${inet.prefixLength} SSID ${ssid.ifEmpty { "(不明)" }}")
+                        // Already listening on 5555: skip tcpip so adbd is not restarted.
+                        if (AdbProtocol.isTcpPortSet(tcpPort, TCPIP_PORT)) {
+                            onStep("tcpip は省略（すでに $TCPIP_PORT）")
+                            return@use UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = true)
+                        }
+                        val reply = adb.enableTcpip(TCPIP_PORT).trim().take(80)
+                        onStep("tcpip:$TCPIP_PORT → ${reply.ifEmpty { "応答なし" }}")
+                        if (!reply.contains("restarting")) {
+                            throw UsbAdbException("Wi-Fi adb を有効にできませんでした（${reply.ifEmpty { "応答なし" }}）")
+                        }
+                        UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = false)
                     }
                 } catch (e: UsbAdbException) {
                     throw e

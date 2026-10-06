@@ -53,6 +53,8 @@ fun SettingsScreen(vm: RemoteViewModel, onBack: () -> Unit, onOpenLicenses: () -
             HorizontalDivider()
             UsbAdbSection(vm)
             HorizontalDivider()
+            LogSection(vm)
+            HorizontalDivider()
             MirrorSection(vm)
             HorizontalDivider()
             LabeledSwitch("画面を常時 ON にする", vm.keepScreenOn, enabled = true, onChange = vm::setKeepScreenOnSetting)
@@ -158,13 +160,29 @@ private fun QuestRow(vm: RemoteViewModel, quest: QuestState) {
 
 @Composable
 private fun UsbAdbSection(vm: RemoteViewModel) {
-    SectionTitle("Wi-Fi adb の復旧")
+    SectionTitle("Quest と USB でつなぐ")
     Text(
-        "Quest 再起動後は Wi-Fi adb が無効になります。スマホと Quest を USB-C で直結すると、PC なしで有効にできます。",
+        "Quest を再起動すると、スマホからの Wi-Fi 接続（adb）が切れます。USB ケーブルで一度つなぐと元に戻ります（PC 不要）。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ActionButton("USB で Wi-Fi adb を有効化", enabled = true, outlined = true) { vm.openUsbDialog() }
+    ActionButton("USB でつなぐ", enabled = true, outlined = true) { vm.openUsbDialog() }
+}
+
+@Composable
+private fun LogSection(vm: RemoteViewModel) {
+    SectionTitle("ログ")
+    Text(
+        "結果ログと接続の各段階をスマホ内に保存しています（最新 500 行）。不具合の報告に使えます。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ActionButton("ログをコピー", enabled = true, outlined = true) { vm.copyLog() }
+        ActionButton("ログを消去", enabled = true, outlined = true) { vm.clearLog() }
+    }
+    // Fixed one line for the copy / clear result.
+    Text(vm.logToolStatus.ifEmpty { " " }, style = MaterialTheme.typography.bodySmall, maxLines = 1)
 }
 
 @Composable

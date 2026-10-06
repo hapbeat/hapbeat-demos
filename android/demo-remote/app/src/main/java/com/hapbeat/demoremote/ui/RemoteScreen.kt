@@ -171,6 +171,17 @@ private fun QuestBar(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
         TextButton(onClick = onOpenSettings) { Text("設定") }
     }
     QuestStatus(vm, vm.selectedQuest)
+    DiagnosticsLines(vm)
+}
+
+/** Fixed two small lines for on-site diagnosis: the phone's Wi-Fi, then the last discovery / 5555 scan. */
+@Composable
+private fun DiagnosticsLines(vm: RemoteViewModel) {
+    Column(Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 8.dp)) {
+        listOf(vm.wifiDiag, vm.discoveryDiag).forEach {
+            Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }
 
 @Composable
@@ -197,15 +208,27 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                 modifier = Modifier.width(104.dp),
             )
         }
-        // adb status / guidance: fixed two-line area so messages never shift the layout.
+        // Read-only state from adb (developer mode / adb / uptime / build); one fixed line.
+        Text(
+            quest.info.ifEmpty { "-" },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        // adb status / guidance: fixed three-line area so messages never shift the layout.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 vm.adbMessage.ifEmpty { adbStateText(quest.adb) },
-                Modifier.weight(1f).height(40.dp),
+                Modifier.weight(1f).height(56.dp),
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
-                color = if (vm.adbMessage.isNotEmpty() && quest.adb == AdbState.DISCONNECTED) StatusRed else Color.Unspecified,
+                color = when {
+                    vm.adbMessage.isEmpty() || quest.adb != AdbState.DISCONNECTED -> Color.Unspecified
+                    vm.adbMessageError -> StatusRed
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
             val connecting = quest.adb == AdbState.CONNECTING || quest.adb == AdbState.AUTH_WAIT
             // Wi-Fi adb off (port 5555 closed): the button leads to the USB re-enable dialog instead.
@@ -248,7 +271,13 @@ private fun StatusDot(color: Color) {
 @Composable
 private fun NoticeArea(vm: RemoteViewModel) {
     val reason = vm.demoSwitchBlockReason
-    val (text, error) = if (reason != null) reason to true else vm.notice
+    val battery = vm.selectedQuest?.battery
+    val (text, error) = when {
+        reason != null -> reason to true
+        vm.notice.first.isNotEmpty() -> vm.notice
+        battery != null && battery <= 20 -> "HMD の電池が少なくなっています（$battery%）" to true
+        else -> vm.notice
+    }
     Text(
         text,
         Modifier.fillMaxWidth().height(40.dp),
