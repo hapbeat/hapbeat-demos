@@ -32,6 +32,21 @@ class PresetsTest {
         assertEquals("'{}'", DemoCatalog.shellQuote("{}"))
     }
 
+    @Test
+    fun inactiveOptionsAreLeftOutOfTheHubJson() {
+        // Volley: points applies to scene block / match only, balls to receive only (descriptor `when`).
+        assertEquals(
+            prefix + """'{"version":1,"steps":[{"demo_id":"volley","options":{"scene":"receive","balls":"20"}}]}'""",
+            DemoCatalog.hubPlanCommand(listOf(PresetStep("volley", mapOf("scene" to "receive", "points" to "3", "balls" to "20")))),
+        )
+        // scene left at its default (block): points applies, balls does not.
+        assertEquals(
+            prefix + """'{"version":1,"steps":[{"demo_id":"volley","options":{"points":"3"}}]}'""",
+            DemoCatalog.hubPlanCommand(listOf(PresetStep("volley", mapOf("points" to "3", "balls" to "20")))),
+        )
+        assertEquals(listOf("scene", "balls"), DemoCatalog.activeOptionsFor("volley", mapOf("scene" to "receive")).map { it.id })
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun planRejectsEmpty() {
         DemoCatalog.hubPlanCommand(emptyList())

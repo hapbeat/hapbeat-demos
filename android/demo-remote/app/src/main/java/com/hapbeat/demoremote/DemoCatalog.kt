@@ -6,8 +6,15 @@ import com.hapbeat.demoremote.protocol.MiniJson
 /** One value of a demo option ([label]: the descriptor's Japanese label). */
 data class OptionValue(val value: String, val label: String)
 
-/** One option of a demo's descriptor (`options[]`): [id], Japanese [label], [default] and the allowed [values]. */
-data class DemoOption(val id: String, val label: String, val default: String, val values: List<OptionValue>)
+/**
+ * One option of a demo's descriptor (`options[]`): [id], Japanese [label], [default] and the allowed [values].
+ * [whenValues] mirrors the descriptor's `when`: the option applies only while each referenced option has one of
+ * the listed values (demo-session.md: otherwise it is left out of the ticket).
+ */
+data class DemoOption(
+    val id: String, val label: String, val default: String, val values: List<OptionValue>,
+    val whenValues: Map<String, Set<String>> = emptyMap(),
+)
 
 /**
  * Fixed demo table. adb launches only these packages; nothing received from the
@@ -33,9 +40,10 @@ object DemoCatalog {
         DemoOption("scene", "モード", "block", listOf(
             OptionValue("block", "スパイク＋ブロック"), OptionValue("match", "6人制の試合"), OptionValue("receive", "レシーブ"),
         )),
-        // The descriptor marks points for scene block / match and balls for receive (`when`); both are accepted here.
-        DemoOption("points", "点数", "7", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取"))),
-        DemoOption("balls", "球数", "10", listOf(OptionValue("10", "10球"), OptionValue("20", "20球"))),
+        DemoOption("points", "点数", "7", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取")),
+            whenValues = mapOf("scene" to setOf("block", "match"))),
+        DemoOption("balls", "球数", "10", listOf(OptionValue("10", "10球"), OptionValue("20", "20球")),
+            whenValues = mapOf("scene" to setOf("receive"))),
     )
     private val BOXING_OPTIONS = listOf(
         DemoOption("round", "ラウンド", "90", listOf(OptionValue("60", "60秒"), OptionValue("90", "90秒"))),
@@ -63,8 +71,25 @@ object DemoCatalog {
     /** Descriptor options of a session demo (empty for unknown IDs). */
     fun optionsFor(demoId: String): List<DemoOption> = sessionApps.firstOrNull { it.demoId == demoId }?.options.orEmpty()
 
+    /** True when [option]'s `when` holds for the chosen [values] (a missing key counts as its default). */
+    fun isActive(demoId: String, option: DemoOption, values: Map<String, String>): Boolean =
+        option.whenValues.all { (ref, allowed) ->
+            val current = values[ref] ?: optionsFor(demoId).firstOrNull { it.id == ref }?.default
+            current in allowed
+        }
+
+    /** Descriptor options that currently apply (see [DemoOption.whenValues]). */
+    fun activeOptionsFor(demoId: String, values: Map<String, String>): List<DemoOption> =
+        optionsFor(demoId).filter { isActive(demoId, it, values) }
+
+    /** [values] without keys whose option does not apply; this is what goes to the Hub. */
+    fun applicableOptions(demoId: String, values: Map<String, String>): Map<String, String> {
+        val active = activeOptionsFor(demoId, values).map { it.id }.toSet()
+        return values.filterKeys { it in active }
+    }
+
     /** "チュートリアル: なし、モード: 試合" for the options that are set (empty when all are the descriptor default). */
-    fun optionSummary(demoId: String, options: Map<String, String>): String = optionsFor(demoId).mapNotNull { option ->
+    fun optionSummary(demoId: String, options: Map<String, String>): String = activeOptionsFor(demoId, options).mapNotNull { option ->
         val value = options[option.id] ?: return@mapNotNull null
         "${option.label}: ${option.values.firstOrNull { it.value == value }?.label ?: value}"
     }.joinToString("、")
@@ -102,8 +127,9 @@ object DemoCatalog {
             }
             demoId != null -> {
                 requireValidStep(demoId, options)
+                val applicable = applicableOptions(demoId, options)
                 MiniJson.write(linkedMapOf<String, Any?>("version" to 1, "demo_id" to demoId).apply {
-                    if (options.isNotEmpty()) put("options", LinkedHashMap(options))
+                    if (applicable.isNotEmpty()) put("options", LinkedHashMap(applicable))
                 })
             }
             else -> throw IllegalArgumentException("preset or demoId")
@@ -124,8 +150,9 @@ object DemoCatalog {
             "version" to 1,
             "steps" to steps.map { step ->
                 requireValidStep(step.demoId, step.options)
+                val applicable = applicableOptions(step.demoId, step.options)
                 linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
-                    if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
+                    if (applicable.isNotEmpty()) put("options", LinkedHashMap(applicable))
                     if (!step.retry) put("retry", false)
                 }
             },

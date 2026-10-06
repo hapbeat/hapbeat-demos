@@ -404,7 +404,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
             modifier = modifier.height(48.dp),
         )
     }
-    OptionChooser(DemoCatalog.optionsFor(chosen), options) { options = it }
+    OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
     val app = DemoCatalog.sessionApps.first { it.demoId == chosen }
     val installed = quest?.installed?.contains(app.packageName) == true
     ActionButton("このデモで始める", enabled = connected && installed, modifier = Modifier.fillMaxWidth()) {

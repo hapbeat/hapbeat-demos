@@ -98,7 +98,10 @@ private fun StepRow(
             TextButton(onClick = onDown, modifier = Modifier.width(48.dp)) { Text("↓") }
             TextButton(onClick = onRemove, modifier = Modifier.width(56.dp)) { Text("削除") }
         }
-        OptionChooser(DemoCatalog.optionsFor(step.demoId), step.options) { onChange(step.copy(options = it)) }
+        OptionChooser(DemoCatalog.activeOptionsFor(step.demoId, step.options), step.options) {
+            // Drop values of options that no longer apply (e.g. Volley balls after switching away from receive).
+            onChange(step.copy(options = DemoCatalog.applicableOptions(step.demoId, it)))
+        }
         Row(Modifier.fillMaxWidth().clickable { onChange(step.copy(retry = !step.retry)) }, verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = step.retry, onCheckedChange = { onChange(step.copy(retry = it)) })
             Text("失敗時にやり直す", style = MaterialTheme.typography.bodySmall)
