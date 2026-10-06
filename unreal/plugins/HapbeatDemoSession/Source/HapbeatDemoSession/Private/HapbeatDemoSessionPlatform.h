@@ -25,6 +25,11 @@ namespace HapbeatDemoSessionPlatform
     bool Launch(const FHapbeatDemoSessionComponent& Target,const FString& TicketJson);
     /** Android: whether Package is installed (the manifest declares it in <queries>). False elsewhere. */
     bool IsInstalled(const FString& Package);
+    /**
+     * Android: acquires (true) or releases (false) the Wi-Fi MulticastLock the Demo Switch receiver holds while
+     * bound, so a broadcast DISCOVER is not filtered. True when the lock is now held. No-op returning false elsewhere.
+     */
+    bool SetMulticastLock(bool bHeld);
     /** finishAndRemoveTask(). */
     void FinishTask();
 }

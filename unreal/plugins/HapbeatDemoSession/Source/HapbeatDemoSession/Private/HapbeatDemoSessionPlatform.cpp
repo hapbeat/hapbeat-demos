@@ -116,6 +116,19 @@ bool HapbeatDemoSessionPlatform::IsInstalled(const FString& Package)
 #endif
 }
 
+bool HapbeatDemoSessionPlatform::SetMulticastLock(bool bHeld)
+{
+#if PLATFORM_ANDROID
+    JNIEnv* Env=FAndroidApplication::GetJavaEnv();
+    if(!Env) return false;
+    const jmethodID M=Method(Env,"AndroidThunkJava_HapbeatSession_SetMulticastLock","(Z)Z");
+    if(!M) return false;
+    return FJavaWrapper::CallBooleanMethod(Env,FJavaWrapper::GameActivityThis,M,static_cast<jboolean>(bHeld));
+#else
+    return false;
+#endif
+}
+
 void HapbeatDemoSessionPlatform::FinishTask()
 {
 #if PLATFORM_ANDROID

@@ -6,8 +6,11 @@ class FSocket;
 class FInternetAddr;
 
 /**
- * Demo Switch UDP 7710 receiver for the foreground runtime: DISCOVER/HERE, QUERY/STATE and CONTROL
- * (ACK -> operation on the game thread -> READY). SWITCH is answered FAILED/not_allowed.
+ * Demo Switch UDP 7710 receiver: DISCOVER/HERE, QUERY/STATE and CONTROL (ACK -> operation on the game thread ->
+ * READY). SWITCH is answered FAILED/not_allowed. The socket stays bound while the process runs, also while the
+ * runtime is not foreground (no VR focus: boundary setup, system menu); then STATE carries foreground=false and
+ * CONTROL is answered FAILED/not_allowed "not in foreground". A failed bind is retried for a few seconds. On
+ * Android a Wi-Fi MulticastLock is held while bound, so a broadcast DISCOVER is not filtered.
  *
  * Settings: Saved/Config/HapbeatDemoSession.json ({"enabled", "shared_secret", "allow_unsigned",
  * "isolated_lan"}). Without that file the receiver runs in isolated-LAN unsigned mode, the same as the
@@ -28,7 +31,7 @@ public:
     ~FHapbeatDemoSwitchReceiver() {Stop();}
     /** Reads the settings and replay state. False when the receiver stays off. */
     bool Configure(const FString& InDemoId);
-    /** Polls the socket; binds while the runtime is foreground and closes it otherwise. */
+    /** Binds (retrying a failed bind for a few seconds) and polls the socket. */
     void Tick();
     /** Closes the socket and stays off (before handing the device to the next runtime). */
     void Stop();
@@ -42,5 +45,7 @@ private:
     FSocket* Socket=nullptr;
     FString DemoId,Secret,StateFile;
     TMap<FString,int64> Sequences;
-    bool bEnabled=false,bUnsigned=false,bTest=false,bBindFailed=false,bWasForeground=false;
+    /** First failed bind attempt and the next retry (FPlatformTime::Seconds), 0 before any failure. */
+    double BindFailedAt=0,NextBindAt=0;
+    bool bEnabled=false,bUnsigned=false,bTest=false,bBindFailed=false,bForeground=true,bMulticastLock=false;
 };

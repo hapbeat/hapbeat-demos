@@ -1,6 +1,7 @@
 #include "HapbeatDemoSwitchReceiver.h"
 #include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionLog.h"
+#include "HapbeatDemoSessionPlatform.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 #include "IPAddress.h"
@@ -11,6 +12,7 @@
 #include "Misc/Parse.h"
 #include "Misc/ConfigCacheIni.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Framework/Application/SlateApplication.h"
@@ -18,6 +20,7 @@
 bool FHapbeatDemoSwitchReceiver::Configure(const FString& InDemoId)
 {
     Stop();bEnabled=false;Sequences.Reset();Secret.Empty();DemoId=InDemoId;
+    bBindFailed=false;BindFailedAt=NextBindAt=0;bForeground=true;
     if(!HapbeatDemoSwitchProtocol::IsIdentifier(DemoId)) {UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_DISABLED no valid demo_id"));return false;}
 #if UE_BUILD_SHIPPING
     bTest=false;
@@ -54,7 +57,7 @@ bool FHapbeatDemoSwitchReceiver::Configure(const FString& InDemoId)
     if(!LoadReplayState()) {UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_DISABLED replay state is unreadable"));return false;}
     bEnabled=true;
     if(bUnsigned) UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SWITCH_UNSIGNED isolated demonstration LAN only"));
-    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_CONFIGURED demo=%s mode=%s"),*DemoId,bTest?TEXT("loopback test"):TEXT("foreground runtime"));
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_CONFIGURED demo=%s mode=%s"),*DemoId,bTest?TEXT("loopback test"):TEXT("runtime"));
     return true;
 }
 bool FHapbeatDemoSwitchReceiver::LoadReplayState()
@@ -87,6 +90,7 @@ bool FHapbeatDemoSwitchReceiver::Reserve(const FString& ControllerId,int64 Seque
 void FHapbeatDemoSwitchReceiver::Close()
 {
     if(Socket) {Socket->Close();ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Socket);Socket=nullptr;}
+    if(bMulticastLock) {HapbeatDemoSessionPlatform::SetMulticastLock(false);bMulticastLock=false;}
 }
 void FHapbeatDemoSwitchReceiver::Stop()
 {
@@ -102,20 +106,29 @@ void FHapbeatDemoSwitchReceiver::Send(const FString& Payload,const FInternetAddr
 void FHapbeatDemoSwitchReceiver::Tick()
 {
     if(!bEnabled) return;
+    // Not foreground (boundary setup, system menu): still bound and answering DISCOVER / QUERY, commands refused.
     const bool Foreground=bTest||(FApp::UseVRFocus()?FApp::HasVRFocus():(FSlateApplication::IsInitialized()&&FSlateApplication::Get().IsActive()));
-    if(!Foreground) {Close();bBindFailed=false;bWasForeground=false;return;}
-    if(!bWasForeground) {bBindFailed=false;bWasForeground=true;}
+    if(Foreground!=bForeground) {bForeground=Foreground;UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_FOREGROUND %d"),Foreground);}
     auto* Sockets=ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-    if(!Socket&&!bBindFailed) {
+    const double Now=FPlatformTime::Seconds();
+    if(!Socket&&!bBindFailed&&Now>=NextBindAt) {
+        // The previous application's socket can still hold the port for a moment after a hand-over.
+        constexpr double RetryInterval=0.5,RetryWindow=5.0;
         Socket=Sockets->CreateSocket(NAME_DGram,TEXT("Hapbeat Demo Switch"),false);
         auto Address=Sockets->CreateInternetAddr();
         if(bTest) {bool Valid=false;Address->SetIp(TEXT("127.0.0.1"),Valid);}
         else Address->SetAnyAddress();
         Address->SetPort(bTest?17710:7710);
         if(!Socket || !Socket->SetReuseAddr(false) || !Socket->SetNonBlocking(true) || !Socket->Bind(*Address)) {
-            Close();bBindFailed=true;UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_LISTENER_FAILED port is unavailable"));return;
+            Close();
+            if(BindFailedAt==0) BindFailedAt=Now;
+            if(Now-BindFailedAt>=RetryWindow) {bBindFailed=true;UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_LISTENER_FAILED port is unavailable"));}
+            else {NextBindAt=Now+RetryInterval;UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SWITCH_BIND_RETRY port is unavailable, retrying"));}
+            return;
         }
-        UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_LISTENING port=%d demo=%s"),bTest?17710:7710,*DemoId);
+        BindFailedAt=NextBindAt=0;
+        if(!bTest) bMulticastLock=HapbeatDemoSessionPlatform::SetMulticastLock(true);
+        UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_LISTENING port=%d demo=%s multicast_lock=%d"),bTest?17710:7710,*DemoId,bMulticastLock);
     }
     if(!Socket) return;
     for(int32 Count=0;Count<8&&Socket;++Count) {
@@ -125,14 +138,19 @@ void FHapbeatDemoSwitchReceiver::Tick()
         if(!Socket->RecvFrom(Bytes.GetData(),Bytes.Num(),Received,*Source)||Pending>1024||Received<1||Received>1024) continue;
         Bytes.SetNum(Received);
         FHapbeatDemoSwitchMessage M;if(!HapbeatDemoSwitchProtocol::Parse(Bytes,M)) continue;
-        auto Status=[&](const TCHAR* Type,const TCHAR* Code){Send(HapbeatDemoSwitchProtocol::Status(M,DemoId,Type,Code,Secret),*Source);};
+        auto Status=[&](const TCHAR* Type,const TCHAR* Code,const TCHAR* Text=TEXT("")){Send(HapbeatDemoSwitchProtocol::Status(M,DemoId,Type,Code,Secret,Text),*Source);};
         if(!HapbeatDemoSwitchProtocol::Authenticate(M,Secret,bUnsigned)) {
             if(M.Type!=TEXT("DISCOVER")&&M.Type!=TEXT("QUERY")) Status(TEXT("FAILED"),TEXT("invalid_auth"));
             continue;
         }
         if(M.Type==TEXT("DISCOVER")) {Send(HapbeatDemoSwitchProtocol::Here(M,DemoId,Secret),*Source);continue;}
         // QUERY changes nothing: no sequence, answered by unicast like DISCOVER.
-        if(M.Type==TEXT("QUERY")) {if(GetState) Send(HapbeatDemoSwitchProtocol::State(M,DemoId,GetState(),Secret),*Source);continue;}
+        if(M.Type==TEXT("QUERY")) {
+            if(!GetState) continue;
+            FHapbeatDemoSwitchState State=GetState();State.bForeground=bForeground;
+            Send(HapbeatDemoSwitchProtocol::State(M,DemoId,State,Secret),*Source);continue;
+        }
+        if(!bForeground) {Status(TEXT("FAILED"),TEXT("not_allowed"),TEXT("not in foreground"));continue;}
         // Launching another application (SWITCH) is not part of this receiver.
         const bool Allowed=M.Type==TEXT("CONTROL")&&M.DemoId==DemoId&&IsAllowed&&IsAllowed(M.Action);
         if(!Allowed) {Status(TEXT("FAILED"),TEXT("not_allowed"));continue;}

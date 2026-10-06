@@ -298,13 +298,15 @@ void FHapbeatDemoSessionSpec::Define()
             TestEqual(TEXT("signed status"),Ready->GetStringField(TEXT("auth")).Len(),64);
             const TSharedPtr<FJsonObject> Unsigned=Object(HapbeatDemoSwitchProtocol::Status(M,TEXT("safety-mill"),TEXT("FAILED"),TEXT("not_allowed"),FString()));
             TestTrue(TEXT("unsigned status has no auth"),Unsigned.IsValid()&&!Unsigned->HasField(TEXT("auth")));
+            const TSharedPtr<FJsonObject> Refused=Object(HapbeatDemoSwitchProtocol::Status(M,TEXT("safety-mill"),TEXT("FAILED"),TEXT("not_allowed"),FString(),TEXT("not in foreground")));
+            TestTrue(TEXT("status message"),Refused.IsValid()&&Refused->GetStringField(TEXT("message"))==TEXT("not in foreground"));
         });
-        // QUERY / STATE (contracts cae1715 fixtures unsigned_query / unsigned_state). Vectors: HMAC-SHA256 with key
+        // QUERY / STATE (contracts feaf799 fixtures unsigned_query / unsigned_state). Vectors: HMAC-SHA256 with key
         // "unit-test-secret" (Python's hmac) over these canonical strings:
         //   QUERY: "HAPBEAT-DEMO-SWITCH/1\nQUERY\nversion=1:1\ntype=5:QUERY\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n"
         //   STATE: "HAPBEAT-DEMO-SWITCH/1\nSTATE\nversion=1:1\ntype=5:STATE\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n
-        //           current_demo_id=8:handdemo\nhaptics_on=4:true\nhaptics_ui=5:false\nrecenter_ui=5:false\npaused=5:false\nstep_index=1:1\nstep_count=1:3\n"
-        //   STATE outside a session: "...current_demo_id=11:safety-mill\nhaptics_on=5:false\nhaptics_ui=4:true\nrecenter_ui=4:true\npaused=4:true\n
+        //           current_demo_id=8:handdemo\nforeground=4:true\nhaptics_on=4:true\nhaptics_ui=5:false\nrecenter_ui=5:false\npaused=5:false\nstep_index=1:1\nstep_count=1:3\n"
+        //   STATE outside a session, not foreground: "...current_demo_id=11:safety-mill\nforeground=5:false\nhaptics_on=5:false\nhaptics_ui=4:true\nrecenter_ui=4:true\npaused=4:true\n
         //           step_index=2:-1\nstep_count=1:0\n" (same header and first four fields)
         const FString Query=TEXT(R"({"version":1,"type":"QUERY","controller_id":"remote-pixel","nonce":"0123456789abcdef"})");
         It(TEXT("authenticates QUERY and rejects malformed ones"),[this,Secret,Query]()
@@ -334,12 +336,13 @@ void FHapbeatDemoSessionSpec::Define()
             FHapbeatDemoSwitchMessage M;HapbeatDemoSwitchProtocol::Parse(Bytes(Query),M);
             FHapbeatDemoSwitchState S;S.bHapticsOn=true;S.StepIndex=1;S.StepCount=3;
             TestEqual(TEXT("unsigned STATE = fixture"),HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,FString()),
-                FString(TEXT(R"({"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef","current_demo_id":"handdemo","haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,"step_index":1,"step_count":3})")));
+                FString(TEXT(R"({"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef","current_demo_id":"handdemo","foreground":true,"haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,"step_index":1,"step_count":3})")));
             const TSharedPtr<FJsonObject> Signed=Object(HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,Secret));
-            TestTrue(TEXT("signed STATE"),Signed.IsValid()&&Signed->GetStringField(TEXT("auth"))==TEXT("3c238c3a0d0fb308b7db1a8f59b4ced8a8c2e550fa8980be42982c0705c86ea8"));
-            FHapbeatDemoSwitchState Out;Out.bHapticsOn=false;Out.bHapticsUi=Out.bRecenterUi=Out.bPaused=true;
+            TestTrue(TEXT("signed STATE"),Signed.IsValid()&&Signed->GetStringField(TEXT("auth"))==TEXT("2a0883597008915dd0bd27d89c36a3d852d3071e26ed0eb6580074a9de47a171"));
+            FHapbeatDemoSwitchState Out;Out.bForeground=false;Out.bHapticsOn=false;Out.bHapticsUi=Out.bRecenterUi=Out.bPaused=true;
             const FString Outside=HapbeatDemoSwitchProtocol::State(M,TEXT("safety-mill"),Out,Secret);
-            TestTrue(TEXT("outside a session: -1 / 0"),Outside.Contains(TEXT(R"("paused":true,"step_index":-1,"step_count":0,"auth":"1b4f30e7273c75fb570b743731fd66e26410f18cb94daa126778734b55d98225")")));
+            TestTrue(TEXT("not foreground, outside a session: -1 / 0"),Outside.Contains(TEXT(R"("current_demo_id":"safety-mill","foreground":false,"haptics_on":false,)"))
+                &&Outside.Contains(TEXT(R"("paused":true,"step_index":-1,"step_count":0,"auth":"b1cb2a833111fba63bf84b73a729dbd5b3d8bd1e3a6d6ab20b4e33683a7befdf")")));
         });
     });
     Describe(TEXT("ControlRoute"),[this]()
