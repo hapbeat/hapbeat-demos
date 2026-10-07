@@ -257,7 +257,7 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                     when {
                         connecting -> "中止"
                         usbFix -> "USB でつなぐ"
-                        quest.adb == AdbState.CONNECTED -> "adb 再接続"
+                        quest.adb == AdbState.CONNECTED -> "繋ぎ直す"
                         else -> "adb 接続"
                     },
                     fontWeight = if (usbFix) FontWeight.Bold else null,
@@ -367,7 +367,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text("リモコンのプリセット", style = MaterialTheme.typography.titleSmall)
+    Text("プリセット", style = MaterialTheme.typography.titleSmall)
     vm.presets.forEachIndexed { i, preset ->
         Row(
             Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
@@ -386,11 +386,21 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
         QrImportButton(vm, Modifier.weight(1f))
     }
     Text("Hub のプリセット（VR 内で編集）", style = MaterialTheme.typography.titleSmall)
+    var hubPreset by remember { mutableStateOf<Int?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("プリセット", style = MaterialTheme.typography.bodyMedium)
         (1..3).forEach { preset ->
-            ActionButton("$preset", enabled = connected, modifier = Modifier.weight(1f)) { vm.startSession(preset = preset) }
+            ActionButton("$preset", enabled = connected, modifier = Modifier.weight(1f)) { hubPreset = preset }
         }
+    }
+    // The Hub's presets are edited in the headset and their content is not shown here: confirm before starting.
+    hubPreset?.let { preset ->
+        AlertDialog(
+            onDismissRequest = { hubPreset = null },
+            text = { Text("Hub のプリセット $preset で始めますか？（中身は Hub 側の設定です）") },
+            confirmButton = { TextButton(onClick = { hubPreset = null; vm.startSession(preset = preset) }) { Text("始める") } },
+            dismissButton = { TextButton(onClick = { hubPreset = null }) { Text("やめる") } },
+        )
     }
     Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
     // Pick a demo, then its descriptor options (same table as the preset editor), then start.

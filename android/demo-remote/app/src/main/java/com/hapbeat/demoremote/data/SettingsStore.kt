@@ -3,28 +3,8 @@ package com.hapbeat.demoremote.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.hapbeat.demoremote.protocol.AuthConfig
-import com.hapbeat.demoremote.protocol.JsonArray
-import com.hapbeat.demoremote.protocol.JsonException
-import com.hapbeat.demoremote.protocol.JsonBool
-import com.hapbeat.demoremote.protocol.JsonNumber
-import com.hapbeat.demoremote.protocol.JsonObject
-import com.hapbeat.demoremote.protocol.JsonString
-import com.hapbeat.demoremote.protocol.MiniJson
 import com.hapbeat.demoremote.protocol.SequenceStore
 import java.security.SecureRandom
-
-/** Persisted part of a Quest entry (keyed by IPv4). */
-data class SavedQuest(
-    val ip: String,
-    val label: String,
-    val model: String = "",
-    val lastDemoId: String = "",
-    val lastSeenAtMs: Long = 0,
-    /** ro.serialno from adb: identifies the headset when DHCP hands it a different IP. */
-    val serial: String = "",
-    /** Added by hand in settings; kept even before adb has identified it. */
-    val manual: Boolean = false,
-)
 
 data class MirrorSettings(
     val maxSize: Int = 1024,
@@ -78,42 +58,24 @@ class SettingsStore(context: Context) : SequenceStore {
         prefs.edit().putBoolean(KEY_ALLOW_UNSIGNED, allow).putBoolean(KEY_AUTH_CHOSEN, true).apply()
     }
 
-    // ---- Quest list ----
-    fun loadQuests(): List<SavedQuest> {
-        val raw = prefs.getString(KEY_QUESTS, null) ?: return emptyList()
-        return try {
-            (MiniJson.parse(raw) as JsonArray).items.mapNotNull { item ->
-                val f = (item as? JsonObject)?.fields ?: return@mapNotNull null
-                SavedQuest(
-                    ip = (f["ip"] as? JsonString)?.value ?: return@mapNotNull null,
-                    label = (f["label"] as? JsonString)?.value ?: "",
-                    model = (f["model"] as? JsonString)?.value ?: "",
-                    lastDemoId = (f["last_demo_id"] as? JsonString)?.value ?: "",
-                    lastSeenAtMs = (f["last_seen_at"] as? JsonNumber)?.longOrNull() ?: 0,
-                    serial = (f["serial"] as? JsonString)?.value ?: "",
-                    manual = (f["manual"] as? JsonBool)?.value ?: false,
-                )
-            }
-        } catch (_: JsonException) {
-            emptyList()
-        } catch (_: ClassCastException) {
-            emptyList()
-        }
+    // ---- last selected Quest (the list itself is not saved) ----
+    /** Serial of the Quest chosen last; "" when none or chosen before its serial was known. */
+    val rememberedSerial: String get() = prefs.getString(KEY_SELECTED_SERIAL, null) ?: ""
+
+    /** IP of the Quest chosen last, used only while its serial is unknown; "" when none. */
+    val rememberedIp: String get() = prefs.getString(KEY_SELECTED_IP, null) ?: ""
+
+    /** Keeps [serial] when known, else [ip]. */
+    fun rememberSelection(serial: String, ip: String) {
+        val edit = prefs.edit()
+        if (serial.isNotEmpty()) edit.putString(KEY_SELECTED_SERIAL, serial).remove(KEY_SELECTED_IP)
+        else edit.putString(KEY_SELECTED_IP, ip).remove(KEY_SELECTED_SERIAL)
+        edit.apply()
     }
 
-    fun saveQuests(quests: List<SavedQuest>) {
-        val json = MiniJson.write(quests.map {
-            linkedMapOf(
-                "ip" to it.ip, "label" to it.label, "model" to it.model,
-                "last_demo_id" to it.lastDemoId, "last_seen_at" to it.lastSeenAtMs, "serial" to it.serial, "manual" to it.manual,
-            )
-        })
-        prefs.edit().putString(KEY_QUESTS, json).apply()
+    fun forgetSelection() {
+        prefs.edit().remove(KEY_SELECTED_SERIAL).remove(KEY_SELECTED_IP).apply()
     }
-
-    var selectedIp: String?
-        get() = prefs.getString(KEY_SELECTED_IP, null)
-        set(value) { prefs.edit().putString(KEY_SELECTED_IP, value).apply() }
 
     // ---- mirror / display ----
     var mirrorSettings: MirrorSettings
@@ -146,7 +108,7 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_SECRET = "shared_secret"
         const val KEY_ALLOW_UNSIGNED = "allow_unsigned"
         const val KEY_AUTH_CHOSEN = "auth_chosen"
-        const val KEY_QUESTS = "quests"
+        const val KEY_SELECTED_SERIAL = "selected_serial"
         const val KEY_SELECTED_IP = "selected_ip"
         const val KEY_PRESETS = "remote_presets"
         const val KEY_MIRROR_MAX_SIZE = "mirror_max_size"

@@ -34,7 +34,6 @@ import com.hapbeat.demoremote.data.MirrorSettings
 import com.hapbeat.demoremote.data.PresetTransfer
 import com.hapbeat.demoremote.data.RemoteLogFile
 import com.hapbeat.demoremote.data.RemotePreset
-import com.hapbeat.demoremote.data.SavedQuest
 import com.hapbeat.demoremote.data.SettingsStore
 import com.hapbeat.demoremote.data.TransferResult
 import com.hapbeat.demoremote.mirror.MirrorSession
@@ -72,17 +71,17 @@ data class QuestState(
     val lastSeenAtMs: Long = 0,
     /** null = not probed yet in this foreground session. */
     val respondedLastRound: Boolean? = null,
+    /** The round before [respondedLastRound] (seen = either of the two, see [QuestVisibility]); null = not probed. */
+    val respondedPrevRound: Boolean? = null,
     val adb: AdbState = AdbState.DISCONNECTED,
     /** TCP 5555 answered in the last subnet scan (Wi-Fi adb on); null = not scanned yet. */
     val adbPortOpen: Boolean? = null,
-    /** ro.serialno; lets a saved Quest follow its new IP after a DHCP change. */
+    /** ro.serialno; tells the same headset on a new IP (DHCP) and keeps its HMD #n in this run. */
     val serial: String = "",
     /** Haptics state from the last READY haptics_on/off in the current foreground demo; null = unknown. */
     val hapticsOn: Boolean? = null,
     /** Last STATE reply (QUERY); null when the receiver does not support QUERY or the demo changed. */
     val remoteState: DemoSwitchMessage.State? = null,
-    /** Added by hand; kept (and saved) even before adb has identified it. */
-    val manual: Boolean = false,
     val battery: Int? = null,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
@@ -128,15 +127,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var controllerId by mutableStateOf(settings.controllerId); private set
     var authConfig by mutableStateOf(settings.authConfig); private set
     var authChosen by mutableStateOf(settings.authChosen); private set
-    val quests = mutableStateListOf<QuestState>().apply {
-        // Only headsets identified by adb (serial) or added by hand are remembered; a Demo Switch responder seen
-        // once (e.g. a PC running a demo in the editor) is not. Older "Quest N" labels read like model names.
-        addAll(settings.loadQuests().filter { it.serial.isNotEmpty() || it.manual }.map {
-            QuestState(it.ip, it.label.replace(Regex("^Quest (\\d+)$"), "HMD #$1"), it.model, "", it.lastSeenAtMs,
-                serial = it.serial, manual = it.manual)
-        })
-    }
-    var selectedIp by mutableStateOf(settings.selectedIp); private set
+    /** Headsets seen now (see [QuestVisibility]). Memory only: one asleep or on another network is not listed. */
+    val quests = mutableStateListOf<QuestState>()
+    /** Starts empty; the Quest chosen last time is selected again once it is seen ([selectRememberedIfSeen]). */
+    var selectedIp by mutableStateOf<String?>(null); private set
     val logs = mutableStateListOf<LogEntry>()
     /** Session plans kept on this phone (the Hub's presets 1..3 are separate and edited in VR). */
     val presets = mutableStateListOf<RemotePreset>().apply { addAll(settings.presets) }
@@ -206,10 +200,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var usbWatch: BroadcastReceiver? = null
     /** The dialog was already brought up for the current peripheral-side connection (once per cable). */
     private var peripheralPrompted = false
-    /** Hosts the IP-follow already tried (key not trusted, another serial): not offered the key again. Memory only; "再探索" clears it. */
+    /** Hosts already tried for the remembered serial (key not trusted, another serial): not offered the key again. Memory only; "再探索" clears it. */
     private val followTriedHosts = mutableSetOf<String>()
     /** The selected Quest's last adb failure was an automatic connect ("接続待ち"): reconnect when its 5555 opens. */
     private var autoAdbFailedIp: String? = null
+    /** HMD #n given to each serial in this run, so a headset that leaves and comes back keeps its number. */
+    private val serialLabels = mutableMapOf<String, String>()
 
     // ---- lifecycle ----------------------------------------------------------------------
 
@@ -229,7 +225,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun onForeground() {
         foreground = true
         reopenSocket()
-        quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = null) }
+        quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = null, respondedPrevRound = null) }
         discoveryLoop?.cancel()
         discoveryLoop = viewModelScope.launch {
             while (isActive) {
@@ -321,39 +317,66 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectQuest(ip: String) {
         if (selectedIp == ip) return
-        stopMirror()
-        selectedIp = ip
-        settings.selectedIp = ip
-        mirrorVideoSize = null
+        changeSelection(ip)
         setAdbMessage("")
         wifiAdbOff = false
         if (selectedQuest?.adb == AdbState.DISCONNECTED && foreground) connectAdb(manual = false)
         updateMirror()
     }
 
+    /** Points the selection at [ip] (null: none) and remembers it for the next launch by serial, else IP. */
+    private fun changeSelection(ip: String?) {
+        stopMirror()
+        selectedIp = ip
+        mirrorVideoSize = null
+        if (ip != null) settings.rememberSelection(quests.firstOrNull { it.ip == ip }?.serial ?: "", ip)
+    }
+
+    /** Added by hand: listed like a found one, and dropped the same way once it is not seen. */
     fun addQuest(ip: String, label: String): Boolean {
         val trimmed = ip.trim()
         if (!DemoSwitchProtocol.isUnicastIpv4(trimmed)) return false
         if (quests.any { it.ip == trimmed }) return true
-        quests.add(QuestState(trimmed, label.ifBlank { nextLabel() }, manual = true))
-        persistQuests()
+        quests.add(QuestState(trimmed, label.ifBlank { nextLabel() }))
+        selectRememberedIfSeen()
         return true
     }
 
     fun renameQuest(ip: String, label: String) {
         updateQuest(ip) { it.copy(label = label) }
-        persistQuests()
+        quests.firstOrNull { it.ip == ip }?.serial?.takeIf { it.isNotEmpty() }?.let { serialLabels[it] = label }
     }
 
+    /** Removed by the user: if it was selected, it is not selected again on the next launch either. */
     fun removeQuest(ip: String) {
+        if (selectedIp == ip) settings.forgetSelection()
+        dropQuest(ip)
+    }
+
+    /** Takes [ip] off the list (and the selection, if it was selected); the remembered selection stays. */
+    private fun dropQuest(ip: String) {
         if (selectedIp == ip) {
-            stopMirror()
-            selectedIp = null
-            settings.selectedIp = null
+            changeSelection(null)
+            updateMirror()
         }
         adbConnections.remove(ip)?.close()
         quests.removeAll { it.ip == ip }
-        persistQuests()
+    }
+
+    /** Drops every entry that is no longer seen ([QuestVisibility.isVisible]), the selected one included. */
+    private fun pruneUnseen() {
+        quests.filter { !QuestVisibility.isVisible(it) }.forEach {
+            fileLog("${it.label} ${it.ip} が見えなくなったため一覧から外しました")
+            dropQuest(it.ip)
+        }
+    }
+
+    /** Nothing selected and the Quest chosen last time is listed: select it. */
+    private fun selectRememberedIfSeen() {
+        if (selectedIp != null) return
+        val serial = settings.rememberedSerial
+        val ip = settings.rememberedIp
+        quests.firstOrNull { QuestVisibility.matchesRemembered(it, serial, ip) }?.let { selectQuest(it.ip) }
     }
 
     private fun updateQuest(ip: String, block: (QuestState) -> QuestState) {
@@ -363,16 +386,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun unconfirmedLabel(ip: String) = "未確認 ." + ip.substringAfterLast('.')
 
-    /** "HMD #n" with the smallest unused n ("Quest n" would read like a model name). */
+    /**
+     * "HMD #n" with the smallest n neither listed nor held by a known serial in this run ("Quest n" would read like a
+     * model name).
+     */
     private fun nextLabel(): String {
-        val used = quests.mapNotNull { Regex("^HMD #(\\d+)$").find(it.label)?.groupValues?.get(1)?.toInt() }.toSet()
+        val used = (quests.map { it.label } + serialLabels.values)
+            .mapNotNull { Regex("^HMD #(\\d+)$").find(it)?.groupValues?.get(1)?.toInt() }.toSet()
         return "HMD #" + generateSequence(1) { it + 1 }.first { it !in used }
-    }
-
-    private fun persistQuests() {
-        settings.saveQuests(quests.filter { it.serial.isNotEmpty() || it.manual }.map {
-            SavedQuest(it.ip, it.label, it.model, it.lastDemoId, it.lastSeenAtMs, it.serial, it.manual)
-        })
     }
 
     /** A new foreground demo starts with its own haptics state, so the remembered one no longer applies. */
@@ -382,25 +403,25 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             remoteState = quest.remoteState?.takeIf { it.currentDemoId == demoId })
 
     /**
-     * [ip] turned out to be the headset [serial]. If a saved entry with the same serial sits on an
-     * older IP, carry its label (and selection) over to [ip] and drop the stale entry.
+     * adb identified [ip] as a Quest with [serial] ("" when unreadable). It gets the HMD #n this serial had earlier in
+     * this run (an unconfirmed entry gets a new number); an entry of the same headset still listed on an older IP is
+     * dropped and its selection moves to [ip]. The remembered selection switches from IP to serial, and the remembered
+     * headset is selected when nothing is.
      */
     private fun adoptSerial(ip: String, serial: String) {
-        if (serial.isEmpty()) return
-        val stale = quests.firstOrNull { it.serial == serial && it.ip != ip }
-        updateQuest(ip) { it.copy(serial = serial, label = stale?.label ?: it.label) }
+        val entry = quests.firstOrNull { it.ip == ip } ?: return
+        val stale = if (serial.isEmpty()) null else quests.firstOrNull { it.serial == serial && it.ip != ip }
+        val label = serialLabels[serial].takeIf { serial.isNotEmpty() }
+            ?: if (entry.label == unconfirmedLabel(ip)) nextLabel() else entry.label
+        updateQuest(ip) { it.copy(serial = serial, label = label) }
+        if (serial.isNotEmpty()) serialLabels[serial] = label
         if (stale != null) {
-            adbConnections.remove(stale.ip)?.close()
-            quests.removeAll { it.ip == stale.ip }
-            if (selectedIp == stale.ip) {
-                stopMirror()
-                selectedIp = ip
-                settings.selectedIp = ip
-                mirrorVideoSize = null
-            }
-            addLog(stale.label, "IP が変わったため ${stale.ip} → $ip に更新しました", null, LogState.INFO)
+            val wasSelected = selectedIp == stale.ip
+            dropQuest(stale.ip)
+            if (wasSelected) changeSelection(ip)
+            addLog(label, "IP が変わったため ${stale.ip} → $ip に更新しました", null, LogState.INFO)
         }
-        persistQuests()
+        if (selectedIp == ip) settings.rememberSelection(serial, ip) else selectRememberedIfSeen()
     }
 
     // ---- discovery -------------------------------------------------------------------------
@@ -427,9 +448,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 val local = refreshWifiDiag() ?: return@launch
                 val hosts = AdbPortScanner.subnetHosts(local.address.address, local.prefixLength)
                 val found = AdbPortScanner.scan(hosts).toMutableSet()
-                // A saved Quest that looked closed gets a slower second try (just woken, busy Wi-Fi).
-                val saved = quests.filter { (it.serial.isNotEmpty() || it.manual) && it.ip !in found && it.ip in hosts }.map { it.ip }
-                if (saved.isNotEmpty()) found += AdbPortScanner.scan(saved, AdbPortScanner.SAVED_RETRY_TIMEOUT_MS)
+                // A listed Quest that looked closed gets a slower second try (just woken, busy Wi-Fi).
+                val listed = quests.filter { it.ip !in found && it.ip in hosts }.map { it.ip }
+                if (listed.isNotEmpty()) found += AdbPortScanner.scan(listed, AdbPortScanner.SAVED_RETRY_TIMEOUT_MS)
                 val open = found.filter { it !in ignoredAdbHosts }.toSet()
                 lastScan = "5555 走査 ${timeFormat.format(Date())} ${open.size} 台"
                 updateDiscoveryDiag()
@@ -440,8 +461,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val wasOpen = selectedQuest?.adbPortOpen
                 quests.indices.forEach { quests[it] = quests[it].copy(adbPortOpen = quests[it].ip in open) }
-                if (open.isNotEmpty()) persistQuests()
-                followSelectedQuest(open)
+                pruneUnseen()
+                selectRememberedIfSeen()
+                findRememberedQuest(open)
                 // "接続待ち" after an automatic failure: connect again once the selected Quest's 5555 opens (woke up, back on Wi-Fi).
                 val target = selectedQuest
                 if (foreground && target != null && target.ip == autoAdbFailedIp && target.ip in open && wasOpen != true &&
@@ -464,6 +486,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val config = authConfig
         if (!config.canSend || !socket.isOpen || discovering) return
         discovering = true
+        // The last result becomes the previous one before this round (an answer during the window sets the last at once).
+        quests.indices.forEach { quests[it] = quests[it].copy(respondedPrevRound = quests[it].respondedLastRound) }
         val broadcastNonce = DemoSwitchProtocol.newNonce()
         val unicastNonce = DemoSwitchProtocol.newNonce()
         // finally: a cancel during the window (onBackground) must not leave `discovering` stuck.
@@ -498,11 +522,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 quests[it] = if (q.ip in responders) q.copy(respondedLastRound = true)
                 else q.copy(respondedLastRound = false, lastDemoId = "", remoteState = null)
             }
-            // Forget unidentified responders that went quiet (never adb, not added by hand, not selected).
-            quests.removeAll {
-                it.serial.isEmpty() && !it.manual && it.respondedLastRound == false && it.adbPortOpen != true &&
-                    it.adb == AdbState.DISCONNECTED && it.ip != selectedIp
-            }
+            pruneUnseen()
+            selectRememberedIfSeen()
         } finally {
             activeNonces.remove(broadcastNonce)
             activeNonces.remove(unicastNonce)
@@ -531,17 +552,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             quests.add(QuestState(source, nextLabel()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
-        persistQuests()
     }
 
     /**
-     * The selected Quest is gone from its saved IP (DHCP gave it a new one): try the other hosts with
-     * Wi-Fi adb open and re-select the one with the same serial. A headset that already trusts this
-     * phone answers at once; others time out quickly and are left alone (not tried again until "再探索").
+     * Nothing is selected and the Quest chosen last time is known by serial (it may be back on a new IP from DHCP):
+     * try the unidentified hosts with Wi-Fi adb open and select the one with that serial. A headset that already
+     * trusts this phone answers at once; others time out quickly and are left alone (not tried again until "再探索").
      */
-    private suspend fun followSelectedQuest(open: Set<String>) {
-        val target = selectedQuest ?: return
-        if (target.serial.isEmpty() || target.ip in open || target.adb != AdbState.DISCONNECTED) return
+    private suspend fun findRememberedQuest(open: Set<String>) {
+        val serial = settings.rememberedSerial
+        if (selectedIp != null || serial.isEmpty()) return
         val keys = withContext(Dispatchers.IO) { keyPair }
         for (ip in open) {
             val entry = quests.firstOrNull { it.ip == ip }
@@ -550,12 +570,13 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             if (!followTriedHosts.add(ip)) continue
             val adb = QuestAdb(ip, keys)
             if (adb.connect(onAuthWaiting = {}, authWaitMs = FOLLOW_AUTH_WAIT_MS) != AdbConnectResult.Connected) continue
-            val serial = runCatching { adb.shell("getprop ro.serialno").output.trim() }.getOrDefault("")
-            if (serial != target.serial) { adb.close(); continue }
+            val found = runCatching { adb.shell("getprop ro.serialno").output.trim() }.getOrDefault("")
+            // Also give up when the host left the list during the connect.
+            if (found != serial || quests.none { it.ip == ip }) { adb.close(); continue }
             adbConnections.remove(ip)?.close()
             adbConnections[ip] = adb
             updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
-            adoptSerial(ip, serial)
+            adoptSerial(ip, found)
             setAdbMessage("")
             refreshAdbInfo(ip)
             updateMirror()
@@ -605,7 +626,6 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                         else -> q
                     }
                 }
-                persistQuests()
             }
             "FAILED" -> {
                 command.terminal = true
@@ -911,13 +931,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             removeQuest(ip)
             return
         }
-        if (quests.firstOrNull { it.ip == ip }?.label == unconfirmedLabel(ip)) updateQuest(ip) { it.copy(label = nextLabel()) }
         val serial = adbShell(ip, "getprop ro.serialno")?.output?.trim() ?: return
         adoptSerial(ip, serial)
         val packages = adbShell(ip, "pm list packages")?.output?.let { QuestAdb.parsePackages(it) } ?: return
         val battery = adbShell(ip, "dumpsys battery")?.output?.let { QuestAdb.parseBatteryLevel(it) }
         updateQuest(ip) { it.copy(model = model, installed = packages, battery = battery) }
-        persistQuests()
         // Read-only state for the diagnosis (uptime tells a reboot apart from a Wi-Fi problem).
         val developer = adbShell(ip, "settings get global development_settings_enabled")?.output ?: return
         val adbEnabled = adbShell(ip, "settings get global adb_enabled")?.output ?: return
@@ -1265,18 +1283,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             addLog("USB", "Wi-Fi 接続を中止", null, LogState.ERROR, text)
             return
         }
-        if (quests.none { it.ip == ip }) {
-            quests.add(QuestState(ip, nextLabel(), manual = true))
-            persistQuests()
-        }
-        // Same headset seen before on another IP (e.g. the venue's DHCP): carry its label over and drop the old entry.
+        if (quests.none { it.ip == ip }) quests.add(QuestState(ip, nextLabel()))
+        if (selectedIp != ip) changeSelection(ip)
+        // Same headset seen before on another IP (e.g. the venue's DHCP): its HMD #n carries over and the old entry goes.
         if (result.serial.isNotEmpty()) adoptSerial(ip, result.serial)
-        if (selectedIp != ip) {
-            stopMirror()
-            selectedIp = ip
-            settings.selectedIp = ip
-            mirrorVideoSize = null
-        }
         wifiAdbOff = false
         usbAdbStatus = "完了。ケーブルを外してください（Quest $ip/${result.prefixLength} $ssid）" to false
         // Keep the dialog up long enough to read the result.
