@@ -1269,6 +1269,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             quests.add(QuestState(ip, nextLabel(), manual = true))
             persistQuests()
         }
+        // Same headset seen before on another IP (e.g. the venue's DHCP): carry its label over and drop the old entry.
+        if (result.serial.isNotEmpty()) adoptSerial(ip, result.serial)
         if (selectedIp != ip) {
             stopMirror()
             selectedIp = ip

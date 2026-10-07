@@ -26,6 +26,13 @@ class AdbConnectClassifyTest {
         assertEquals(AdbConnectResult.HostUnreachable, QuestAdb.classifyTcpFailure(SocketTimeoutException("connect timed out")))
         assertEquals(AdbConnectResult.HostUnreachable, QuestAdb.classifyTcpFailure(NoRouteToHostException("Host unreachable")))
         assertEquals(AdbConnectResult.HostUnreachable, QuestAdb.classifyTcpFailure(IOException("boom")))
+        // Android's wording for an IP with no host on the LAN (libcore errno text).
+        assertEquals(
+            AdbConnectResult.HostUnreachable,
+            QuestAdb.classifyTcpFailure(
+                ConnectException("failed to connect to /192.168.0.241 (port 5555) after 3000ms: isConnected failed: EHOSTUNREACH (No route to host)"),
+            ),
+        )
         assertEquals(
             AdbConnectResult.HostUnreachable,
             QuestAdb.classifyTcpFailure(ConnectException("failed to connect: connect failed: ENETUNREACH (Network is unreachable)")),

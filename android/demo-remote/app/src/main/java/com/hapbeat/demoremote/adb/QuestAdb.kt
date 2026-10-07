@@ -146,8 +146,11 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
          * ConnectException, so that one is told apart by its message.
          */
         fun classifyTcpFailure(e: IOException): AdbConnectResult = when (e) {
+            // Android reports an absent host as ConnectException "... EHOSTUNREACH (No route to host)".
             is java.net.ConnectException ->
-                if (e.message.orEmpty().let { it.contains("ENETUNREACH") || it.contains("unreachable", ignoreCase = true) }) {
+                if (e.message.orEmpty().let { m ->
+                        listOf("EHOSTUNREACH", "ENETUNREACH", "unreachable", "No route to host").any { m.contains(it, ignoreCase = true) }
+                    }) {
                     AdbConnectResult.HostUnreachable
                 } else {
                     AdbConnectResult.PortClosed

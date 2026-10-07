@@ -130,6 +130,8 @@ data class UsbWifiAdbResult(
     val ssid: String,
     /** `tcpip` was skipped because service.adb.tcp.port was already 5555. */
     val alreadyEnabled: Boolean,
+    /** ro.serialno, so the entry is recognised when DHCP later gives the headset another IP ("" if unread). */
+    val serial: String = "",
 )
 
 /** The phone's side of the USB link, as far as the system tells it. */
@@ -355,6 +357,8 @@ class UsbAdb private constructor(
                         val model = QuestAdb.parseModel(adb.runService("shell:getprop ro.product.model"))
                         onStep("getprop ro.product.model = ${model.ifEmpty { "(空)" }}")
                         if (!QuestAdb.isQuestModel(model)) throw UsbAdbException("Quest ではありません（${model.ifEmpty { "機種不明" }}）")
+                        val serial = adb.runService("shell:getprop ro.serialno").trim()
+                        onStep("getprop ro.serialno = ${serial.ifEmpty { "(空)" }}")
                         val tcpPort = adb.runService("shell:getprop service.adb.tcp.port").trim()
                         onStep("getprop service.adb.tcp.port = ${tcpPort.ifEmpty { "(空)" }}")
                         val inet = adb.wlanInet() ?: throw UsbAdbException("Quest の Wi-Fi IP を取得できません。Quest が Wi-Fi に繋がっているか確認してください")
@@ -368,14 +372,14 @@ class UsbAdb private constructor(
                         // Already listening on 5555: skip tcpip so adbd is not restarted.
                         if (AdbProtocol.isTcpPortSet(tcpPort, TCPIP_PORT)) {
                             onStep("tcpip は省略（すでに $TCPIP_PORT）")
-                            return@use UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = true)
+                            return@use UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = true, serial = serial)
                         }
                         val reply = adb.enableTcpip(TCPIP_PORT).trim().take(80)
                         onStep("tcpip:$TCPIP_PORT → ${reply.ifEmpty { "応答なし" }}")
                         if (!reply.contains("restarting")) {
                             throw UsbAdbException("Wi-Fi adb を有効にできませんでした（${reply.ifEmpty { "応答なし" }}）")
                         }
-                        UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = false)
+                        UsbWifiAdbResult(inet.address, inet.prefixLength, ssid, alreadyEnabled = false, serial = serial)
                     }
                 } catch (e: UsbAdbException) {
                     throw e
