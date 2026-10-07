@@ -130,6 +130,15 @@ namespace Hapbeat.DemoSwitch
                 HandleQuery(json, datagram.Source);
                 return;
             }
+            if (messageType == "PRESET_GET" || messageType == "PRESET_SET" || messageType == "PRESET_START")
+            {
+                // Only the Hub registers a preset host; every other runtime drops these without a reply.
+                var host = DemoSwitchPresets.Host;
+                if (host == null) Debug.LogWarning("[Demo Switch] Rejected " + messageType + ": this runtime has no Hub presets.");
+                else if (messageType == "PRESET_GET") HandlePresetGet(json, datagram.Source, host);
+                else HandlePresetCommand(json, datagram.Source, host);
+                return;
+            }
 
             var parsed = DemoSwitchProtocol.ParseCommand(json);
             if (!parsed.Success)
@@ -314,6 +323,98 @@ namespace Hapbeat.DemoSwitch
             if (error != null) SendFailure(source,command,"launch_failed",error);
             else SendStatus(source,new DemoSwitchStatus("READY",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
         }
+
+        private void HandlePresetGet(string json, IPEndPoint source, IDemoSwitchPresetHost host)
+        {
+            DiscoveryHandleResult result;
+            try
+            {
+                result = DemoSwitchPresetGetHandler.Handle(json, host.ReadPreset, _settings.SharedSecret, _settings.AllowUnsignedOnIsolatedLan);
+            }
+            catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+            {
+                Debug.LogWarning("[Demo Switch] PRESET could not be built: " + exception.Message);
+                return;
+            }
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected PRESET_GET payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] PRESET send failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// PRESET_SET / PRESET_START with the CONTROL rules: authentication, foreground, one operation at a time, current
+        /// demo, then validation (refused without executing), persistent sequence and ACK. The Hub also refuses them while
+        /// its manage screen is open.
+        /// </summary>
+        private void HandlePresetCommand(string json, IPEndPoint source, IDemoSwitchPresetHost host)
+        {
+            var parsed = DemoSwitchProtocol.ParsePresetCommand(json);
+            if (!parsed.Success)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected preset payload: " + parsed.ErrorMessage);
+                return;
+            }
+
+            var command = parsed.Command;
+            if (!string.IsNullOrEmpty(_settings.SharedSecret) && !DemoSwitchProtocol.Authenticate(command, _settings.SharedSecret))
+            { SendFailure(source, command, "invalid_auth", "Command authentication failed."); return; }
+            if (string.IsNullOrEmpty(_settings.SharedSecret) && !_settings.AllowUnsignedOnIsolatedLan)
+            { SendFailure(source, command, "unsigned_disabled", "Unsigned command mode is disabled."); return; }
+            if (!_foreground) { SendFailure(source, command, "not_allowed", NotForegroundMessage); return; }
+            if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished)
+            { SendFailure(source, command, "not_allowed", "An operation is in progress."); return; }
+            if (host.IsBusy) { SendFailure(source, command, "not_allowed", "The Hub's manage screen is open."); return; }
+            if (command.DemoId != _settings.CurrentDemoId)
+            { SendFailure(source, command, "not_allowed", "Current demo is not the Hub."); return; }
+
+            if (command.IsStart)
+            {
+                if (!host.HasInstalledStep(command.Preset))
+                { SendFailure(source, command, "not_allowed", "The preset has no installed step."); return; }
+            }
+            else
+            {
+                var check = host.CheckSteps(command.Steps, out var offending);
+                if (check == DemoSwitchPresetCheck.NotInstalled) { SendFailure(source, command, "not_allowed", offending); return; }
+                if (check == DemoSwitchPresetCheck.UnknownOption) { SendFailure(source, command, "invalid_payload", offending); return; }
+            }
+            if (!_sequenceGuard.TryAccept(command.ControllerId, command.Sequence))
+            { SendFailure(source, command, "replay", "seq was already accepted or is older."); return; }
+
+            SendStatus(source, new DemoSwitchStatus("ACK", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+            if (!command.IsStart)
+            {
+                if (host.TryStorePreset(command.Preset, command.Name, command.Visible, command.Steps, out var storeError))
+                    SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+                else SendFailure(source, command, "launch_failed", storeError);
+                return;
+            }
+
+            if (!host.TryStartPreset(command.Preset, failure => SendFailure(source, command, "launch_failed", failure), out var error))
+            {
+                SendFailure(source, command, "launch_failed", error);
+                return;
+            }
+            // READY names the started demo once the Hub has left the foreground, before it stops 7710 and finishes.
+            if (!DemoAppHandoff.NotifyWhenLeft(next => SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId,
+                    command.Sequence, command.DemoId, next, "ok", ""))))
+                SendFailure(source, command, "launch_failed", "The start did not begin a hand-over.");
+        }
+
+        private void SendFailure(IPEndPoint endpoint, DemoSwitchPresetCommand command, string code, string message) =>
+            SendStatus(endpoint, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
+                command.DemoId, _settings.CurrentDemoId, code, message));
 
         private void SendFailure(IPEndPoint endpoint, DemoSwitchCommand command, string code, string message) =>
             SendStatus(endpoint, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
