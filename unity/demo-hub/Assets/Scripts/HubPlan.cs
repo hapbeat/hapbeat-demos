@@ -35,10 +35,16 @@ namespace Hapbeat.DemoHub
         public const int TitleMaxLength = 40;
         private static readonly System.Text.RegularExpressions.Regex IdentifierPattern =
             new System.Text.RegularExpressions.Regex(@"^[a-z0-9][a-z0-9._-]{0,63}\z");
+        private static readonly System.Text.RegularExpressions.Regex OptionValuePattern =
+            new System.Text.RegularExpressions.Regex(@"^[a-z0-9][a-z0-9._-]{0,31}\z");
 
         public const int SummaryMaxLength = 60;
 
         public List<HubPlanStep> Steps { get; } = new List<HubPlanStep>();
+        /// <summary>Shown on the preset button; "" for none. Set by PRESET_SET, kept by the Hub's editor.</summary>
+        public string Name { get; set; } = string.Empty;
+        /// <summary>Increased on every save of the preset (<see cref="HubPlanStore.SavePreset"/>), by the editor or PRESET_SET.</summary>
+        public long Revision { get; set; }
 
         /// <summary>One-step plan for a demo tile: descriptor default options, retry offered.</summary>
         public static HubPlan Single(DemoSessionDescriptor descriptor)
@@ -166,6 +172,49 @@ namespace Hapbeat.DemoHub
             return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle, recenterUi);
         }
 
+        /// <summary>
+        /// A preset written by PRESET_SET: the steps with their options as given (checked by <see cref="Check"/>) and the
+        /// name; the revision is set by the caller.
+        /// </summary>
+        public static HubPlan FromPreset(string name, IReadOnlyList<DemoSwitchPresetStep> steps)
+        {
+            var plan = new HubPlan { Name = name ?? string.Empty };
+            foreach (var step in steps.Take(MaxSteps))
+                plan.Steps.Add(new HubPlanStep(step.DemoId, step.Options.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), step.Retry));
+            return plan;
+        }
+
+        /// <summary>
+        /// The stored steps for PRESET, including steps whose demo is not installed. Options that the wire format cannot
+        /// carry (not an identifier / option value, more than 8) are left out.
+        /// </summary>
+        public IReadOnlyList<DemoSwitchPresetStep> PresetSteps() => Steps.Select(step => new DemoSwitchPresetStep(step.DemoId,
+            step.Options.Where(p => IdentifierPattern.IsMatch(p.Key) && OptionValuePattern.IsMatch(p.Value ?? string.Empty))
+                .OrderBy(p => p.Key, StringComparer.Ordinal).Take(DemoSwitchPresets.MaxStepOptions)
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), step.Retry)).ToList();
+
+        /// <summary>
+        /// PRESET_SET validation of the whole plan before anything is stored: every demo must be installed (a catalog entry)
+        /// and every option key and value must exist in its descriptor. The first offending step decides the result, and
+        /// <paramref name="demoId"/> is its demo.
+        /// </summary>
+        public static DemoSwitchPresetCheck Check(IReadOnlyList<DemoSwitchPresetStep> steps, IReadOnlyList<DemoSessionCatalogEntry> catalog, out string demoId)
+        {
+            foreach (var step in steps)
+            {
+                var entry = Find(catalog, step.DemoId);
+                demoId = step.DemoId;
+                if (entry == null) return DemoSwitchPresetCheck.NotInstalled;
+                foreach (var pair in step.Options)
+                {
+                    var option = entry.Descriptor.FindOption(pair.Key);
+                    if (option == null || !option.HasValue(pair.Value)) return DemoSwitchPresetCheck.UnknownOption;
+                }
+            }
+            demoId = null;
+            return DemoSwitchPresetCheck.Ok;
+        }
+
         public string ToJson()
         {
             var steps = new JArray();
@@ -175,7 +224,7 @@ namespace Hapbeat.DemoHub
                 foreach (var pair in step.Options.OrderBy(p => p.Key, StringComparer.Ordinal)) options[pair.Key] = pair.Value;
                 steps.Add(new JObject { ["demo_id"] = step.DemoId, ["options"] = options, ["retry"] = step.Retry });
             }
-            return new JObject { ["version"] = 1, ["steps"] = steps }.ToString(Formatting.Indented);
+            return new JObject { ["version"] = 1, ["name"] = Name, ["revision"] = Revision, ["steps"] = steps }.ToString(Formatting.Indented);
         }
 
         public static bool TryFromJson(string json, out HubPlan plan)
@@ -186,6 +235,12 @@ namespace Hapbeat.DemoHub
                 var root = JObject.Parse(json);
                 if (root.Value<int?>("version") != 1 || !(root["steps"] is JArray steps)) return false;
                 var result = new HubPlan();
+                // Files from before name / revision load as unnamed, revision 0.
+                if (root["name"] is JValue name && name.Type == JTokenType.String && DemoSwitchPresets.IsValidName(name.Value<string>()))
+                    result.Name = name.Value<string>();
+                if (root["revision"] is JValue revision && revision.Type == JTokenType.Integer
+                    && long.TryParse(revision.ToString(Formatting.None), out var number) && number >= 0)
+                    result.Revision = number;
                 foreach (var token in steps.Take(MaxSteps))
                 {
                     var demoId = token.Value<string>("demo_id");
@@ -224,6 +279,15 @@ namespace Hapbeat.DemoHub
         public static string PresetSlot(int number) => "preset-" + number;
 
         public bool Save(HubPlan plan, string slot) => Write(slot, plan.ToJson());
+
+        /// <summary>Saves preset <paramref name="number"/> with its revision increased; a failed write keeps the old revision.</summary>
+        public bool SavePreset(HubPlan plan, int number)
+        {
+            plan.Revision++;
+            if (Save(plan, PresetSlot(number))) return true;
+            plan.Revision--;
+            return false;
+        }
 
         public bool TryLoad(string slot, out HubPlan plan)
         {

@@ -793,6 +793,79 @@ namespace Hapbeat.DemoHub.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        [Test]
+        public void RemotePresetIsStoredWithNameVisibilityAndRevision()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.IsBusy, Is.False);
+                Assert.That(controller.HasInstalledStep(2), Is.False);
+
+                var steps = new[]
+                {
+                    new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, false),
+                    new DemoSwitchPresetStep("handdemo", null, true)
+                };
+                Assert.That(controller.TryStorePreset(2, "展示 A", true, steps, out var error), Is.True, error);
+                Assert.That(controller.Preset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(1));
+                Assert.That(controller.HasInstalledStep(2), Is.True);
+                Assert.That(store.LoadSettings().VisiblePresets, Has.Member(2), "visible is the saved top-screen choice.");
+                Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nVolley レシーブ 10球"), "The top screen is refreshed.");
+
+                var read = controller.ReadPreset(2);
+                Assert.That(read.Visible, Is.True);
+                Assert.That(read.Revision, Is.EqualTo(1));
+                Assert.That(read.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "handdemo" }), "Uninstalled steps are kept.");
+                Assert.That(read.Steps[0].Options["scene"], Is.EqualTo("receive"));
+                Assert.That(read.Steps[0].Retry, Is.False);
+
+                // The Hub's own editor keeps the name and increases the revision too.
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Assert.That(controller.IsBusy, Is.True);
+                controller.SelectTab(1);
+                controller.RemoveStep(1);
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(2));
+                Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(store.LoadPreset(2).Revision, Is.EqualTo(2));
+
+                Assert.That(controller.TryStorePreset(2, "", false, new DemoSwitchPresetStep[0], out error), Is.True, error);
+                Assert.That(controller.Preset(2).Steps, Is.Empty, "An empty list clears the preset.");
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(3));
+                Assert.That(store.LoadSettings().VisiblePresets, Has.No.Member(2));
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.PresetLabel(1), Does.StartWith(HubText.Preset + " 1\n"), "Without a name the label is unchanged.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RemotePresetStartUsesTheTopScreenStartAndFailsSafelyInTheEditor()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.TryStorePreset(1, "", true, new[] { new DemoSwitchPresetStep("boxing", null, true) }, out var error), Is.True, error);
+                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
+                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
+                string failed = null;
+                Assert.That(controller.TryStartPreset(1, e => failed = e, out error), Is.False);
+                Assert.That(error, Is.Not.Empty);
+                Assert.That(failed, Is.Null, "A start that fails at once is returned, not reported later.");
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         static List<string> Texts(DemoHubController controller) =>
             controller.Panel.GetComponentsInChildren<UnityEngine.UI.Text>().Select(t => t.text).ToList();
     }

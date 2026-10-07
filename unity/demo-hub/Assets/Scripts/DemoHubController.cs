@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -21,6 +22,7 @@ namespace Hapbeat.DemoHub
         public const string NothingInstalled = "インストール済みのデモがプランにありません。";
         public const string LaunchFailed = "起動できませんでした: ";
         public const string Preset = "プリセット";
+        public const string PresetNamed = "プリセット {0}：{1}";
         public const string Tiles = "デモのタイル";
         public const string TilesHeading = "トップに表示するデモ（インストール済み）";
         public const string NoDemos = "インストール済みのデモがありません。";
@@ -71,9 +73,10 @@ namespace Hapbeat.DemoHub
     /// screen is the M5 waiting room instead. M5 SWITCH keeps working in every screen.
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
     /// then stays put; the package's 視線をリセット button (shown when the manage screen turns it on) and a
-    /// system recenter place it in front of the head again.
+    /// system recenter place it in front of the head again. A controller reads, overwrites and starts the presets over
+    /// Demo Switch (<see cref="IDemoSwitchPresetHost"/>), except while the manage screen is open.
     /// </summary>
-    public sealed class DemoHubController : MonoBehaviour
+    public sealed class DemoHubController : MonoBehaviour, IDemoSwitchPresetHost
     {
         public enum HubScreen { Top, Manage, Finished }
 
@@ -168,6 +171,7 @@ namespace Hapbeat.DemoHub
             _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
             DemoRecenter.Recentered += Recenter;
+            DemoSwitchPresets.RegisterHost(this);
             // An external start goes straight to its first demo; the top screen only shows when it is rejected.
             if (!TakeExternalStart()) Show(InitialScreen(DemoSession.Ticket));
         }
@@ -422,9 +426,14 @@ namespace Hapbeat.DemoHub
             _manageButton = _panel.AddButton(new Vector2(232, -28), new Vector2(104, BarHeight), HubText.Manage, 18, null);
         }
 
-        /// <summary>"プリセット 1" over the step summary.</summary>
-        private string PresetLabel(int number) =>
-            HubText.Preset + " " + number + "\n" + _presets[number - 1].Summary(_catalog);
+        /// <summary>"プリセット 1" (or "プリセット 1：名前" when it has a name) over the step summary.</summary>
+        internal string PresetLabel(int number)
+        {
+            var name = _presets[number - 1].Name;
+            var title = string.IsNullOrEmpty(name) ? HubText.Preset + " " + number
+                : string.Format(CultureInfo.InvariantCulture, HubText.PresetNamed, number, name);
+            return title + "\n" + _presets[number - 1].Summary(_catalog);
+        }
 
         /// <summary>This device's hapbeat-device.json; a missing or invalid file shows both axes as unspecified.</summary>
         internal static string DeviceAddressLine(DemoDeviceAddress address) =>
@@ -435,8 +444,7 @@ namespace Hapbeat.DemoHub
         private static string Axis(int value) =>
             value == DemoDeviceAddress.Unspecified ? HubText.Unspecified : value.ToString(CultureInfo.InvariantCulture);
 
-        internal void StartPreset(int number) =>
-            Launch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi));
+        internal void StartPreset(int number) => TryStartPreset(number, null, out _);
 
         /// <summary>A demo tile is a one-step session: descriptor defaults, retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
@@ -445,10 +453,23 @@ namespace Hapbeat.DemoHub
         private static DemoSessionComponent Finish() =>
             DemoSessionCatalog.TryGetOwnComponent(out var finish) ? finish : new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
 
-        private void Launch(DemoSessionTicket ticket)
+        private void Launch(DemoSessionTicket ticket) => TryLaunch(ticket, null, out _);
+
+        /// <summary>
+        /// Starts <paramref name="ticket"/>; a failure shows on the status line. <paramref name="onFailed"/> also receives
+        /// the error when the started application does not come to the front.
+        /// </summary>
+        private bool TryLaunch(DemoSessionTicket ticket, Action<string> onFailed, out string error)
         {
-            if (ticket == null) { SetStatus(HubText.NothingInstalled); return; }
-            if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
+            if (ticket == null)
+            {
+                error = HubText.NothingInstalled;
+                SetStatus(error);
+                return false;
+            }
+            if (DemoSession.LaunchTicket(ticket, out error, failure => { LaunchFailed(failure); onFailed?.Invoke(failure); })) return true;
+            LaunchFailed(error);
+            return false;
         }
 
         /// <summary>
@@ -793,7 +814,7 @@ namespace Hapbeat.DemoHub
 
         private void PlanChanged()
         {
-            _status = _store.Save(EditedPlan, HubPlanStore.PresetSlot(_tab + 1)) ? string.Empty : HubText.Preset + " " + (_tab + 1) + HubText.SaveFailed;
+            _status = _store.SavePreset(EditedPlan, _tab + 1) ? string.Empty : HubText.Preset + " " + (_tab + 1) + HubText.SaveFailed;
             Rebuild();
         }
 
@@ -802,6 +823,48 @@ namespace Hapbeat.DemoHub
             _status = _store.SaveSettings(Settings) ? string.Empty : HubText.SaveFailed;
             Rebuild();
         }
+
+        // ------------------------------------------------- Demo Switch presets
+
+        /// <summary>Staff are editing: PRESET_SET / PRESET_START are refused (the receiver also refuses during a launch).</summary>
+        public bool IsBusy => Screen == HubScreen.Manage;
+
+        public DemoSwitchPreset ReadPreset(int number)
+        {
+            var plan = _presets[number - 1];
+            return new DemoSwitchPreset(plan.Name, Settings.VisiblePresets.Contains(number), plan.Revision, plan.PresetSteps());
+        }
+
+        public DemoSwitchPresetCheck CheckSteps(IReadOnlyList<DemoSwitchPresetStep> steps, out string demoId) => HubPlan.Check(steps, _catalog, out demoId);
+
+        /// <summary>Stores the preset with its revision increased, `visible` as the top-screen choice, and rebuilds the screen.</summary>
+        public bool TryStorePreset(int number, string name, bool visible, IReadOnlyList<DemoSwitchPresetStep> steps, out string error)
+        {
+            var plan = HubPlan.FromPreset(name, steps);
+            plan.Revision = _presets[number - 1].Revision;
+            if (!_store.SavePreset(plan, number))
+            {
+                error = "Could not save preset " + number + ".";
+                return false;
+            }
+            _presets[number - 1] = plan;
+            error = null;
+            if (visible != Settings.VisiblePresets.Contains(number))
+            {
+                if (visible) Settings.VisiblePresets.Add(number);
+                else Settings.VisiblePresets.Remove(number);
+                if (!_store.SaveSettings(Settings)) error = "Could not save the Hub settings.";
+            }
+            if (_panel != null) Rebuild();
+            return error == null;
+        }
+
+        public bool HasInstalledStep(int number) => _presets[number - 1].Steps.Any(s => HubPlan.Find(_catalog, s.DemoId) != null);
+
+        /// <summary>The top screen's preset start: the Hub-wide launch settings apply.</summary>
+        public bool TryStartPreset(int number, Action<string> onFailed, out string error) =>
+            TryLaunch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi),
+                onFailed, out error);
 
         // --------------------------------------------------------------- finish
 
@@ -828,6 +891,7 @@ namespace Hapbeat.DemoHub
         private void OnDestroy()
         {
             DemoRecenter.Recentered -= Recenter;
+            DemoSwitchPresets.UnregisterHost(this);
             if (_panel == null) return;
             if (Application.isPlaying) Destroy(_panel.gameObject);
             else DestroyImmediate(_panel.gameObject);
