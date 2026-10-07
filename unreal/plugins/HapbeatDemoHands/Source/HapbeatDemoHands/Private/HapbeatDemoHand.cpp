@@ -41,6 +41,10 @@ bool FHapbeatHandRig::Init(const USkeletalMesh* Asset)
     }
     HandBone=JointName(WristJoint);HandLoc=Loc(WristJoint);
     RefForward=Loc(MiddleProximal)-HandLoc;RefSide=Loc(IndexProximal)-Loc(LittleProximal);
+    // forward x index-side is the palm normal of one hand and the back-of-hand normal of its mirror image. The
+    // thumb sits on the palm side of the metacarpal plane in both Meta meshes (2-5 cm), so it picks the sign.
+    RefPalm=FVector::CrossProduct(RefForward,RefSide).GetSafeNormal();
+    if(FVector::DotProduct(Loc(int32(EHandKeypoint::ThumbProximal))-HandLoc,RefPalm)<0)RefPalm=-RefPalm;
     RefLength=FMath::Max(1.f,RefForward.Size());
     if(!bOk)Bones.Reset();
     return bOk;
@@ -78,13 +82,13 @@ bool FHapbeatHandRig::BuildReferenceSample(const FTransform& World,float CurlDeg
     TArray<FVector> K;K.Init(HandLoc,EHandKeypointCount);
     K[PalmJoint]=HandLoc+RefForward*.5f;
     for(int32 C=0;C<ChainStart.Num();++C) {
-        // Each finger bends in its own plane, like a hinge joint: the hand's side axis made perpendicular to the
-        // finger's proximal bone (one hand-wide axis twisted the splayed fingers sideways). For this rig
-        // forward x index-side is the palm normal, so rotating about -side curls towards the palm.
+        // Each finger bends in its own plane, like a hinge joint: about the axis perpendicular to the finger's
+        // proximal bone and the palm normal (one hand-wide axis twisted the splayed fingers sideways). Positive
+        // curls towards the palm on both hands (RefPalm carries the mirror sign).
         const int32 Start=ChainStart[C],End=C+1<ChainStart.Num()?ChainStart[C+1]:Bones.Num();
         const FVector Bone=RefDir[FMath::Min(Start+1,End-1)];
-        const FVector Axis=-(RefSide-Bone*FVector::DotProduct(RefSide,Bone)).GetSafeNormal();
-        const FQuat Curl(Axis.IsNearlyZero()?-RefSide.GetSafeNormal():Axis,FMath::DegreesToRadians(ChainCurls?ChainCurls[C]:CurlDegrees));
+        const FVector Axis=FVector::CrossProduct(Bone,RefPalm).GetSafeNormal();
+        const FQuat Curl(Axis.IsNearlyZero()?FVector::CrossProduct(RefForward,RefPalm).GetSafeNormal():Axis,FMath::DegreesToRadians(ChainCurls?ChainCurls[C]:CurlDegrees));
         FVector P=RefLoc[Start];FQuat Acc=FQuat::Identity;K[From[Start]]=P;
         for(int32 B=Start;B<End;++B) {
             if(B>Start)Acc=Curl*Acc;
