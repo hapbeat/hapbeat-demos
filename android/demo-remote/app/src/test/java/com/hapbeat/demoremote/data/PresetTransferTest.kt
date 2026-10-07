@@ -1,6 +1,5 @@
 package com.hapbeat.demoremote.data
 
-import com.hapbeat.demoremote.data.PresetTransfer.NameConflict
 import com.hapbeat.demoremote.protocol.JsonArray
 import com.hapbeat.demoremote.protocol.JsonBool
 import com.hapbeat.demoremote.protocol.JsonNull
@@ -184,29 +183,5 @@ class PresetTransferTest {
         assertNull(PresetTransfer.tokenFromLink("https://preset?d=v1.abc"))
         // Percent-encoding is passed through raw and then fails the token check.
         assertTrue(PresetTransfer.decodeToken(PresetTransfer.tokenFromLink("hapbeat-remote://preset?d=v1.ab%3D")!!) is TransferResult.Rejected)
-    }
-
-    // ---- merge ----
-
-    @Test
-    fun mergeOverwritesOrRenames() {
-        val a = RemotePreset("A", listOf(PresetStep("fps")))
-        val b = RemotePreset("B", listOf(PresetStep("fps")))
-        val newA = RemotePreset("A", listOf(PresetStep("handdemo")))
-        val newC = RemotePreset("C", listOf(PresetStep("boxing")))
-        assertEquals(listOf(newA, b, newC), PresetTransfer.merge(listOf(a, b), listOf(newA, newC), listOf(NameConflict.OVERWRITE, NameConflict.ADD_RENAMED)))
-        assertEquals(
-            listOf(a, b, newA.copy(name = "A (2)"), newA.copy(name = "A (3)")),
-            PresetTransfer.merge(listOf(a, b), listOf(newA, newA), listOf(NameConflict.ADD_RENAMED, NameConflict.ADD_RENAMED)),
-        )
-    }
-
-    @Test
-    fun uniqueNameStaysWithin40CodePoints() {
-        val long = "あ".repeat(40)
-        val renamed = PresetTransfer.uniqueName(long, setOf(long))
-        assertEquals("あ".repeat(36) + " (2)", renamed)
-        assertTrue(PresetTransfer.isValidName(renamed))
-        assertEquals("x (3)", PresetTransfer.uniqueName("x", setOf("x", "x (2)")))
     }
 }

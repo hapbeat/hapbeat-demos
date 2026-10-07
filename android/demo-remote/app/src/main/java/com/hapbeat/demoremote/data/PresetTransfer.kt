@@ -26,7 +26,8 @@ sealed interface TransferResult {
 /**
  * Presets handed over from the web showcase by QR or link (demo-session.md「リモコンへのプリセット受け渡し（QR /
  * リンク）」, demo-remote-preset.schema.json). Pure Kotlin so the whole check runs in JVM unit tests.
- * Anything that breaks a rule rejects the whole payload; nothing is imported partially.
+ * Anything that breaks a rule rejects the whole payload; nothing is imported partially. Accepted presets are not
+ * kept on the phone: each is written into the Hub slot the user picks (PRESET_SET, see HubPresets).
  */
 object PresetTransfer {
     const val WEB_PREFIX = "https://devtools.hapbeat.com/remote/preset#"
@@ -164,39 +165,4 @@ object PresetTransfer {
         c == '\t' || c == '\u000b' || c == '\u000c' || c == ' ' || c == ' ' || c == '﻿' ||
             c == '\n' || c == '\r' || c == ' ' || c == ' ' || Character.getType(c) == Character.SPACE_SEPARATOR.toInt()
 
-    // ---- merging into the phone's list ----
-
-    /** How one imported preset is stored when the name is already taken. */
-    enum class NameConflict { OVERWRITE, ADD_RENAMED }
-
-    /**
-     * [existing] with [imported] added. A preset whose name is taken is either written over the first preset of
-     * that name ([NameConflict.OVERWRITE]) or added as "name (2)", "name (3)", ... ([NameConflict.ADD_RENAMED]).
-     * [choices] is parallel to [imported]; missing entries add renamed.
-     */
-    fun merge(existing: List<RemotePreset>, imported: List<RemotePreset>, choices: List<NameConflict>): List<RemotePreset> {
-        val result = existing.toMutableList()
-        imported.forEachIndexed { i, preset ->
-            val at = result.indexOfFirst { it.name == preset.name }
-            when {
-                at < 0 -> result.add(preset)
-                choices.getOrNull(i) == NameConflict.OVERWRITE -> result[at] = preset
-                else -> result.add(preset.copy(name = uniqueName(preset.name, result.map { it.name }.toSet())))
-            }
-        }
-        return result
-    }
-
-    /** "name (n)" with the smallest free n >= 2, shortening the base so the result stays within 40 code points. */
-    fun uniqueName(name: String, taken: Set<String>): String {
-        var n = 2
-        while (true) {
-            val suffix = " ($n)"
-            val room = MAX_NAME_CODE_POINTS - suffix.length
-            val base = if (name.codePointCount(0, name.length) <= room) name else name.substring(0, name.offsetByCodePoints(0, room))
-            val candidate = base + suffix
-            if (candidate !in taken) return candidate
-            n++
-        }
-    }
 }

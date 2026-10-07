@@ -96,12 +96,32 @@ class StateQueryTest {
     @Test
     fun hubSessionCommands() {
         val prefix = "am start -n jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity --es com.hapbeat.demo_hub.start "
-        assertEquals(prefix + """'{"version":1,"preset":2}'""", DemoCatalog.hubSessionCommand(preset = 2))
         assertEquals(prefix + """'{"version":1,"demo_id":"handdemo"}'""", DemoCatalog.hubSessionCommand(demoId = "handdemo"))
         assertEquals(
             prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"60"}}'""",
             DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "60")),
         )
+    }
+
+    @Test
+    fun hubSessionLeavesInactiveOptionsOut() {
+        // Volley: points applies to scene block / match only, balls to receive only (descriptor `when`).
+        val prefix = "am start -n jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity --es com.hapbeat.demo_hub.start "
+        assertEquals(
+            prefix + """'{"version":1,"demo_id":"volley","options":{"scene":"receive","balls":"20"}}'""",
+            DemoCatalog.hubSessionCommand(demoId = "volley", options = mapOf("scene" to "receive", "points" to "3", "balls" to "20")),
+        )
+    }
+
+    @Test
+    fun shellQuoteEscapesSingleQuotes() {
+        assertEquals("""'a'\''b'""", DemoCatalog.shellQuote("a'b"))
+        assertEquals("'{}'", DemoCatalog.shellQuote("{}"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun hubSessionRejectsQuoteInOptionValue() {
+        DemoCatalog.hubSessionCommand(demoId = "volley", options = mapOf("scene" to "x';reboot;'"))
     }
 
     @Test(expected = IllegalArgumentException::class)

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -65,11 +66,12 @@ import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
+import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 @Composable
-fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int?) -> Unit = {}) {
+fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -106,13 +108,13 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: 
 }
 
 @Composable
-private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int?) -> Unit) {
+private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit) {
     QuestBar(vm, onOpenSettings)
     ActionsAndLog(vm, onEditPreset)
 }
 
 @Composable
-private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
+private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     // The two most urgent actions stay one tap away: back to the Hub, and pause (shared pause panel).
@@ -357,52 +359,71 @@ private fun StateSummary(quest: QuestState?) {
 }
 
 @Composable
-private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
+private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     val quest = vm.selectedQuest
+    // Hub presets live on the selected HMD's Hub and go over Demo Switch (no adb).
+    val block = vm.hubPresetBlockReason
+    val slots = vm.selectedHubPresets
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("プリセット（Hub に保存）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+        // Fixed width so the label swap does not shift the heading.
+        TextButton(
+            onClick = vm::reloadHubPresets,
+            enabled = !vm.hubPresetReading && quest?.remoteState?.currentDemoId == DemoCatalog.HUB_ID,
+            modifier = Modifier.width(96.dp),
+        ) { Text(if (vm.hubPresetReading) "読込中" else "再読込") }
+    }
+    // Two fixed lines: why editing / starting is off (else when the presets were read), then whether the slots below
+    // are only the last read content (gray) while the Hub is not in front.
+    val stale = block != null && slots.any { it != null }
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            block ?: vm.hubPresetStatus.ifEmpty { " " },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (block != null) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            if (stale) "下は最後に読んだ内容です" else " ",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+    var confirmStart by remember { mutableStateOf<Int?>(null) }
+    slots.forEachIndexed { i, slot ->
+        HubPresetRow(i + 1, slot, stale = block != null, canWrite = block == null, onEdit = { onEditPreset(i + 1) }, onStart = { confirmStart = i + 1 })
+    }
+    QrImportButton(vm, Modifier.fillMaxWidth())
+    // Started by the Hub from what it stores: show that content once more before starting.
+    confirmStart?.let { number ->
+        val slot = slots.getOrNull(number - 1)
+        AlertDialog(
+            onDismissRequest = { confirmStart = null },
+            title = { Text("プリセット $number で始めますか？") },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${quest?.label ?: "-"}：${slot?.let { presetTitle(it) } ?: "-"}", fontWeight = FontWeight.Bold)
+                    slot?.preset?.steps?.forEachIndexed { n, step -> Text("${n + 1}. ${stepSummary(step)}", style = MaterialTheme.typography.bodySmall) }
+                    if (slot != null && slot.unreadable) {
+                        Text("${slot.preset.steps.size + 1} 本目以降は読めません（全 ${slot.stepCount} 本）", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { confirmStart = null; vm.startHubPreset(number) }) { Text("始める") } },
+            dismissButton = { TextButton(onClick = { confirmStart = null }) { Text("やめる") } },
+        )
+    }
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     val connected = quest?.adb == AdbState.CONNECTED && hubInstalled
+    Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
     Text(
         if (connected) "Hub 経由でセッション（チュートリアル・完了画面付き）として始めます。前面アプリに関係なく使えます"
         else "adb 接続後に使えます",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text("プリセット", style = MaterialTheme.typography.titleSmall)
-    vm.presets.forEachIndexed { i, preset ->
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(preset.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(presetSummary(preset), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            TextButton(onClick = { onEditPreset(i) }, modifier = Modifier.width(64.dp)) { Text("編集") }
-            ActionButton("開始", enabled = connected, modifier = Modifier.width(88.dp)) { vm.startPreset(preset) }
-        }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(onClick = { onEditPreset(null) }, modifier = Modifier.weight(1f)) { Text("＋ プリセットを作る") }
-        QrImportButton(vm, Modifier.weight(1f))
-    }
-    Text("Hub のプリセット（VR 内で編集）", style = MaterialTheme.typography.titleSmall)
-    var hubPreset by remember { mutableStateOf<Int?>(null) }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("プリセット", style = MaterialTheme.typography.bodyMedium)
-        (1..3).forEach { preset ->
-            ActionButton("$preset", enabled = connected, modifier = Modifier.weight(1f)) { hubPreset = preset }
-        }
-    }
-    // The Hub's presets are edited in the headset and their content is not shown here: confirm before starting.
-    hubPreset?.let { preset ->
-        AlertDialog(
-            onDismissRequest = { hubPreset = null },
-            text = { Text("Hub のプリセット $preset で始めますか？（中身は Hub 側の設定です）") },
-            confirmButton = { TextButton(onClick = { hubPreset = null; vm.startSession(preset = preset) }) { Text("始める") } },
-            dismissButton = { TextButton(onClick = { hubPreset = null }) { Text("やめる") } },
-        )
-    }
-    Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
     // Pick a demo, then its descriptor options (same table as the preset editor), then start.
     var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
     var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -420,6 +441,55 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int?) -> Unit) {
     ActionButton("このデモで始める", enabled = connected && installed, modifier = Modifier.fillMaxWidth()) {
         vm.startSession(demoId = chosen, options = options)
     }
+}
+
+/**
+ * One Hub slot: number, name, whether the Hub shows it, the demo order (options and retry), 編集 and 開始.
+ * [stale]: the Hub is not in front, so this is the last read content (gray). Fixed height: the text changes only.
+ */
+@Composable
+private fun HubPresetRow(number: Int, slot: HubPresetSlot?, stale: Boolean, canWrite: Boolean, onEdit: () -> Unit, onStart: () -> Unit) {
+    val color = if (stale) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else Color.Unspecified
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "$number  ${slot?.let { presetTitle(it) } ?: "未読込"}",
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    when {
+                        slot == null || slot.stepCount == 0 -> ""
+                        slot.preset.visible -> "Hub に表示"
+                        else -> "Hub に非表示"
+                    },
+                    style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1,
+                )
+            }
+            Text(
+                when {
+                    slot == null -> "Hub を開くと読み込みます"
+                    slot.unreadable -> "大きすぎて読めないデモがあります（Hub で編集してください）"
+                    slot.stepCount == 0 -> "「編集」でデモを選んで作れます"
+                    else -> stepsSummary(slot.preset.steps)
+                },
+                style = MaterialTheme.typography.bodySmall, color = color, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(onClick = onEdit, enabled = canWrite && slot != null && !slot.unreadable, modifier = Modifier.width(64.dp)) { Text("編集") }
+        ActionButton("開始", enabled = canWrite && slot != null && slot.stepCount > 0, modifier = Modifier.width(88.dp), onClick = onStart)
+    }
+}
+
+/** Name of a read slot: "空き" when it has no demos and no name, "（名前なし）" when only the name is empty. */
+private fun presetTitle(slot: HubPresetSlot): String = when {
+    slot.preset.name.isNotEmpty() -> slot.preset.name
+    slot.stepCount == 0 -> "空き"
+    else -> "（名前なし）"
 }
 
 /**
@@ -451,7 +521,7 @@ private fun QrImportButton(vm: RemoteViewModel, modifier: Modifier) {
             }
         },
         modifier = modifier,
-    ) { Text("QR から取り込む") }
+    ) { Text("QR から Hub に取り込む") }
 }
 
 @Composable

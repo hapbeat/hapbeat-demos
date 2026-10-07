@@ -1,5 +1,7 @@
 package com.hapbeat.demoremote.protocol
 
+import com.hapbeat.demoremote.data.PresetStep
+import com.hapbeat.demoremote.data.PresetTransfer
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
@@ -33,6 +35,30 @@ sealed interface DemoSwitchMessage {
         val hapticsOn: Boolean, val hapticsUi: Boolean, val recenterUi: Boolean, val paused: Boolean,
         val stepIndex: Long, val stepCount: Long, override val auth: String?,
     ) : DemoSwitchMessage
+
+    /** Reads Hub preset [preset] (1..3) from step [from] (0..31). Answered like QUERY (no sequence). */
+    data class PresetGet(override val controllerId: String, val nonce: String, val preset: Int, val from: Int, override val auth: String?) : DemoSwitchMessage
+
+    /**
+     * One page of a Hub preset: [steps] from [from] that fit in one datagram. Empty [steps] with [from] < [stepCount]
+     * means the step at [from] alone does not fit (the preset can only be edited on the Hub).
+     */
+    data class Preset(
+        override val controllerId: String, val nonce: String, val preset: Int, val revision: Long,
+        val name: String, val visible: Boolean, val stepCount: Int, val from: Int, val steps: List<PresetStep>,
+        override val auth: String?,
+    ) : DemoSwitchMessage
+
+    /** Overwrites Hub preset [preset]; [demoId] is always demo_hub. CONTROL rules (sequence, ACK -> READY / FAILED). */
+    data class PresetSet(
+        override val controllerId: String, val seq: Long, val demoId: String, val preset: Int,
+        val name: String, val visible: Boolean, val steps: List<PresetStep>, override val auth: String?,
+    ) : DemoSwitchMessage
+
+    /** Starts a session from Hub preset [preset]; READY once the first demo has the foreground. */
+    data class PresetStart(
+        override val controllerId: String, val seq: Long, val demoId: String, val preset: Int, override val auth: String?,
+    ) : DemoSwitchMessage
 }
 
 /** Authentication policy of this controller. [secret] null/empty means unsigned mode (only if [allowUnsigned]). */
@@ -48,6 +74,13 @@ object DemoSwitchProtocol {
     const val MAX_STATUS_MESSAGE_BYTES = 256
     /** FAILED / not_allowed message of a runtime that is running but not in the foreground. */
     const val NOT_IN_FOREGROUND_MESSAGE = "not in foreground"
+    /** demo_id of PRESET_SET / PRESET_START: only the Hub handles Hub presets. */
+    const val HUB_DEMO_ID = "demo_hub"
+    const val MAX_PRESET_STEPS = 32
+    const val MAX_PRESET_OPTIONS = 8
+    val PRESET_NUMBERS = 1..3
+    /** Range of PRESET_GET / PRESET `from`. */
+    val PRESET_FROM = 0..31
 
     val STATUS_TYPES = setOf("ACK", "READY", "FAILED")
     val STATUS_CODES = setOf(
@@ -63,6 +96,7 @@ object DemoSwitchProtocol {
     private val IDENTIFIER = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
     private val NONCE = Regex("^[0-9a-f]{16}$")
     private val AUTH = Regex("^[0-9a-f]{64}$")
+    private val OPTION_VALUE = Regex("^[a-z0-9][a-z0-9._-]{0,31}$")
     private val random = SecureRandom()
 
     fun isIdentifier(value: String): Boolean = IDENTIFIER.matches(value)
@@ -117,6 +151,40 @@ object DemoSwitchProtocol {
         field(this, "step_index", m.stepIndex.toString()); field(this, "step_count", m.stepCount.toString())
     }.toString()
 
+    fun canonicalPresetGet(controllerId: String, nonce: String, preset: Int, from: Int): String =
+        StringBuilder(HEADER + "PRESET_GET\n").apply {
+            field(this, "version", "1"); field(this, "type", "PRESET_GET"); field(this, "controller_id", controllerId)
+            field(this, "nonce", nonce); field(this, "preset", preset.toString()); field(this, "from", from.toString())
+        }.toString()
+
+    fun canonicalPreset(m: DemoSwitchMessage.Preset): String = StringBuilder(HEADER + "PRESET\n").apply {
+        field(this, "version", "1"); field(this, "type", "PRESET"); field(this, "controller_id", m.controllerId)
+        field(this, "nonce", m.nonce); field(this, "preset", m.preset.toString()); field(this, "revision", m.revision.toString())
+        field(this, "name", m.name); field(this, "visible", m.visible.toString()); field(this, "step_count", m.stepCount.toString())
+        field(this, "from", m.from.toString()); field(this, "steps", canonicalSteps(m.steps))
+    }.toString()
+
+    fun canonicalPresetSet(controllerId: String, seq: Long, preset: Int, name: String, visible: Boolean, steps: List<PresetStep>): String =
+        StringBuilder(HEADER + "COMMAND\n").apply {
+            field(this, "version", "1"); field(this, "type", "PRESET_SET"); field(this, "controller_id", controllerId)
+            field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "preset", preset.toString())
+            field(this, "name", name); field(this, "visible", visible.toString()); field(this, "steps", canonicalSteps(steps))
+        }.toString()
+
+    fun canonicalPresetStart(controllerId: String, seq: Long, preset: Int): String = StringBuilder(HEADER + "COMMAND\n").apply {
+        field(this, "version", "1"); field(this, "type", "PRESET_START"); field(this, "controller_id", controllerId)
+        field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "preset", preset.toString())
+    }.toString()
+
+    /**
+     * Signed value of `steps`: `<demo_id>;<key=value,... sorted by key>;<1|0>` joined with `|` (retry omitted = 1).
+     * Identifiers and option values cannot contain `|`, `;`, `,` or `=`, so this is unambiguous.
+     */
+    fun canonicalSteps(steps: List<PresetStep>): String = steps.joinToString("|") { step ->
+        val options = step.options.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${it.value}" }
+        "${step.demoId};$options;${if (step.retry) 1 else 0}"
+    }
+
     fun canonical(message: DemoSwitchMessage): String = when (message) {
         is DemoSwitchMessage.Switch -> canonicalCommand(message.controllerId, message.seq, message.demoId)
         is DemoSwitchMessage.Control -> canonicalControl(message.controllerId, message.seq, message.demoId, message.action, message.sceneId)
@@ -127,6 +195,11 @@ object DemoSwitchProtocol {
         is DemoSwitchMessage.Here -> canonicalHere(message.controllerId, message.nonce, message.currentDemoId)
         is DemoSwitchMessage.Query -> canonicalQuery(message.controllerId, message.nonce)
         is DemoSwitchMessage.State -> canonicalState(message)
+        is DemoSwitchMessage.PresetGet -> canonicalPresetGet(message.controllerId, message.nonce, message.preset, message.from)
+        is DemoSwitchMessage.Preset -> canonicalPreset(message)
+        is DemoSwitchMessage.PresetSet ->
+            canonicalPresetSet(message.controllerId, message.seq, message.preset, message.name, message.visible, message.steps)
+        is DemoSwitchMessage.PresetStart -> canonicalPresetStart(message.controllerId, message.seq, message.preset)
     }
 
     fun hmacHex(secret: String, canonical: String): String {
@@ -175,6 +248,46 @@ object DemoSwitchProtocol {
         linkedMapOf("version" to 1, "type" to "QUERY", "controller_id" to controllerId, "nonce" to nonce),
         config, canonicalQuery(controllerId, nonce),
     )
+
+    fun buildPresetGet(controllerId: String, nonce: String, preset: Int, from: Int, config: AuthConfig): String = withAuth(
+        linkedMapOf("version" to 1, "type" to "PRESET_GET", "controller_id" to controllerId, "nonce" to nonce, "preset" to preset, "from" to from),
+        config, canonicalPresetGet(controllerId, nonce, preset, from),
+    )
+
+    /**
+     * PRESET_SET with [steps] as given (callers pass validated steps, see HubPresets). `options` is left out when
+     * empty and `retry` when true, which signs the same as writing them.
+     */
+    fun buildPresetSet(
+        controllerId: String, seq: Long, preset: Int, name: String, visible: Boolean, steps: List<PresetStep>, config: AuthConfig,
+    ): String = withAuth(
+        linkedMapOf(
+            "version" to 1, "type" to "PRESET_SET", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
+            "preset" to preset, "name" to name, "visible" to visible,
+            "steps" to steps.map { step ->
+                linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
+                    if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
+                    if (!step.retry) put("retry", false)
+                }
+            },
+        ),
+        config, canonicalPresetSet(controllerId, seq, preset, name, visible, steps),
+    )
+
+    fun buildPresetStart(controllerId: String, seq: Long, preset: Int, config: AuthConfig): String = withAuth(
+        linkedMapOf("version" to 1, "type" to "PRESET_START", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID, "preset" to preset),
+        config, canonicalPresetStart(controllerId, seq, preset),
+    )
+
+    /**
+     * Bytes of the PRESET_SET for these values in the worst case: the largest sequence and an `auth` field, so a plan
+     * that fits here fits whatever the next sequence and the authentication mode.
+     */
+    fun presetSetWorstCaseBytes(controllerId: String, preset: Int, name: String, visible: Boolean, steps: List<PresetStep>): Int =
+        buildPresetSet(controllerId, MAX_SEQ, preset, name, visible, steps, WORST_CASE_AUTH).toByteArray(Charsets.UTF_8).size
+
+    /** Any secret: the auth field is always 64 hex characters. */
+    private val WORST_CASE_AUTH = AuthConfig(secret = "worst-case", allowUnsigned = false)
 
     // ---- parsing / schema validation ---------------------------------------------------------
 
@@ -245,7 +358,88 @@ object DemoSwitchProtocol {
                     auth = auth,
                 )
             }
+            "PRESET_GET" -> {
+                if (!onlyFields(obj, PRESET_GET_FIELDS)) return null
+                DemoSwitchMessage.PresetGet(
+                    controllerId, nonceField(obj) ?: return null, presetField(obj) ?: return null, fromField(obj) ?: return null, auth,
+                )
+            }
+            "PRESET" -> {
+                if (!onlyFields(obj, PRESET_FIELDS)) return null
+                DemoSwitchMessage.Preset(
+                    controllerId = controllerId,
+                    nonce = nonceField(obj) ?: return null,
+                    preset = presetField(obj) ?: return null,
+                    revision = intField(obj, "revision")?.takeIf { it in 0..MAX_SEQ } ?: return null,
+                    name = presetNameField(obj) ?: return null,
+                    visible = boolField(obj, "visible") ?: return null,
+                    stepCount = intField(obj, "step_count")?.takeIf { it in 0..MAX_PRESET_STEPS }?.toInt() ?: return null,
+                    from = fromField(obj) ?: return null,
+                    steps = presetStepsField(obj) ?: return null,
+                    auth = auth,
+                )
+            }
+            "PRESET_SET" -> {
+                if (!onlyFields(obj, PRESET_SET_FIELDS)) return null
+                DemoSwitchMessage.PresetSet(
+                    controllerId = controllerId,
+                    seq = seqField(obj) ?: return null,
+                    demoId = stringField(obj, "demo_id")?.takeIf { it == HUB_DEMO_ID } ?: return null,
+                    preset = presetField(obj) ?: return null,
+                    name = presetNameField(obj) ?: return null,
+                    visible = boolField(obj, "visible") ?: return null,
+                    steps = presetStepsField(obj) ?: return null,
+                    auth = auth,
+                )
+            }
+            "PRESET_START" -> {
+                if (!onlyFields(obj, PRESET_START_FIELDS)) return null
+                DemoSwitchMessage.PresetStart(
+                    controllerId, seqField(obj) ?: return null, stringField(obj, "demo_id")?.takeIf { it == HUB_DEMO_ID } ?: return null,
+                    presetField(obj) ?: return null, auth,
+                )
+            }
             else -> null
+        }
+    }
+
+    /** Hub preset name: "" or the remote preset transfer name rules (1..40 code points, demo-session.md). */
+    fun isPresetName(name: String): Boolean = name.isEmpty() || PresetTransfer.isValidName(name)
+
+    private fun presetField(obj: Map<String, JsonValue>): Int? =
+        intField(obj, "preset")?.takeIf { it in PRESET_NUMBERS.first..PRESET_NUMBERS.last }?.toInt()
+
+    private fun fromField(obj: Map<String, JsonValue>): Int? =
+        intField(obj, "from")?.takeIf { it in PRESET_FROM.first..PRESET_FROM.last }?.toInt()
+
+    private fun presetNameField(obj: Map<String, JsonValue>): String? = stringField(obj, "name")?.takeIf { isPresetName(it) }
+
+    /** `steps` (0..32): each `demo_id`, optional `options` (<= 8, identifier keys, option-value values), optional `retry`. */
+    private fun presetStepsField(obj: Map<String, JsonValue>): List<PresetStep>? {
+        val items = (obj["steps"] as? JsonArray)?.items ?: return null
+        if (items.size > MAX_PRESET_STEPS) return null
+        return items.map { item ->
+            val f = (item as? JsonObject)?.fields ?: return null
+            if (!f.keys.all { it == "demo_id" || it == "options" || it == "retry" }) return null
+            val demoId = identifierField(f, "demo_id") ?: return null
+            val options = when (val o = f["options"]) {
+                null -> emptyMap()
+                is JsonObject -> {
+                    if (o.fields.size > MAX_PRESET_OPTIONS) return null
+                    o.fields.mapValues { (key, v) ->
+                        val value = (v as? JsonString)?.value ?: return null
+                        if (!isIdentifier(key) || !OPTION_VALUE.matches(value)) return null
+                        value
+                    }
+                }
+                else -> return null
+            }
+            val retry = when (val r = f["retry"]) {
+                null -> true
+                is JsonBool -> r.value
+                else -> return null
+            }
+            PresetStep(demoId, options, retry)
         }
     }
 
@@ -255,6 +449,10 @@ object DemoSwitchProtocol {
     private val DISCOVER_FIELDS = setOf("version", "type", "controller_id", "nonce")
     private val HERE_FIELDS = DISCOVER_FIELDS + "current_demo_id"
     private val STATE_FIELDS = HERE_FIELDS + setOf("foreground", "haptics_on", "haptics_ui", "recenter_ui", "paused", "step_index", "step_count")
+    private val PRESET_GET_FIELDS = DISCOVER_FIELDS + setOf("preset", "from")
+    private val PRESET_FIELDS = PRESET_GET_FIELDS + setOf("revision", "name", "visible", "step_count", "steps")
+    private val PRESET_START_FIELDS = SWITCH_FIELDS + "preset"
+    private val PRESET_SET_FIELDS = PRESET_START_FIELDS + setOf("name", "visible", "steps")
 
     /** Required fields present and no field other than those plus optional auth. */
     private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>): Boolean =
@@ -311,6 +509,16 @@ object DemoSwitchProtocol {
     ): Boolean {
         if (message.controllerId != controllerId) return false
         if (queryTarget(message.nonce) != source) return false
+        return authAccepted(message, config)
+    }
+
+    /** PRESET acceptance: from the Quest the PRESET_GET went to, own controller ID, that request's nonce, auth rule. */
+    fun acceptPreset(
+        message: DemoSwitchMessage.Preset, source: String, controllerId: String, requestTarget: (nonce: String) -> String?,
+        config: AuthConfig,
+    ): Boolean {
+        if (message.controllerId != controllerId) return false
+        if (requestTarget(message.nonce) != source) return false
         return authAccepted(message, config)
     }
 

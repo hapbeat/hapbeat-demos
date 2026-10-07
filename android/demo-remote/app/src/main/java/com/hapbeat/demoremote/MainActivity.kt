@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSettings = { screen = Screen.SETTINGS },
                                 onEditPreset = { editingPreset = it; screen = Screen.PRESET },
                             )
-                            Screen.PRESET -> PresetEditScreen(viewModel, editingPreset, onDone = { screen = Screen.REMOTE })
+                            Screen.PRESET -> PresetEditScreen(viewModel, editingPreset ?: 1, onDone = { screen = Screen.REMOTE })
                             Screen.SETTINGS -> SettingsScreen(
                                 viewModel,
                                 onBack = { screen = Screen.REMOTE },

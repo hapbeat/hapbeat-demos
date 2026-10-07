@@ -1,6 +1,5 @@
 package com.hapbeat.demoremote
 
-import com.hapbeat.demoremote.data.PresetStep
 import com.hapbeat.demoremote.protocol.MiniJson
 
 /** One value of a demo option ([label]: the descriptor's Japanese label). */
@@ -116,52 +115,17 @@ object DemoCatalog {
     private const val HUB_START_EXTRA = "com.hapbeat.demo_hub.start"
 
     /**
-     * Starts a Demo Session through the Hub's external start extra (demo-session.md「Hub を外部から起動して
-     * セッションを始める」): a preset 1..3, or one demo with descriptor [options] (empty = all defaults).
+     * Starts a one-demo Demo Session through the Hub's external start extra (demo-session.md「Hub を外部から起動して
+     * セッションを始める」) with descriptor [options] (empty = all defaults). Hub presets are started with PRESET_START.
      */
-    fun hubSessionCommand(preset: Int? = null, demoId: String? = null, options: Map<String, String> = emptyMap()): String {
-        val json = when {
-            preset != null -> {
-                require(preset in 1..3)
-                MiniJson.write(linkedMapOf("version" to 1, "preset" to preset))
-            }
-            demoId != null -> {
-                requireValidStep(demoId, options)
-                val applicable = applicableOptions(demoId, options)
-                MiniJson.write(linkedMapOf<String, Any?>("version" to 1, "demo_id" to demoId).apply {
-                    if (applicable.isNotEmpty()) put("options", LinkedHashMap(applicable))
-                })
-            }
-            else -> throw IllegalArgumentException("preset or demoId")
-        }
-        return hubStartCommand(json)
+    fun hubSessionCommand(demoId: String, options: Map<String, String> = emptyMap()): String {
+        requireValidStep(demoId, options)
+        val applicable = applicableOptions(demoId, options)
+        val json = MiniJson.write(linkedMapOf<String, Any?>("version" to 1, "demo_id" to demoId).apply {
+            if (applicable.isNotEmpty()) put("options", LinkedHashMap(applicable))
+        })
+        return "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA ${shellQuote(json)}"
     }
-
-    /** Hub start extra limit (demo-session.md). */
-    const val HUB_START_MAX_BYTES = 4096
-
-    /**
-     * Starts a session with a plan built on this phone (`steps`, 1..32 demos). The JSON is rebuilt from the
-     * validated steps (demo_id, options, retry); a preset's name never goes into it.
-     */
-    fun hubPlanCommand(steps: List<PresetStep>): String {
-        require(steps.size in 1..32)
-        val json = MiniJson.write(linkedMapOf(
-            "version" to 1,
-            "steps" to steps.map { step ->
-                requireValidStep(step.demoId, step.options)
-                val applicable = applicableOptions(step.demoId, step.options)
-                linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
-                    if (applicable.isNotEmpty()) put("options", LinkedHashMap(applicable))
-                    if (!step.retry) put("retry", false)
-                }
-            },
-        ))
-        require(json.toByteArray(Charsets.UTF_8).size <= HUB_START_MAX_BYTES)
-        return hubStartCommand(json)
-    }
-
-    private fun hubStartCommand(json: String): String = "am start -n $HUB_COMPONENT --es $HUB_START_EXTRA ${shellQuote(json)}"
 
     /**
      * One POSIX single-quoted shell word (' becomes '\''). Validated values cannot contain a quote; this is
