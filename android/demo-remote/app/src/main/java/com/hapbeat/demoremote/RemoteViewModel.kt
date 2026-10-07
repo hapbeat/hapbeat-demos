@@ -1109,7 +1109,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun onUsbLink(link: UsbLink, changed: Boolean) {
         if (link != UsbLink.PERIPHERAL) peripheralPrompted = false
         if (!foreground || usbAdbRunning || usbCloseJob?.isActive == true) return
-        if (link == UsbLink.PERIPHERAL && !peripheralPrompted) {
+        // Only when a USB recovery is expected (the Quest refused Wi-Fi adb): a phone charging from a PC is also on
+        // the peripheral side and must not get this dialog.
+        if (link == UsbLink.PERIPHERAL && !peripheralPrompted && wifiAdbOff) {
             peripheralPrompted = true
             fileLog("USB: スマホが周辺機器側のためダイアログを表示")
             showUsbDialog()
