@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.PresetTransfer.NameConflict
 import com.hapbeat.demoremote.data.TransferResult
@@ -46,7 +47,9 @@ fun PresetImportDialog(vm: RemoteViewModel) {
             // Default for a taken name: add renamed (nothing on the phone is lost unless the user picks overwrite).
             val choices = remember(pending) { pending.presets.map { NameConflict.ADD_RENAMED }.toMutableStateList() }
             AlertDialog(
-                onDismissRequest = vm::dismissImport,
+                // Only the buttons close it: a tap outside (e.g. while unlocking the phone) must not drop the import.
+                onDismissRequest = {},
+                properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
                 title = { Text("プリセットを取り込む（${pending.presets.size} 件）") },
                 text = {
                     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
