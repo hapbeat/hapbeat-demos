@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -40,7 +41,7 @@ object DemoThumbnails {
 }
 
 /** Fixed height of a demo tile, with or without a thumbnail, so grids line up. */
-private val TileHeight = 120.dp
+private val TileHeight = 92.dp
 
 /** Disabled-content alpha of Material 3, applied to the thumbnail too. */
 private const val DISABLED_ALPHA = 0.38f
@@ -49,7 +50,7 @@ private const val DISABLED_ALPHA = 0.38f
 @Composable
 fun DemoTile(app: DemoApp, enabled: Boolean, modifier: Modifier = Modifier, outlined: Boolean = false, onClick: () -> Unit) {
     val m = modifier.height(TileHeight)
-    val padding = PaddingValues(8.dp)
+    val padding = PaddingValues(4.dp)
     val content: @Composable ColumnScope.() -> Unit = { DemoTileContent(app, enabled) }
     if (outlined) {
         OutlinedButton(onClick = onClick, enabled = enabled, modifier = m, shape = ButtonShape, contentPadding = padding) {
@@ -80,5 +81,5 @@ private fun ColumnScope.DemoTileContent(app: DemoApp, enabled: Boolean) {
             )
         }
     }
-    Text(app.label, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Text(app.label, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
 }

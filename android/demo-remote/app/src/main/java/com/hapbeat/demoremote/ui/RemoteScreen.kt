@@ -312,7 +312,7 @@ private fun SwitchTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ButtonGrid(DemoCatalog.apps, columns = 2) { app, modifier ->
+    ButtonGrid(DemoCatalog.apps, columns = 3) { app, modifier ->
         DemoTile(app, enabled = enabled && app.demoId != current, modifier = modifier) { vm.sendSwitch(app.demoId) }
     }
 }
@@ -427,7 +427,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     // Pick a demo, then its descriptor options (same table as the preset editor), then start.
     var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
     var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    ButtonGrid(DemoCatalog.sessionApps, columns = 2) { app, modifier ->
+    ButtonGrid(DemoCatalog.sessionApps, columns = 3) { app, modifier ->
         DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId) { chosen = app.demoId }
     }
     OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
@@ -528,7 +528,7 @@ private fun LaunchTab(vm: RemoteViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ButtonGrid(DemoCatalog.apps, columns = 2) { app, modifier ->
+    ButtonGrid(DemoCatalog.apps, columns = 3) { app, modifier ->
         val installed = quest?.installed?.contains(app.packageName) == true
         DemoTile(app, enabled = connected && installed, modifier = modifier, outlined = true) { vm.launchApp(app) }
     }

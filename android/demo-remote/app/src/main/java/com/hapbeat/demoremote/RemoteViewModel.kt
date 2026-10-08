@@ -597,7 +597,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onHere(source: String, here: DemoSwitchMessage.Here) {
         if (quests.none { it.ip == source }) {
-            quests.add(QuestState(source, nextLabel()))
+            // A Demo Switch answer alone does not prove a headset (a PC running a demo in the Unity editor answers
+            // too): it stays "未確認" until adb reports a Quest model.
+            quests.add(QuestState(source, unconfirmedLabel(source)))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
     }
