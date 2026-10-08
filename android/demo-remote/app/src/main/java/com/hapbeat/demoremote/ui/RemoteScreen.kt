@@ -313,7 +313,7 @@ private fun SwitchTab(vm: RemoteViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     ButtonGrid(DemoCatalog.apps, columns = 2) { app, modifier ->
-        ActionButton(app.label, enabled = enabled && app.demoId != current, modifier = modifier) { vm.sendSwitch(app.demoId) }
+        DemoTile(app, enabled = enabled && app.demoId != current, modifier = modifier) { vm.sendSwitch(app.demoId) }
     }
 }
 
@@ -428,12 +428,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
     var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
     ButtonGrid(DemoCatalog.sessionApps, columns = 2) { app, modifier ->
-        FilterChip(
-            selected = chosen == app.demoId,
-            onClick = { chosen = app.demoId },
-            label = { Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            modifier = modifier.height(48.dp),
-        )
+        DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId) { chosen = app.demoId }
     }
     OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
     val app = DemoCatalog.sessionApps.first { it.demoId == chosen }
@@ -535,7 +530,7 @@ private fun LaunchTab(vm: RemoteViewModel) {
     )
     ButtonGrid(DemoCatalog.apps, columns = 2) { app, modifier ->
         val installed = quest?.installed?.contains(app.packageName) == true
-        ActionButton(app.label, enabled = connected && installed, modifier = modifier, outlined = true) { vm.launchApp(app) }
+        DemoTile(app, enabled = connected && installed, modifier = modifier, outlined = true) { vm.launchApp(app) }
     }
 }
 

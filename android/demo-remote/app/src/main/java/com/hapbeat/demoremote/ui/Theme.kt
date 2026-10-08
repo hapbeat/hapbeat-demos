@@ -32,7 +32,7 @@ fun AppTheme(content: @Composable () -> Unit) {
 val ButtonMinHeight = 56.dp
 
 /** Grids of buttons read better as tiles than as rows of capsules. */
-private val ButtonShape = RoundedCornerShape(6.dp)
+internal val ButtonShape = RoundedCornerShape(6.dp)
 
 @Composable
 fun ActionButton(text: String, enabled: Boolean, modifier: Modifier = Modifier, outlined: Boolean = false, onClick: () -> Unit) {

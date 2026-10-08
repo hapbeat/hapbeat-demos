@@ -29,6 +29,7 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 - `local.properties`（`sdk.dir=...`）は各 PC で用意する（commit しない）
 - scrcpy-server はビルド時に GitHub Releases から取得し、SHA-256 を検証して APK に同梱する（repo には置かない）。`tools/quest-mirror/scrcpy/scrcpy-server` に同じハッシュのファイルがあればそれを使う（オフラインビルド用）
 - ユニットテスト: `.\gradlew.bat :app:testDebugUnitTest`
+- デモボタンのサムネイル（`app/src/main/assets/thumbs/<demo_id>.webp`）は devtools-site のショーケースから縮小して同梱している。ショーケースの画像を更新したら差し替える
 
 ## 初回設定
 

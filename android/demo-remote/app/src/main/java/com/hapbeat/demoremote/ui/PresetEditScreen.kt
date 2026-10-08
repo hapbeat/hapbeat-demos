@@ -91,7 +91,7 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
             }
             Text("デモを追加", style = MaterialTheme.typography.titleSmall)
             ButtonGrid(DemoCatalog.sessionApps, columns = 2) { app, modifier ->
-                ActionButton(app.label, enabled = steps.size < DemoSwitchProtocol.MAX_PRESET_STEPS, modifier = modifier, outlined = true) {
+                DemoTile(app, enabled = steps.size < DemoSwitchProtocol.MAX_PRESET_STEPS, modifier = modifier, outlined = true) {
                     steps.add(PresetStep(app.demoId))
                 }
             }

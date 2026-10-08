@@ -19,8 +19,12 @@ data class DemoOption(
  * Fixed demo table. adb launches only these packages; nothing received from the
  * network is ever used as a package name or shell command.
  * [options]: copy of the demo's descriptor options, the only option keys and values sent to the Hub.
+ * [thumbnail]: path under `assets/` of the button image (null = name only).
  */
-data class DemoApp(val demoId: String, val label: String, val packageName: String, val options: List<DemoOption> = emptyList())
+data class DemoApp(
+    val demoId: String, val label: String, val packageName: String, val options: List<DemoOption> = emptyList(),
+    val thumbnail: String? = null,
+)
 
 object DemoCatalog {
     const val HUB_ID = "demo_hub"
@@ -50,13 +54,13 @@ object DemoCatalog {
 
     val apps: List<DemoApp> = listOf(
         DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
-        DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley", VOLLEY_OPTIONS),
-        DemoApp("boxing", "Boxing", "com.hapbeat.boxing", BOXING_OPTIONS),
-        DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2"),
-        DemoApp("trex-encounter", "T-Rex Encounter", "com.hapbeat.trexencounter"),
-        DemoApp("safety-mill", "Safety Mill", "com.hapbeat.safetymill"),
-        DemoApp(ENERGY_DUEL_ID, "Energy Duel", "jp.hapbeat.energyduel", ENERGY_DUEL_OPTIONS),
-        DemoApp("fps", "FPS", "com.hapbeat.fpsdemo"),
+        DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley", VOLLEY_OPTIONS, thumbnail = "thumbs/volley.webp"),
+        DemoApp("boxing", "Boxing", "com.hapbeat.boxing", BOXING_OPTIONS, thumbnail = "thumbs/boxing.webp"),
+        DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2", thumbnail = "thumbs/handdemo.webp"),
+        DemoApp("trex-encounter", "T-Rex Encounter", "com.hapbeat.trexencounter", thumbnail = "thumbs/trex-encounter.webp"),
+        DemoApp("safety-mill", "Safety Mill", "com.hapbeat.safetymill", thumbnail = "thumbs/safety-mill.webp"),
+        DemoApp(ENERGY_DUEL_ID, "Energy Duel", "jp.hapbeat.energyduel", ENERGY_DUEL_OPTIONS, thumbnail = "thumbs/energy-duel.webp"),
+        DemoApp("fps", "FPS", "com.hapbeat.fpsdemo", thumbnail = "thumbs/fps.webp"),
     )
 
     val hub: DemoApp get() = apps.first { it.demoId == HUB_ID }
