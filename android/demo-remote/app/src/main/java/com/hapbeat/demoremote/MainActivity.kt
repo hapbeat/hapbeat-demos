@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.hapbeat.demoremote.ui.AppTheme
+import com.hapbeat.demoremote.ui.HubSettingsScreen
 import com.hapbeat.demoremote.ui.LicenseScreen
 import com.hapbeat.demoremote.ui.PresetEditScreen
 import com.hapbeat.demoremote.ui.PresetImportDialog
@@ -31,7 +32,7 @@ import com.hapbeat.demoremote.ui.RemoteScreen
 import com.hapbeat.demoremote.ui.SettingsScreen
 import com.hapbeat.demoremote.ui.UsbAdbDialog
 
-enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET }
+enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET, HUB_SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RemoteViewModel by viewModels()
@@ -63,8 +64,10 @@ class MainActivity : ComponentActivity() {
                                 viewModel,
                                 onOpenSettings = { screen = Screen.SETTINGS },
                                 onEditPreset = { editingPreset = it; screen = Screen.PRESET },
+                                onOpenHubSettings = { screen = Screen.HUB_SETTINGS },
                             )
                             Screen.PRESET -> PresetEditScreen(viewModel, editingPreset ?: 1, onDone = { screen = Screen.REMOTE })
+                            Screen.HUB_SETTINGS -> HubSettingsScreen(viewModel, onDone = { screen = Screen.REMOTE })
                             Screen.SETTINGS -> SettingsScreen(
                                 viewModel,
                                 onBack = { screen = Screen.REMOTE },

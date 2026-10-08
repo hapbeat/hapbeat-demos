@@ -1,5 +1,6 @@
 package com.hapbeat.demoremote.protocol
 
+import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.PresetStep
 import com.hapbeat.demoremote.data.PresetTransfer
 import java.security.MessageDigest
@@ -34,6 +35,12 @@ sealed interface DemoSwitchMessage {
         val foreground: Boolean,
         val hapticsOn: Boolean, val hapticsUi: Boolean, val recenterUi: Boolean, val paused: Boolean,
         val stepIndex: Long, val stepCount: Long, override val auth: String?,
+        /**
+         * Optional fields (null = absent: an older runtime, unknown rather than an error). [deviceModel] as the OS reports
+         * it, [editor] true inside a development editor, [screen] `main` / `completion` / `manage`, [handStyle]
+         * `ghost` / `skin` (absent when the runtime does not draw the shared hands).
+         */
+        val deviceModel: String? = null, val editor: Boolean? = null, val screen: String? = null, val handStyle: String? = null,
     ) : DemoSwitchMessage
 
     /** Reads Hub preset [preset] (1..3) from step [from] (0..31). Answered like QUERY (no sequence). */
@@ -59,6 +66,32 @@ sealed interface DemoSwitchMessage {
     data class PresetStart(
         override val controllerId: String, val seq: Long, val demoId: String, val preset: Int, override val auth: String?,
     ) : DemoSwitchMessage
+
+    /** Reads the Hub-wide settings from installed demo [from] (0..63). Answered like PRESET_GET (no sequence). */
+    data class HubSettingsGet(override val controllerId: String, val nonce: String, val from: Int, override val auth: String?) : DemoSwitchMessage
+
+    /**
+     * One page of the Hub-wide settings: the four launch settings, this headset's device address ([player] / [group],
+     * -1 = not specified) and the installed [demos] from [from] that fit in one datagram ([demoCount] in all).
+     */
+    data class HubSettings(
+        override val controllerId: String, val nonce: String, val revision: Long,
+        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val staffWaiting: Boolean,
+        val player: Int, val group: Int, val demoCount: Int, val from: Int, val demos: List<HubDemo>,
+        override val auth: String?,
+    ) : DemoSwitchMessage
+
+    /** Overwrites the Hub-wide settings; [visibleDemos] are the installed demos shown as tiles. PRESET_SET rules. */
+    data class HubSettingsSet(
+        override val controllerId: String, val seq: Long, val demoId: String,
+        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val staffWaiting: Boolean,
+        val visibleDemos: List<String>, override val auth: String?,
+    ) : DemoSwitchMessage
+
+    /** Starts a Demo Session from [steps] (1..32, not stored); READY once the first demo has the foreground. */
+    data class HubStart(
+        override val controllerId: String, val seq: Long, val demoId: String, val steps: List<PresetStep>, override val auth: String?,
+    ) : DemoSwitchMessage
 }
 
 /** Authentication policy of this controller. [secret] null/empty means unsigned mode (only if [allowUnsigned]). */
@@ -81,6 +114,13 @@ object DemoSwitchProtocol {
     val PRESET_NUMBERS = 1..3
     /** Range of PRESET_GET / PRESET `from`. */
     val PRESET_FROM = 0..31
+    /** Installed demos of HUB_SETTINGS (`demo_count`, `demos`, `visible_demos`) and the range of its `from`. */
+    const val MAX_HUB_DEMOS = 64
+    val HUB_SETTINGS_FROM = 0..63
+    const val MAX_DEVICE_MODEL_CODE_POINTS = 64
+    val HAND_STYLES = setOf("ghost", "skin")
+    /** STATE `screen`: the completion panel / the Hub's finish screen is `completion`, the Hub's manage screen `manage`. */
+    val SCREENS = setOf("main", "completion", "manage")
 
     val STATUS_TYPES = setOf("ACK", "READY", "FAILED")
     val STATUS_CODES = setOf(
@@ -90,6 +130,7 @@ object DemoSwitchProtocol {
     val CONTROL_ACTIONS = setOf(
         "menu_open", "menu_close", "recenter", "restart", "scene", "haptics_on", "haptics_off",
         "haptics_ui_show", "haptics_ui_hide", "recenter_ui_show", "recenter_ui_hide", "tutorial_start",
+        "hand_style_ghost", "hand_style_skin", "session_next", "session_retry", "hub_top", "hub_replay",
     )
 
     private const val HEADER = "HAPBEAT-DEMO-SWITCH/1\n"
@@ -149,6 +190,11 @@ object DemoSwitchProtocol {
         field(this, "haptics_on", m.hapticsOn.toString()); field(this, "haptics_ui", m.hapticsUi.toString())
         field(this, "recenter_ui", m.recenterUi.toString()); field(this, "paused", m.paused.toString())
         field(this, "step_index", m.stepIndex.toString()); field(this, "step_count", m.stepCount.toString())
+        // The optional fields, in this order, only when present.
+        m.deviceModel?.let { field(this, "device_model", it) }
+        m.editor?.let { field(this, "editor", it.toString()) }
+        m.screen?.let { field(this, "screen", it) }
+        m.handStyle?.let { field(this, "hand_style", it) }
     }.toString()
 
     fun canonicalPresetGet(controllerId: String, nonce: String, preset: Int, from: Int): String =
@@ -176,6 +222,46 @@ object DemoSwitchProtocol {
         field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "preset", preset.toString())
     }.toString()
 
+    fun canonicalHubSettingsGet(controllerId: String, nonce: String, from: Int): String =
+        StringBuilder(HEADER + "HUB_SETTINGS_GET\n").apply {
+            field(this, "version", "1"); field(this, "type", "HUB_SETTINGS_GET"); field(this, "controller_id", controllerId)
+            field(this, "nonce", nonce); field(this, "from", from.toString())
+        }.toString()
+
+    fun canonicalHubSettings(m: DemoSwitchMessage.HubSettings): String = StringBuilder(HEADER + "HUB_SETTINGS\n").apply {
+        field(this, "version", "1"); field(this, "type", "HUB_SETTINGS"); field(this, "controller_id", m.controllerId)
+        field(this, "nonce", m.nonce); field(this, "revision", m.revision.toString())
+        field(this, "haptics_ui", m.hapticsUi.toString()); field(this, "recenter_ui", m.recenterUi.toString())
+        field(this, "hand_style", m.handStyle); field(this, "staff_waiting", m.staffWaiting.toString())
+        field(this, "player", m.player.toString()); field(this, "group", m.group.toString())
+        field(this, "demo_count", m.demoCount.toString()); field(this, "from", m.from.toString())
+        field(this, "demos", canonicalHubDemos(m.demos))
+    }.toString()
+
+    fun canonicalHubSettingsSet(
+        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, staffWaiting: Boolean,
+        visibleDemos: List<String>,
+    ): String = StringBuilder(HEADER + "COMMAND\n").apply {
+        field(this, "version", "1"); field(this, "type", "HUB_SETTINGS_SET"); field(this, "controller_id", controllerId)
+        field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID)
+        field(this, "haptics_ui", hapticsUi.toString()); field(this, "recenter_ui", recenterUi.toString())
+        field(this, "hand_style", handStyle); field(this, "staff_waiting", staffWaiting.toString())
+        field(this, "visible_demos", visibleDemos.joinToString("|"))
+    }.toString()
+
+    fun canonicalHubStart(controllerId: String, seq: Long, steps: List<PresetStep>): String = StringBuilder(HEADER + "COMMAND\n").apply {
+        field(this, "version", "1"); field(this, "type", "HUB_START"); field(this, "controller_id", controllerId)
+        field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "steps", canonicalSteps(steps))
+    }.toString()
+
+    /**
+     * Signed value of HUB_SETTINGS `demos`: `<demo_id>;<1|0>;<N>:<title>` joined with `|`, where N is the title's UTF-8
+     * byte count (a title may contain any character, so it is length-prefixed).
+     */
+    fun canonicalHubDemos(demos: List<HubDemo>): String = demos.joinToString("|") { demo ->
+        "${demo.demoId};${if (demo.visible) 1 else 0};${demo.title.toByteArray(Charsets.UTF_8).size}:${demo.title}"
+    }
+
     /**
      * Signed value of `steps`: `<demo_id>;<key=value,... sorted by key>;<1|0>` joined with `|` (retry omitted = 1).
      * Identifiers and option values cannot contain `|`, `;`, `,` or `=`, so this is unambiguous.
@@ -200,6 +286,13 @@ object DemoSwitchProtocol {
         is DemoSwitchMessage.PresetSet ->
             canonicalPresetSet(message.controllerId, message.seq, message.preset, message.name, message.visible, message.steps)
         is DemoSwitchMessage.PresetStart -> canonicalPresetStart(message.controllerId, message.seq, message.preset)
+        is DemoSwitchMessage.HubSettingsGet -> canonicalHubSettingsGet(message.controllerId, message.nonce, message.from)
+        is DemoSwitchMessage.HubSettings -> canonicalHubSettings(message)
+        is DemoSwitchMessage.HubSettingsSet -> canonicalHubSettingsSet(
+            message.controllerId, message.seq, message.hapticsUi, message.recenterUi, message.handStyle, message.staffWaiting,
+            message.visibleDemos,
+        )
+        is DemoSwitchMessage.HubStart -> canonicalHubStart(message.controllerId, message.seq, message.steps)
     }
 
     fun hmacHex(secret: String, canonical: String): String {
@@ -263,13 +356,7 @@ object DemoSwitchProtocol {
     ): String = withAuth(
         linkedMapOf(
             "version" to 1, "type" to "PRESET_SET", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
-            "preset" to preset, "name" to name, "visible" to visible,
-            "steps" to steps.map { step ->
-                linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
-                    if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
-                    if (!step.retry) put("retry", false)
-                }
-            },
+            "preset" to preset, "name" to name, "visible" to visible, "steps" to stepsJson(steps),
         ),
         config, canonicalPresetSet(controllerId, seq, preset, name, visible, steps),
     )
@@ -278,6 +365,40 @@ object DemoSwitchProtocol {
         linkedMapOf("version" to 1, "type" to "PRESET_START", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID, "preset" to preset),
         config, canonicalPresetStart(controllerId, seq, preset),
     )
+
+    fun buildHubSettingsGet(controllerId: String, nonce: String, from: Int, config: AuthConfig): String = withAuth(
+        linkedMapOf("version" to 1, "type" to "HUB_SETTINGS_GET", "controller_id" to controllerId, "nonce" to nonce, "from" to from),
+        config, canonicalHubSettingsGet(controllerId, nonce, from),
+    )
+
+    fun buildHubSettingsSet(
+        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, staffWaiting: Boolean,
+        visibleDemos: List<String>, config: AuthConfig,
+    ): String = withAuth(
+        linkedMapOf(
+            "version" to 1, "type" to "HUB_SETTINGS_SET", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
+            "haptics_ui" to hapticsUi, "recenter_ui" to recenterUi, "hand_style" to handStyle, "staff_waiting" to staffWaiting,
+            "visible_demos" to visibleDemos,
+        ),
+        config, canonicalHubSettingsSet(controllerId, seq, hapticsUi, recenterUi, handStyle, staffWaiting, visibleDemos),
+    )
+
+    /** HUB_START with [steps] as given (callers pass validated steps); `options` / `retry` are written as in PRESET_SET. */
+    fun buildHubStart(controllerId: String, seq: Long, steps: List<PresetStep>, config: AuthConfig): String = withAuth(
+        linkedMapOf(
+            "version" to 1, "type" to "HUB_START", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
+            "steps" to stepsJson(steps),
+        ),
+        config, canonicalHubStart(controllerId, seq, steps),
+    )
+
+    /** `steps` of PRESET_SET / HUB_START: `options` left out when empty and `retry` when true (signs the same). */
+    private fun stepsJson(steps: List<PresetStep>): List<Map<String, Any?>> = steps.map { step ->
+        linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
+            if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
+            if (!step.retry) put("retry", false)
+        }
+    }
 
     /**
      * Bytes of the PRESET_SET for these values in the worst case: the largest sequence and an `auth` field, so a plan
@@ -343,7 +464,7 @@ object DemoSwitchProtocol {
                 DemoSwitchMessage.Query(controllerId, nonceField(obj) ?: return null, auth)
             }
             "STATE" -> {
-                if (!onlyFields(obj, STATE_FIELDS)) return null
+                if (!onlyFields(obj, STATE_FIELDS, STATE_OPTIONAL_FIELDS)) return null
                 DemoSwitchMessage.State(
                     controllerId = controllerId,
                     nonce = nonceField(obj) ?: return null,
@@ -356,6 +477,12 @@ object DemoSwitchProtocol {
                     stepIndex = intField(obj, "step_index")?.takeIf { it in -1..32 } ?: return null,
                     stepCount = intField(obj, "step_count")?.takeIf { it in 0..32 } ?: return null,
                     auth = auth,
+                    deviceModel = if (obj.containsKey("device_model")) {
+                        stringField(obj, "device_model")?.takeIf { isDeviceModel(it) } ?: return null
+                    } else null,
+                    editor = if (obj.containsKey("editor")) boolField(obj, "editor") ?: return null else null,
+                    screen = if (obj.containsKey("screen")) stringField(obj, "screen")?.takeIf { it in SCREENS } ?: return null else null,
+                    handStyle = if (obj.containsKey("hand_style")) handStyleField(obj) ?: return null else null,
                 )
             }
             "PRESET_GET" -> {
@@ -399,6 +526,53 @@ object DemoSwitchProtocol {
                     presetField(obj) ?: return null, auth,
                 )
             }
+            "HUB_SETTINGS_GET" -> {
+                if (!onlyFields(obj, HUB_SETTINGS_GET_FIELDS)) return null
+                DemoSwitchMessage.HubSettingsGet(controllerId, nonceField(obj) ?: return null, hubFromField(obj) ?: return null, auth)
+            }
+            "HUB_SETTINGS" -> {
+                if (!onlyFields(obj, HUB_SETTINGS_FIELDS)) return null
+                DemoSwitchMessage.HubSettings(
+                    controllerId = controllerId,
+                    nonce = nonceField(obj) ?: return null,
+                    revision = intField(obj, "revision")?.takeIf { it in 0..MAX_SEQ } ?: return null,
+                    hapticsUi = boolField(obj, "haptics_ui") ?: return null,
+                    recenterUi = boolField(obj, "recenter_ui") ?: return null,
+                    handStyle = handStyleField(obj) ?: return null,
+                    staffWaiting = boolField(obj, "staff_waiting") ?: return null,
+                    player = deviceAxisField(obj, "player") ?: return null,
+                    group = deviceAxisField(obj, "group") ?: return null,
+                    demoCount = intField(obj, "demo_count")?.takeIf { it in 0..MAX_HUB_DEMOS }?.toInt() ?: return null,
+                    from = hubFromField(obj) ?: return null,
+                    demos = hubDemosField(obj) ?: return null,
+                    auth = auth,
+                )
+            }
+            "HUB_SETTINGS_SET" -> {
+                if (!onlyFields(obj, HUB_SETTINGS_SET_FIELDS)) return null
+                val visible = (obj["visible_demos"] as? JsonArray)?.items ?: return null
+                if (visible.size > MAX_HUB_DEMOS) return null
+                val ids = visible.map { (it as? JsonString)?.value?.takeIf { id -> isIdentifier(id) } ?: return null }
+                if (ids.toSet().size != ids.size) return null
+                DemoSwitchMessage.HubSettingsSet(
+                    controllerId = controllerId,
+                    seq = seqField(obj) ?: return null,
+                    demoId = stringField(obj, "demo_id")?.takeIf { it == HUB_DEMO_ID } ?: return null,
+                    hapticsUi = boolField(obj, "haptics_ui") ?: return null,
+                    recenterUi = boolField(obj, "recenter_ui") ?: return null,
+                    handStyle = handStyleField(obj) ?: return null,
+                    staffWaiting = boolField(obj, "staff_waiting") ?: return null,
+                    visibleDemos = ids,
+                    auth = auth,
+                )
+            }
+            "HUB_START" -> {
+                if (!onlyFields(obj, HUB_START_FIELDS)) return null
+                DemoSwitchMessage.HubStart(
+                    controllerId, seqField(obj) ?: return null, stringField(obj, "demo_id")?.takeIf { it == HUB_DEMO_ID } ?: return null,
+                    presetStepsField(obj)?.takeIf { it.isNotEmpty() } ?: return null, auth,
+                )
+            }
             else -> null
         }
     }
@@ -413,6 +587,34 @@ object DemoSwitchProtocol {
         intField(obj, "from")?.takeIf { it in PRESET_FROM.first..PRESET_FROM.last }?.toInt()
 
     private fun presetNameField(obj: Map<String, JsonValue>): String? = stringField(obj, "name")?.takeIf { isPresetName(it) }
+
+    /** STATE `device_model`: 1..64 code points without C0 / C1 control characters (U+0000..U+001F, U+007F..U+009F). */
+    fun isDeviceModel(value: String): Boolean =
+        value.codePointCount(0, value.length) in 1..MAX_DEVICE_MODEL_CODE_POINTS && value.none { it in '\u0000'..'\u001f' || it in '\u007f'..'\u009f' }
+
+    private fun handStyleField(obj: Map<String, JsonValue>): String? = stringField(obj, "hand_style")?.takeIf { it in HAND_STYLES }
+
+    private fun hubFromField(obj: Map<String, JsonValue>): Int? =
+        intField(obj, "from")?.takeIf { it in HUB_SETTINGS_FROM.first..HUB_SETTINGS_FROM.last }?.toInt()
+
+    /** Device address axis: 1..99, or -1 when not specified. */
+    private fun deviceAxisField(obj: Map<String, JsonValue>, name: String): Int? =
+        intField(obj, name)?.takeIf { it == -1L || it in 1..99 }?.toInt()
+
+    /** HUB_SETTINGS `demos` (0..64): each exactly `demo_id`, `title` (the preset name rules), `visible`. */
+    private fun hubDemosField(obj: Map<String, JsonValue>): List<HubDemo>? {
+        val items = (obj["demos"] as? JsonArray)?.items ?: return null
+        if (items.size > MAX_HUB_DEMOS) return null
+        return items.map { item ->
+            val f = (item as? JsonObject)?.fields ?: return null
+            if (f.keys != setOf("demo_id", "title", "visible")) return null
+            HubDemo(
+                identifierField(f, "demo_id") ?: return null,
+                stringField(f, "title")?.takeIf { PresetTransfer.isValidName(it) } ?: return null,
+                boolField(f, "visible") ?: return null,
+            )
+        }
+    }
 
     /** `steps` (0..32): each `demo_id`, optional `options` (<= 8, identifier keys, option-value values), optional `retry`. */
     private fun presetStepsField(obj: Map<String, JsonValue>): List<PresetStep>? {
@@ -453,10 +655,17 @@ object DemoSwitchProtocol {
     private val PRESET_FIELDS = PRESET_GET_FIELDS + setOf("revision", "name", "visible", "step_count", "steps")
     private val PRESET_START_FIELDS = SWITCH_FIELDS + "preset"
     private val PRESET_SET_FIELDS = PRESET_START_FIELDS + setOf("name", "visible", "steps")
+    private val STATE_OPTIONAL_FIELDS = setOf("device_model", "editor", "screen", "hand_style")
+    private val HUB_SETTINGS_GET_FIELDS = DISCOVER_FIELDS + "from"
+    private val HUB_SETTINGS_FIELDS = HUB_SETTINGS_GET_FIELDS + setOf(
+        "revision", "haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "player", "group", "demo_count", "demos",
+    )
+    private val HUB_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "visible_demos")
+    private val HUB_START_FIELDS = SWITCH_FIELDS + "steps"
 
-    /** Required fields present and no field other than those plus optional auth. */
-    private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>): Boolean =
-        obj.keys.containsAll(required) && obj.keys.all { it in required || it == "auth" }
+    /** Required fields present and no field other than those, [optional] ones and auth. */
+    private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>, optional: Set<String> = emptySet()): Boolean =
+        obj.keys.containsAll(required) && obj.keys.all { it in required || it in optional || it == "auth" }
 
     private fun stringField(obj: Map<String, JsonValue>, name: String): String? = (obj[name] as? JsonString)?.value
     private fun intField(obj: Map<String, JsonValue>, name: String): Long? = (obj[name] as? JsonNumber)?.longOrNull()
@@ -515,6 +724,16 @@ object DemoSwitchProtocol {
     /** PRESET acceptance: from the Quest the PRESET_GET went to, own controller ID, that request's nonce, auth rule. */
     fun acceptPreset(
         message: DemoSwitchMessage.Preset, source: String, controllerId: String, requestTarget: (nonce: String) -> String?,
+        config: AuthConfig,
+    ): Boolean {
+        if (message.controllerId != controllerId) return false
+        if (requestTarget(message.nonce) != source) return false
+        return authAccepted(message, config)
+    }
+
+    /** HUB_SETTINGS acceptance: from the Quest the HUB_SETTINGS_GET went to, own controller ID, that request's nonce, auth rule. */
+    fun acceptHubSettings(
+        message: DemoSwitchMessage.HubSettings, source: String, controllerId: String, requestTarget: (nonce: String) -> String?,
         config: AuthConfig,
     ): Boolean {
         if (message.controllerId != controllerId) return false

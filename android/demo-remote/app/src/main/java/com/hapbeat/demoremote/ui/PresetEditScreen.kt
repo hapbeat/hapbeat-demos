@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,10 +32,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hapbeat.demoremote.ControlCatalog
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.DemoOption
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.RemoteViewModel
+import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPreset
 import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.PresetStep
@@ -53,8 +56,9 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
     val draft = HubPreset(name.trim(), visible, steps.toList())
     // A change after a save makes its result stale.
     LaunchedEffect(draft) { if (!vm.presetSaving) vm.clearPresetSaveStatus() }
+    val hubDemos = vm.selectedHubDemos
     val remaining = HubPresets.remainingBytes(vm.controllerId, number, draft)
-    val problem = HubPresets.problem(vm.controllerId, number, draft)
+    val problem = HubPresets.problem(vm.controllerId, number, draft, hubDemos)
     val block = vm.hubPresetBlockReason
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -70,6 +74,7 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            HubManageNotice(vm)
             OutlinedTextField(
                 value = name, onValueChange = { name = takeCodePoints(it, NAME_MAX_CODE_POINTS) }, label = { Text("名前（空でも可）") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -82,7 +87,7 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
             if (steps.isEmpty()) Text("デモが無いまま保存すると空きになります", style = MaterialTheme.typography.bodySmall)
             steps.forEachIndexed { i, step ->
                 StepRow(
-                    i, step,
+                    i, step, hubDemos,
                     onChange = { steps[i] = it },
                     onUp = { if (i > 0) { steps.removeAt(i); steps.add(i - 1, step) } },
                     onDown = { if (i < steps.lastIndex) { steps.removeAt(i); steps.add(i + 1, step) } },
@@ -90,7 +95,8 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
                 )
             }
             Text("デモを追加", style = MaterialTheme.typography.titleSmall)
-            ButtonGrid(DemoCatalog.sessionApps, columns = 3) { app, modifier ->
+            // The Hub's installed demos once read (HUB_SETTINGS); a demo this app does not know is added with its defaults.
+            ButtonGrid(DemoCatalog.sessionCandidates(hubDemos), columns = 3) { app, modifier ->
                 DemoTile(app, enabled = steps.size < DemoSwitchProtocol.MAX_PRESET_STEPS, modifier = modifier, outlined = true) {
                     steps.add(PresetStep(app.demoId))
                 }
@@ -127,11 +133,12 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
 
 @Composable
 private fun StepRow(
-    i: Int, step: PresetStep, onChange: (PresetStep) -> Unit, onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit,
+    i: Int, step: PresetStep, hubDemos: List<HubDemo>?, onChange: (PresetStep) -> Unit, onUp: () -> Unit, onDown: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("${i + 1}. ${DemoCatalog.labelFor(step.demoId)}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${i + 1}. ${DemoCatalog.labelFor(step.demoId, hubDemos)}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton(onClick = onUp, modifier = Modifier.width(48.dp)) { Text("↑") }
             TextButton(onClick = onDown, modifier = Modifier.width(48.dp)) { Text("↓") }
             TextButton(onClick = onRemove, modifier = Modifier.width(56.dp)) { Text("削除") }
@@ -142,7 +149,7 @@ private fun StepRow(
         }
         Row(Modifier.fillMaxWidth().clickable { onChange(step.copy(retry = !step.retry)) }, verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = step.retry, onCheckedChange = { onChange(step.copy(retry = it)) })
-            Text("失敗時にやり直す", style = MaterialTheme.typography.bodySmall)
+            Text("もう一度（完了後にもう一度遊べる）", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -173,11 +180,31 @@ private const val NAME_MAX_CODE_POINTS = 40
 private fun takeCodePoints(text: String, max: Int): String =
     if (text.codePointCount(0, text.length) <= max) text else text.substring(0, text.offsetByCodePoints(0, max))
 
-/** "Energy Duel（チュートリアル: なし）" plus "・やり直しなし" when retry is off. */
-fun stepSummary(step: PresetStep): String {
+/** "Energy Duel（チュートリアル: なし）" plus "・もう一度なし" when retry is off ([hubDemos]: names of demos this app does not know). */
+fun stepSummary(step: PresetStep, hubDemos: List<HubDemo>? = null): String {
     val options = DemoCatalog.optionSummary(step.demoId, step.options)
-    return DemoCatalog.labelFor(step.demoId) + (if (options.isEmpty()) "" else "（$options）") + if (step.retry) "" else "・やり直しなし"
+    return DemoCatalog.labelFor(step.demoId, hubDemos) + (if (options.isEmpty()) "" else "（$options）") + if (step.retry) "" else "・もう一度なし"
 }
 
 /** "Hand Demo → Energy Duel（モード: 試合）" style one-line summary of a demo order. */
-fun stepsSummary(steps: List<PresetStep>): String = steps.joinToString(" → ") { stepSummary(it) }
+fun stepsSummary(steps: List<PresetStep>, hubDemos: List<HubDemo>? = null): String = steps.joinToString(" → ") { stepSummary(it, hubDemos) }
+
+/**
+ * Fixed-height area: while the selected HMD's STATE says the Hub's manage screen is open (it refuses preset and settings
+ * writes), says so with 管理画面を閉じる (CONTROL hub_top); blank otherwise.
+ */
+@Composable
+fun HubManageNotice(vm: RemoteViewModel) {
+    val state = vm.selectedQuest?.remoteState
+    val open = state?.currentDemoId == DemoCatalog.HUB_ID && state.screen == "manage"
+    Box(Modifier.fillMaxWidth().height(ButtonMinHeight)) {
+        if (open) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Hub の管理画面が開いています", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = StatusRed, maxLines = 2)
+                ActionButton(ControlCatalog.hubTop.label, enabled = vm.demoSwitchBlockReason == null, outlined = true) {
+                    vm.sendControl(ControlCatalog.hubTop)
+                }
+            }
+        }
+    }
+}

@@ -67,32 +67,58 @@ object HubPresets {
         DemoSwitchProtocol.presetSetWorstCaseBytes(controllerId, number, preset.name, preset.visible, normalize(preset.steps))
 
     /**
-     * Why [preset] cannot be written to slot [number], or null: the name rules, 0..32 steps, the allow list (demos
-     * the Hub can start), each demo's option table, then the 1024-byte limit.
+     * Why [preset] cannot be written to slot [number], or null: the name rules, 0..32 steps, then [stepsProblem], then
+     * the 1024-byte limit.
      */
-    fun problem(controllerId: String, number: Int, preset: HubPreset): String? {
+    fun problem(controllerId: String, number: Int, preset: HubPreset, hubDemos: List<HubDemo>? = null): String? {
         if (number !in DemoSwitchProtocol.PRESET_NUMBERS) return "プリセットの番号が正しくありません"
         if (!DemoSwitchProtocol.isPresetName(preset.name)) return "名前が正しくありません（40 文字まで・改行なし）"
         if (preset.steps.size > DemoSwitchProtocol.MAX_PRESET_STEPS) return "デモは ${DemoSwitchProtocol.MAX_PRESET_STEPS} 本までです"
-        for (step in preset.steps) {
-            if (DemoCatalog.sessionApps.none { it.demoId == step.demoId }) return "リモコンに登録されていないデモです: ${step.demoId}"
-            try {
-                DemoCatalog.requireValidStep(step.demoId, step.options)
-            } catch (_: IllegalArgumentException) {
-                return "${DemoCatalog.labelFor(step.demoId)} にない設定があります"
-            }
-        }
+        stepsProblem(preset.steps, hubDemos)?.let { return it }
         if (remainingBytes(controllerId, number, preset) < 0) return "大きすぎて送れません（デモ数か名前を減らしてください）"
         return null
     }
 
-    /** FAILED of PRESET_SET / PRESET_START in words; [message] names the first offending demo_id where the Hub gives one. */
-    fun failureText(code: String, message: String): String {
-        val demo = message.takeIf { id -> DemoCatalog.sessionApps.any { it.demoId == id } }
+    /**
+     * Why [steps] would be refused by the Hub (PRESET_SET / HUB_START), or null. With the Hub's installed demos
+     * ([hubDemos], from HUB_SETTINGS) every demo must be installed there; a demo this app knows must use its option
+     * table, and one it does not know is sent without options (the demo's defaults). Without that list only this app's
+     * session demos are allowed.
+     */
+    fun stepsProblem(steps: List<PresetStep>, hubDemos: List<HubDemo>?): String? {
+        for (step in steps) {
+            val label = DemoCatalog.labelFor(step.demoId, hubDemos)
+            val known = DemoCatalog.sessionApps.any { it.demoId == step.demoId }
+            if (hubDemos != null) {
+                if (hubDemos.none { it.demoId == step.demoId }) return "$label が HMD の Hub に入っていません"
+            } else if (!known) {
+                return "リモコンに登録されていないデモです: ${step.demoId}"
+            }
+            if (!known) {
+                if (step.options.isNotEmpty()) return "$label にない設定があります"
+                continue
+            }
+            try {
+                DemoCatalog.requireValidStep(step.demoId, step.options)
+            } catch (_: IllegalArgumentException) {
+                return "$label にない設定があります"
+            }
+        }
+        return null
+    }
+
+    /**
+     * FAILED of PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START in words; [message] names the first offending
+     * demo_id where the Hub gives one (a demo of this app or of [hubDemos]).
+     */
+    fun failureText(code: String, message: String, hubDemos: List<HubDemo>? = null): String {
+        val demo = message.takeIf { id ->
+            DemoCatalog.sessionApps.any { it.demoId == id } || hubDemos?.any { it.demoId == id } == true
+        }
         return when {
             message == DemoSwitchProtocol.NOT_IN_FOREGROUND_MESSAGE -> HUB_NOT_FOREGROUND
-            code == "invalid_payload" && demo != null -> "${DemoCatalog.labelFor(demo)} にない設定です（Hub とリモコンの版を確認）"
-            code == "not_allowed" && demo != null -> "${DemoCatalog.labelFor(demo)} が HMD にインストールされていません"
+            code == "invalid_payload" && demo != null -> "${DemoCatalog.labelFor(demo, hubDemos)} にない設定です（Hub とリモコンの版を確認）"
+            code == "not_allowed" && demo != null -> "${DemoCatalog.labelFor(demo, hubDemos)} が HMD にインストールされていません"
             code == "not_allowed" -> "Hub が受け付けませんでした（管理画面の表示中・起動中・デモが無い枠など）" +
                 if (message.isEmpty()) "" else ": $message"
             code == "launch_failed" -> "Hub で失敗しました" + if (message.isEmpty()) "" else ": $message"
@@ -103,4 +129,6 @@ object HubPresets {
 
     const val HUB_NOT_RUNNING = "Hub が起動していません（「Hub を開く」で開けます）"
     const val HUB_NOT_FOREGROUND = "Hub が前面にありません（HMD 内でメニューや一時停止を閉じてください）"
+    /** STATE `screen` manage: the Hub refuses preset and settings writes until the manage screen is closed. */
+    const val HUB_MANAGE_OPEN = "Hub の管理画面が開いています（閉じてから操作してください）"
 }

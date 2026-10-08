@@ -1,5 +1,7 @@
 package com.hapbeat.demoremote
 
+import com.hapbeat.demoremote.data.HubDemo
+import com.hapbeat.demoremote.protocol.DemoSwitchMessage
 import com.hapbeat.demoremote.protocol.MiniJson
 
 /** One value of a demo option ([label]: the descriptor's Japanese label). */
@@ -65,11 +67,21 @@ object DemoCatalog {
 
     val hub: DemoApp get() = apps.first { it.demoId == HUB_ID }
 
-    /** Display name for a demo ID; unknown IDs are shown as-is. */
-    fun labelFor(demoId: String?): String = apps.firstOrNull { it.demoId == demoId }?.label ?: (demoId ?: "-")
+    /** Display name for a demo ID: this table, else the Hub's display name from [hubDemos], else the ID as-is. */
+    fun labelFor(demoId: String?, hubDemos: List<HubDemo>? = null): String = apps.firstOrNull { it.demoId == demoId }?.label
+        ?: hubDemos?.firstOrNull { it.demoId == demoId }?.title ?: (demoId ?: "-")
 
     /** Demo IDs that can start a one-demo Hub session (everything but the Hub itself). */
     val sessionApps: List<DemoApp> get() = apps.filter { it.demoId != HUB_ID }
+
+    /**
+     * Demos offered for a session or a preset: the demos installed on the Hub ([hubDemos], from HUB_SETTINGS) in the
+     * Hub's order, or this table's session demos while the Hub's list is unknown. A demo this table does not know is
+     * offered under the Hub's display name with no package (adb cannot start it) and no options (the demo's defaults).
+     */
+    fun sessionCandidates(hubDemos: List<HubDemo>?): List<DemoApp> = hubDemos?.map { demo ->
+        sessionApps.firstOrNull { it.demoId == demo.demoId } ?: DemoApp(demo.demoId, demo.title, packageName = "")
+    } ?: sessionApps
 
     /** Descriptor options of a session demo (empty for unknown IDs). */
     fun optionsFor(demoId: String): List<DemoOption> = sessionApps.firstOrNull { it.demoId == demoId }?.options.orEmpty()
@@ -146,8 +158,11 @@ object DemoCatalog {
 /** One CONTROL button: action + scene_id (empty except for scene). [demoId]: only for that foreground demo. */
 data class ControlAction(val label: String, val action: String, val sceneId: String = "", val demoId: String? = null)
 
-/** A titled row group on the 操作 tab. */
-data class ControlGroup(val title: String, val actions: List<ControlAction>)
+/**
+ * A titled row group on the 操作 tab. [stateful]: its buttons depend on the demo's STATE, and a fixed line under the
+ * group says why they cannot be pressed.
+ */
+data class ControlGroup(val title: String, val actions: List<ControlAction>, val stateful: Boolean = false)
 
 object ControlCatalog {
     val menuOpen = ControlAction("メニューを開く", "menu_open")
@@ -170,6 +185,18 @@ object ControlCatalog {
             ControlAction("リセットボタン 表示", "recenter_ui_show"),
             ControlAction("リセットボタン 非表示", "recenter_ui_hide"),
         )),
+        ControlGroup("手の見た目", listOf(
+            ControlAction("ゴースト", "hand_style_ghost"),
+            ControlAction("肌", "hand_style_skin"),
+        ), stateful = true),
+        ControlGroup("セッション", listOf(
+            ControlAction("次へ", "session_next"),
+            ControlAction("もう一度", "session_retry"),
+        ), stateful = true),
+        ControlGroup("Hub", listOf(
+            ControlAction("トップへ", "hub_top", demoId = DemoCatalog.HUB_ID),
+            ControlAction("最初から（同じプラン）", "hub_replay", demoId = DemoCatalog.HUB_ID),
+        ), stateful = true),
         ControlGroup("Volley", listOf(
             // Same IDs as the Volley descriptor's scenes (block is its default).
             ControlAction("スパイク＋ブロック", "scene", "block", DemoCatalog.VOLLEY_ID),
@@ -182,4 +209,48 @@ object ControlCatalog {
             ControlAction("フリープレイ", "scene", "free", DemoCatalog.ENERGY_DUEL_ID),
         )),
     )
+
+    /** CONTROL `hub_top`: closes the Hub's manage screen (also offered where a manage screen blocks a write). */
+    val hubTop = ControlAction("管理画面を閉じる", "hub_top", demoId = DemoCatalog.HUB_ID)
+
+    /** Actions that leave the current scene or demo: READY comes after a launch, so they wait as long as SWITCH. */
+    val LAUNCHING_ACTIONS = setOf("session_next", "session_retry", "hub_replay")
+
+    /**
+     * Why [control] cannot be sent to the demo [state] describes (the last STATE, null = none), or null. Only the
+     * STATE-dependent actions are checked here; a missing optional field counts as "not supported / unknown".
+     */
+    fun unavailableReason(control: ControlAction, state: DemoSwitchMessage.State?): String? = when (control.action) {
+        "hand_style_ghost", "hand_style_skin" -> when {
+            state == null -> STATE_UNKNOWN
+            state.handStyle == null -> "このデモは共通の手を使っていないか、手の見た目の切替に未対応です"
+            else -> null
+        }
+        "session_next" -> when {
+            state == null -> STATE_UNKNOWN
+            state.stepIndex < 0 -> "セッション中（Hub から始めたデモ）だけ使えます"
+            else -> null
+        }
+        "session_retry" -> when {
+            state == null -> STATE_UNKNOWN
+            state.currentDemoId == DemoCatalog.HUB_ID || state.screen != "completion" -> "デモの完了画面が出ているときだけ使えます"
+            else -> null
+        }
+        "hub_top" -> when {
+            state == null -> STATE_UNKNOWN
+            state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
+            state.screen == null -> "Hub の画面が分かりません（Hub の版が古い）"
+            state.screen == "main" -> "Hub はトップ画面です"
+            else -> null
+        }
+        "hub_replay" -> when {
+            state == null -> STATE_UNKNOWN
+            state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
+            state.screen != "completion" -> "Hub の終了画面が出ているときだけ使えます"
+            else -> null
+        }
+        else -> null
+    }
+
+    private const val STATE_UNKNOWN = "デモの状態が分かりません（状態問い合わせに応答なし）"
 }

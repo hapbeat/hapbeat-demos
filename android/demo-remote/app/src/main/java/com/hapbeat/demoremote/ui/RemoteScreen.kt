@@ -66,12 +66,15 @@ import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
+import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 @Composable
-fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}) {
+fun RemoteScreen(
+    vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}, onOpenHubSettings: () -> Unit = {},
+) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -85,7 +88,7 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: 
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ControlColumn(vm, onOpenSettings, onEditPreset)
+                    ControlColumn(vm, onOpenSettings, onEditPreset, onOpenHubSettings)
                 }
             }
         } else {
@@ -100,7 +103,7 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: 
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     QuestBar(vm, onOpenSettings)
-                    ActionsAndLog(vm, onEditPreset)
+                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings)
                 }
             }
         }
@@ -108,13 +111,13 @@ fun RemoteScreen(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: 
 }
 
 @Composable
-private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit) {
+private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit) {
     QuestBar(vm, onOpenSettings)
-    ActionsAndLog(vm, onEditPreset)
+    ActionsAndLog(vm, onEditPreset, onOpenHubSettings)
 }
 
 @Composable
-private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
+private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     // The two most urgent actions stay one tap away: back to the Hub, and pause (shared pause panel).
@@ -139,7 +142,7 @@ private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (tab) {
-            0 -> SessionTab(vm, onEditPreset)
+            0 -> SessionTab(vm, onEditPreset, onOpenHubSettings)
             1 -> SwitchTab(vm)
             2 -> ControlTab(vm)
             else -> LaunchTab(vm)
@@ -155,8 +158,10 @@ private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
 private fun QuestBar(vm: RemoteViewModel, onOpenSettings: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (vm.quests.isEmpty()) Text("Quest が見つかっていません", Modifier.padding(vertical = 16.dp))
-            vm.quests.forEach { q ->
+            // Responders inside a development editor are left out unless settings ask for them (STATE `editor`).
+            val listed = vm.listedQuests
+            if (listed.isEmpty()) Text("Quest が見つかっていません", Modifier.padding(vertical = 16.dp))
+            listed.forEach { q ->
                 FilterChip(
                     selected = q.ip == vm.selectedIp,
                     onClick = { vm.selectQuest(q.ip) },
@@ -327,11 +332,25 @@ private fun ControlTab(vm: RemoteViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     StateSummary(vm.selectedQuest)
+    val state = vm.selectedQuest?.remoteState
     ControlCatalog.groups.forEach { group ->
         Text(group.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
         ButtonGrid(group.actions, columns = 2) { control, modifier ->
-            val allowed = enabled && (control.demoId == null || control.demoId == current)
-            ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = true) { vm.sendControl(control) }
+            val allowed = enabled && (control.demoId == null || control.demoId == current) &&
+                ControlCatalog.unavailableReason(control, state) == null
+            // The current hand look is the filled one (same size, so nothing moves).
+            val currentLook = state?.handStyle != null && control.action == "hand_style_${state.handStyle}"
+            ActionButton(control.label, enabled = allowed, modifier = modifier, outlined = !currentLook) { vm.sendControl(control) }
+        }
+        if (group.stateful) {
+            // Fixed one line: why a button of this group is gray (from the last STATE), else blank.
+            Text(
+                group.actions.firstNotNullOfOrNull { ControlCatalog.unavailableReason(it, state) } ?: " ",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -359,13 +378,15 @@ private fun StateSummary(quest: QuestState?) {
 }
 
 @Composable
-private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
+private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit) {
     val quest = vm.selectedQuest
     // Hub presets live on the selected HMD's Hub and go over Demo Switch (no adb).
     val block = vm.hubPresetBlockReason
     val slots = vm.selectedHubPresets
+    val hubDemos = vm.selectedHubDemos
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("プリセット（Hub に保存）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+        TextButton(onClick = onOpenHubSettings, enabled = quest != null, modifier = Modifier.width(112.dp)) { Text("Hub の設定") }
         // Fixed width so the label swap does not shift the heading.
         TextButton(
             onClick = vm::reloadHubPresets,
@@ -393,7 +414,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
     }
     var confirmStart by remember { mutableStateOf<Int?>(null) }
     slots.forEachIndexed { i, slot ->
-        HubPresetRow(i + 1, slot, stale = block != null, canWrite = block == null, onEdit = { onEditPreset(i + 1) }, onStart = { confirmStart = i + 1 })
+        HubPresetRow(i + 1, slot, hubDemos, stale = block != null, canWrite = block == null, onEdit = { onEditPreset(i + 1) }, onStart = { confirmStart = i + 1 })
     }
     QrImportButton(vm, Modifier.fillMaxWidth())
     // Started by the Hub from what it stores: show that content once more before starting.
@@ -405,7 +426,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("${quest?.label ?: "-"}：${slot?.let { presetTitle(it) } ?: "-"}", fontWeight = FontWeight.Bold)
-                    slot?.preset?.steps?.forEachIndexed { n, step -> Text("${n + 1}. ${stepSummary(step)}", style = MaterialTheme.typography.bodySmall) }
+                    slot?.preset?.steps?.forEachIndexed { n, step -> Text("${n + 1}. ${stepSummary(step, hubDemos)}", style = MaterialTheme.typography.bodySmall) }
                     if (slot != null && slot.unreadable) {
                         Text("${slot.preset.steps.size + 1} 本目以降は読めません（全 ${slot.stepCount} 本）", style = MaterialTheme.typography.bodySmall)
                     }
@@ -415,25 +436,37 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
             dismissButton = { TextButton(onClick = { confirmStart = null }) { Text("やめる") } },
         )
     }
-    val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
-    val connected = quest?.adb == AdbState.CONNECTED && hubInstalled
     Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
     Text(
-        if (connected) "Hub 経由でセッション（チュートリアル・完了画面付き）として始めます。前面アプリに関係なく使えます"
-        else "adb 接続後に使えます",
+        "Hub 経由でセッション（チュートリアル・完了画面付き）として始めます。Hub が前面ならそのまま、ほかのデモが前面なら" +
+            " adb で（adb が無ければ Hub に切り替えてから）始めます",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    // Pick a demo, then its descriptor options (same table as the preset editor), then start.
+    // Pick a demo, then its descriptor options (same table as the preset editor), then start. The Hub's own list of
+    // installed demos is used once read.
+    val candidates = DemoCatalog.sessionCandidates(hubDemos)
     var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
     var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    ButtonGrid(DemoCatalog.sessionApps, columns = 3) { app, modifier ->
+    ButtonGrid(candidates, columns = 3) { app, modifier ->
         DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId) { chosen = app.demoId }
     }
+    val app = candidates.firstOrNull { it.demoId == chosen }
     OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
-    val app = DemoCatalog.sessionApps.first { it.demoId == chosen }
-    val installed = quest?.installed?.contains(app.packageName) == true
-    ActionButton("このデモで始める", enabled = connected && installed, modifier = Modifier.fillMaxWidth()) {
+    val reason = when {
+        app == null -> "上からデモを選んでください"
+        vm.sessionStarting -> "開始中…"
+        else -> vm.sessionStartBlockReason(app)
+    }
+    // Fixed one line: why the button is gray.
+    Text(
+        reason ?: " ",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    ActionButton("このデモで始める", enabled = reason == null, modifier = Modifier.fillMaxWidth()) {
         vm.startSession(demoId = chosen, options = options)
     }
 }
@@ -443,7 +476,9 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit) {
  * [stale]: the Hub is not in front, so this is the last read content (gray). Fixed height: the text changes only.
  */
 @Composable
-private fun HubPresetRow(number: Int, slot: HubPresetSlot?, stale: Boolean, canWrite: Boolean, onEdit: () -> Unit, onStart: () -> Unit) {
+private fun HubPresetRow(
+    number: Int, slot: HubPresetSlot?, hubDemos: List<HubDemo>?, stale: Boolean, canWrite: Boolean, onEdit: () -> Unit, onStart: () -> Unit,
+) {
     val color = if (stale) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else Color.Unspecified
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
@@ -470,7 +505,7 @@ private fun HubPresetRow(number: Int, slot: HubPresetSlot?, stale: Boolean, canW
                     slot == null -> "Hub を開くと読み込みます"
                     slot.unreadable -> "大きすぎて読めないデモがあります（Hub で編集してください）"
                     slot.stepCount == 0 -> "「編集」でデモを選んで作れます"
-                    else -> stepsSummary(slot.preset.steps)
+                    else -> stepsSummary(slot.preset.steps, hubDemos)
                 },
                 style = MaterialTheme.typography.bodySmall, color = color, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis,
             )

@@ -98,6 +98,11 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
         set(value) { prefs.edit().putBoolean(KEY_KEEP_SCREEN_ON, value).apply() }
 
+    /** List responders that run inside a development editor (STATE `editor`) too. */
+    var showEditors: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_EDITORS, false)
+        set(value) { prefs.edit().putBoolean(KEY_SHOW_EDITORS, value).apply() }
+
     private companion object {
         const val KEY_CONTROLLER_ID = "controller_id"
         const val KEY_NEXT_SEQ = "next_seq"
@@ -112,5 +117,6 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_MIRROR_BOTH_EYES = "mirror_both_eyes"
         const val KEY_MIRROR_ENABLED = "mirror_enabled"
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+        const val KEY_SHOW_EDITORS = "show_editors"
     }
 }

@@ -131,6 +131,12 @@ private fun ControllerSection(vm: RemoteViewModel) {
 private fun QuestListSection(vm: RemoteViewModel) {
     SectionTitle("Quest 一覧")
     vm.quests.forEach { q -> QuestRow(vm, q) }
+    LabeledSwitch("PC のエディタも表示", vm.showEditors, enabled = true, onChange = vm::setShowEditorsSetting)
+    Text(
+        "Unity / Unreal のエディタで動いているデモも Demo Switch に応答します。既定では HMD の一覧に出しません。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     var ip by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
