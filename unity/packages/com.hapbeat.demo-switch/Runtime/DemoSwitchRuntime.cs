@@ -6,15 +6,27 @@ using UnityEngine;
 
 namespace Hapbeat.DemoSwitch
 {
+    /// <summary>
+    /// Keeps UDP 7710 bound while the process lives (contracts: Transport and lifecycle). Out of the foreground
+    /// (<see cref="OnApplicationFocus"/> false or <see cref="OnApplicationPause"/> true) it still answers DISCOVER
+    /// and QUERY (STATE `foreground: false`) but refuses SWITCH / CONTROL; only a hand-over stops the listener.
+    /// </summary>
     internal sealed class DemoSwitchRuntime : MonoBehaviour
     {
+        /// <summary>A failed bind (e.g. the previous application's socket still open) is retried every 0.25 s for 5 s.</summary>
+        internal const float BindRetryIntervalSeconds = 0.25f;
+        internal const int BindRetryAttempts = 20;
+        internal const string NotForegroundMessage = "not in foreground";
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private DemoSwitchSettings _settings;
         private DemoSwitchUdpTransport _transport;
         private DemoSwitchSequenceGuard _sequenceGuard;
         private IDemoSwitchLaunchAdapter _launcher;
+        private readonly DemoSwitchMulticastLock _multicastLock = new DemoSwitchMulticastLock();
         private bool _foreground = true;
         private bool _listenerStarted;
+        private Coroutine _bindRetry;
+        private Coroutine _control;
         private DemoSwitchLaunchContext? _pendingLaunchContext;
         private float _nextDropLogTime;
         private bool _controlBusy;
@@ -40,7 +52,7 @@ namespace Hapbeat.DemoSwitch
             _transport = new DemoSwitchUdpTransport();
             _sequenceGuard = new DemoSwitchSequenceGuard(new PlayerPrefsSequenceStore());
             _launcher = DemoSwitchLaunchAdapter.Create();
-            StartForegroundReceiver();
+            StartReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
             gameObject.AddComponent<DemoSessionHapticsButton>();
             gameObject.AddComponent<DemoSessionRecenterButton>();
@@ -113,6 +125,20 @@ namespace Hapbeat.DemoSwitch
                 HandleDiscover(json, datagram.Source);
                 return;
             }
+            if (messageType == "QUERY")
+            {
+                HandleQuery(json, datagram.Source);
+                return;
+            }
+            if (messageType == "PRESET_GET" || messageType == "PRESET_SET" || messageType == "PRESET_START")
+            {
+                // Only the Hub registers a preset host; every other runtime drops these without a reply.
+                var host = DemoSwitchPresets.Host;
+                if (host == null) Debug.LogWarning("[Demo Switch] Rejected " + messageType + ": this runtime has no Hub presets.");
+                else if (messageType == "PRESET_GET") HandlePresetGet(json, datagram.Source, host);
+                else HandlePresetCommand(json, datagram.Source, host);
+                return;
+            }
 
             var parsed = DemoSwitchProtocol.ParseCommand(json);
             if (!parsed.Success)
@@ -130,6 +156,11 @@ namespace Hapbeat.DemoSwitch
             if (string.IsNullOrEmpty(_settings.SharedSecret) && !_settings.AllowUnsignedOnIsolatedLan)
             {
                 SendFailure(datagram.Source, command, "unsigned_disabled", "Unsigned command mode is disabled.");
+                return;
+            }
+            if (!_foreground)
+            {
+                SendFailure(datagram.Source, command, "not_allowed", NotForegroundMessage);
                 return;
             }
             if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished)
@@ -189,18 +220,75 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        private void HandleQuery(string json, IPEndPoint source)
+        {
+            var result = DemoSwitchQueryHandler.Handle(json, query => BuildState(query, _settings.CurrentDemoId, _foreground), _settings.SharedSecret,
+                _settings.AllowUnsignedOnIsolatedLan);
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected QUERY payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] STATE send failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// STATE values: whether this runtime is in the foreground, haptics output (<see cref="DemoSession.HapticsEnabled"/>),
+        /// whether the haptics button is shown (the descriptor supports the toggle and haptics UI is on), the 視線をリセット
+        /// button, the shared pause or a scene's <see cref="IDemoAppMenuState"/>, and the active session's step (-1 / 0 outside a session).
+        /// </summary>
+        internal static DemoSwitchState BuildState(DemoSwitchQuery query, string currentDemoId, bool foreground)
+        {
+            var ticket = DemoSession.IsActive ? DemoSession.Ticket : null;
+            return new DemoSwitchState(query.ControllerId, query.Nonce, currentDemoId, foreground, DemoSession.HapticsEnabled,
+                DemoSession.SupportsHapticsToggle && DemoSession.HapticsUiVisible, DemoSession.RecenterUiVisible,
+                DemoPause.IsPaused || IsAppMenuOpen(), ticket != null ? ticket.Index : -1, ticket != null ? ticket.Steps.Count : 0);
+        }
+
+        private static bool IsAppMenuOpen()
+        {
+            foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                if (behaviour.isActiveAndEnabled && behaviour is IDemoAppMenuState menu && menu.IsMenuOpen) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// The adapter for a CONTROL action. haptics_*, recenter / recenter_ui_* and tutorial_start belong to the shared
+        /// Demo Session layer. Other actions go to the scene's adapter when it accepts them; otherwise menu_open,
+        /// menu_close and restart fall back to the shared pause (<see cref="DemoPause.SharedControls"/>, which accepts
+        /// them only where the shared pause is on). The caller rejects the action when the result cannot execute it.
+        /// </summary>
+        internal static IDemoAppControls ResolveControls(string action, string sceneId, IDemoAppControls sceneControls)
+        {
+            if (DemoSwitchProtocol.IsHapticsAction(action)) return DemoSession.HapticsControls;
+            if (DemoSwitchProtocol.IsRecenterAction(action)) return DemoSession.RecenterControls;
+            if (action == "tutorial_start") return DemoSession.TutorialControls;
+            if (sceneControls != null && sceneControls.CanExecuteControl(action, sceneId)) return sceneControls;
+            return DemoSwitchProtocol.IsSharedPauseAction(action) ? DemoPause.SharedControls : sceneControls;
+        }
+
+        private static bool IsSharedLayerAction(string action) => DemoSwitchProtocol.IsHapticsAction(action)
+            || DemoSwitchProtocol.IsRecenterAction(action) || action == "tutorial_start";
+
         private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
         {
-            IDemoAppControls adapter = null;
-            // haptics_* and recenter / recenter_ui_* belong to the shared Demo Session layer, never to the scene's control adapter.
-            if (DemoSwitchProtocol.IsHapticsAction(command.Action)) adapter = DemoSession.HapticsControls;
-            else if (DemoSwitchProtocol.IsRecenterAction(command.Action)) adapter = DemoSession.RecenterControls;
-            else foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-            {
-                if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
-                if (adapter != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }
-                adapter = candidate;
-            }
+            IDemoAppControls sceneControls = null;
+            if (!IsSharedLayerAction(command.Action))
+                foreach (var behaviour in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                {
+                    if (!behaviour.isActiveAndEnabled || !(behaviour is IDemoAppControls candidate)) continue;
+                    if (sceneControls != null) { SendFailure(source,command,"not_allowed","Multiple app control adapters."); return; }
+                    sceneControls = candidate;
+                }
+            var adapter = ResolveControls(command.Action, command.SceneId, sceneControls);
             if (command.DemoId != _settings.CurrentDemoId || adapter == null
                 || !adapter.CanExecuteControl(command.Action,command.SceneId))
             { SendFailure(source,command,"not_allowed","Current demo or action is not supported."); return; }
@@ -208,7 +296,7 @@ namespace Hapbeat.DemoSwitch
             { SendFailure(source,command,"replay","seq was already accepted or is older."); return; }
             _controlBusy = true;
             SendStatus(source,new DemoSwitchStatus("ACK",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
-            StartCoroutine(ExecuteControl(adapter,command,source));
+            _control = StartCoroutine(ExecuteControl(adapter,command,source));
         }
 
         private IEnumerator ExecuteControl(IDemoAppControls adapter, DemoSwitchCommand command, IPEndPoint source)
@@ -236,6 +324,98 @@ namespace Hapbeat.DemoSwitch
             else SendStatus(source,new DemoSwitchStatus("READY",command.ControllerId,command.Sequence,command.DemoId,_settings.CurrentDemoId,"ok",""));
         }
 
+        private void HandlePresetGet(string json, IPEndPoint source, IDemoSwitchPresetHost host)
+        {
+            DiscoveryHandleResult result;
+            try
+            {
+                result = DemoSwitchPresetGetHandler.Handle(json, host.ReadPreset, _settings.SharedSecret, _settings.AllowUnsignedOnIsolatedLan);
+            }
+            catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+            {
+                Debug.LogWarning("[Demo Switch] PRESET could not be built: " + exception.Message);
+                return;
+            }
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected PRESET_GET payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] PRESET send failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// PRESET_SET / PRESET_START with the CONTROL rules: authentication, foreground, one operation at a time, current
+        /// demo, then validation (refused without executing), persistent sequence and ACK. The Hub also refuses them while
+        /// its manage screen is open.
+        /// </summary>
+        private void HandlePresetCommand(string json, IPEndPoint source, IDemoSwitchPresetHost host)
+        {
+            var parsed = DemoSwitchProtocol.ParsePresetCommand(json);
+            if (!parsed.Success)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected preset payload: " + parsed.ErrorMessage);
+                return;
+            }
+
+            var command = parsed.Command;
+            if (!string.IsNullOrEmpty(_settings.SharedSecret) && !DemoSwitchProtocol.Authenticate(command, _settings.SharedSecret))
+            { SendFailure(source, command, "invalid_auth", "Command authentication failed."); return; }
+            if (string.IsNullOrEmpty(_settings.SharedSecret) && !_settings.AllowUnsignedOnIsolatedLan)
+            { SendFailure(source, command, "unsigned_disabled", "Unsigned command mode is disabled."); return; }
+            if (!_foreground) { SendFailure(source, command, "not_allowed", NotForegroundMessage); return; }
+            if (_controlBusy || DemoAppHandoff.IsPending || DemoAppHandoff.IsFinished)
+            { SendFailure(source, command, "not_allowed", "An operation is in progress."); return; }
+            if (host.IsBusy) { SendFailure(source, command, "not_allowed", "The Hub's manage screen is open."); return; }
+            if (command.DemoId != _settings.CurrentDemoId)
+            { SendFailure(source, command, "not_allowed", "Current demo is not the Hub."); return; }
+
+            if (command.IsStart)
+            {
+                if (!host.HasInstalledStep(command.Preset))
+                { SendFailure(source, command, "not_allowed", "The preset has no installed step."); return; }
+            }
+            else
+            {
+                var check = host.CheckSteps(command.Steps, out var offending);
+                if (check == DemoSwitchPresetCheck.NotInstalled) { SendFailure(source, command, "not_allowed", offending); return; }
+                if (check == DemoSwitchPresetCheck.UnknownOption) { SendFailure(source, command, "invalid_payload", offending); return; }
+            }
+            if (!_sequenceGuard.TryAccept(command.ControllerId, command.Sequence))
+            { SendFailure(source, command, "replay", "seq was already accepted or is older."); return; }
+
+            SendStatus(source, new DemoSwitchStatus("ACK", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+            if (!command.IsStart)
+            {
+                if (host.TryStorePreset(command.Preset, command.Name, command.Visible, command.Steps, out var storeError))
+                    SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+                else SendFailure(source, command, "launch_failed", storeError);
+                return;
+            }
+
+            if (!host.TryStartPreset(command.Preset, failure => SendFailure(source, command, "launch_failed", failure), out var error))
+            {
+                SendFailure(source, command, "launch_failed", error);
+                return;
+            }
+            // READY names the started demo once the Hub has left the foreground, before it stops 7710 and finishes.
+            if (!DemoAppHandoff.NotifyWhenLeft(next => SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId,
+                    command.Sequence, command.DemoId, next, "ok", ""))))
+                SendFailure(source, command, "launch_failed", "The start did not begin a hand-over.");
+        }
+
+        private void SendFailure(IPEndPoint endpoint, DemoSwitchPresetCommand command, string code, string message) =>
+            SendStatus(endpoint, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
+                command.DemoId, _settings.CurrentDemoId, code, message));
+
         private void SendFailure(IPEndPoint endpoint, DemoSwitchCommand command, string code, string message) =>
             SendStatus(endpoint, new DemoSwitchStatus("FAILED", command.ControllerId, command.Sequence,
                 command.DemoId, _settings.CurrentDemoId, code, message));
@@ -254,14 +434,62 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
-        private void StartForegroundReceiver()
+        /// <summary>
+        /// Reads a launch context (at start, and a new Intent each time this application comes to the front) and binds
+        /// 7710 unless it is bound. A failed bind is retried (<see cref="RetryBind"/>); READY or FAILED/listener_failed
+        /// for a launch context follows the final result. Nothing starts again after a hand-over.
+        /// </summary>
+        private void StartReceiver()
         {
+            if (DemoAppHandoff.IsFinished) return;
             CaptureLaunchContext();
-            if (!TryStartListener(out var error))
+            if (_listenerStarted) { ReportReady(); return; }
+            if (_bindRetry != null) return;
+            if (!TryValidateReceiver(out var error))
             {
                 ReportListenerFailure(error);
                 return;
             }
+            error = TryBind();
+            if (error == null) { OnListenerStarted(); return; }
+            Debug.LogWarning("[Demo Switch] Could not bind UDP " + _settings.Port + " (" + error + "); retrying every " +
+                BindRetryIntervalSeconds + " s, " + BindRetryAttempts + " times.");
+            _bindRetry = StartCoroutine(RetryBind(TryBind, OnBindRetryFinished));
+        }
+
+        /// <summary>
+        /// Calls <paramref name="bind"/> (null = bound, otherwise the error) every <see cref="BindRetryIntervalSeconds"/>,
+        /// at most <see cref="BindRetryAttempts"/> times, and reports the result with the number of retries made.
+        /// </summary>
+        internal static IEnumerator RetryBind(Func<string> bind, Action<string, int> onFinished)
+        {
+            string error = null;
+            for (var attempt = 1; attempt <= BindRetryAttempts; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(BindRetryIntervalSeconds);
+                error = bind();
+                if (error == null) { onFinished(null, attempt); yield break; }
+            }
+            onFinished(error, BindRetryAttempts);
+        }
+
+        private void OnBindRetryFinished(string error, int attempts)
+        {
+            _bindRetry = null;
+            if (error == null)
+            {
+                Debug.Log("[Demo Switch] Bound UDP " + _settings.Port + " after " + attempts + " retries.");
+                OnListenerStarted();
+                return;
+            }
+            Debug.LogError("[Demo Switch] Could not bind UDP " + _settings.Port + " after " + attempts + " retries: " + error);
+            ReportListenerFailure(error);
+        }
+
+        private void OnListenerStarted()
+        {
+            _listenerStarted = true;
+            _multicastLock.Acquire();
             ReportReady();
         }
 
@@ -293,11 +521,9 @@ namespace Hapbeat.DemoSwitch
                     "listener_failed", error));
         }
 
-        private bool TryStartListener(out string error)
+        private bool TryValidateReceiver(out string error)
         {
             error = null;
-            if (!_foreground) { error = "Application is not in the foreground."; return false; }
-            if (_listenerStarted) return true;
             if (_settings == null) { error = "Settings were not loaded."; return false; }
             if (!_settings.ReceiverEnabled) { error = "Receiver is disabled in settings."; return false; }
             if (!DemoSwitchProtocol.IsIdentifier(_settings.CurrentDemoId))
@@ -316,43 +542,55 @@ namespace Hapbeat.DemoSwitch
                 }
                 Debug.LogWarning("[Demo Switch] Unsigned mode is enabled. Use only on an isolated demo LAN.");
             }
+            return true;
+        }
 
+        /// <summary>Null when 7710 is bound, otherwise the socket error.</summary>
+        private string TryBind()
+        {
             try
             {
                 _transport.Start(_settings.Port);
-                _listenerStarted = true;
-                return true;
+                return null;
             }
             catch (Exception exception)
             {
-                Debug.LogError("[Demo Switch] Could not bind UDP " + _settings.Port + ": " + exception.Message);
-                error = exception.Message;
-                return false;
+                return exception.Message;
             }
         }
 
+        /// <summary>Hand-over or teardown: stops a bind retry, releases 7710 and the multicast lock.</summary>
         private void StopListener()
         {
+            if (_bindRetry != null) { StopCoroutine(_bindRetry); _bindRetry = null; }
+            _multicastLock.Release();
             if (!_listenerStarted) return;
             _transport.Stop();
             _listenerStarted = false;
         }
 
+        // Focus and pause only set the foreground state; the listener keeps running (DISCOVER / QUERY are answered).
         private void OnApplicationFocus(bool hasFocus)
         {
             _foreground = hasFocus;
-            if (hasFocus) StartForegroundReceiver(); else StopListener();
+            if (hasFocus) StartReceiver();
         }
 
         private void OnApplicationPause(bool paused)
         {
             _foreground = !paused;
-            if (paused) { StopAllCoroutines(); _controlBusy = false; StopListener(); }
-            else StartForegroundReceiver();
+            if (paused)
+            {
+                if (_control != null) StopCoroutine(_control);
+                _control = null;
+                _controlBusy = false;
+            }
+            else StartReceiver();
         }
 
         private void OnDestroy()
         {
+            StopListener();
             _transport?.Dispose();
             if (Instance == this) Instance = null;
         }

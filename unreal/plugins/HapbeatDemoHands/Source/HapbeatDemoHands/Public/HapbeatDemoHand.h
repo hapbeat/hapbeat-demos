@@ -28,6 +28,8 @@ struct HAPBEATDEMOHANDS_API FHapbeatHandRig
     TArray<FQuat> RefRot;
     TArray<FVector> RefLoc, RefDir;
     FVector HandLoc=FVector::ZeroVector, RefForward=FVector::ForwardVector, RefSide=FVector::RightVector;
+    /** Reference-pose palm normal (unit), on the side of the thumb, so it is right for the left and the right mesh. */
+    FVector RefPalm=FVector::UpVector;
     float RefLength=1;
 
     bool Init(const USkeletalMesh* Asset);

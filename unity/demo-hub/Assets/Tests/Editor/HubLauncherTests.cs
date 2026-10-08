@@ -194,6 +194,59 @@ namespace Hapbeat.DemoHub.Tests
             }
         }
 
+        /// <summary>Text boxes truncate vertically: each must hold its explicit lines at its font size (best-fit labels at their smallest size).</summary>
+        static void AssertTextsFitTheirLines(DemoHubController controller, string what)
+        {
+            var panel = controller.Panel;
+            var texts = panel.GetComponentsInChildren<UnityEngine.UI.Text>(true);
+            Assert.That(texts, Is.Not.Empty, what);
+            foreach (var text in texts)
+            {
+                var size = text.resizeTextForBestFit ? text.resizeTextMinSize : text.fontSize;
+                var lines = Mathf.Max(1, text.text.Split('\n').Length);
+                Assert.That(text.rectTransform.rect.height, Is.GreaterThanOrEqualTo(lines * panel.LineHeight(size)),
+                    what + ": \"" + text.text + "\" (size " + size + ", " + lines + " line(s))");
+            }
+        }
+
+        [Test]
+        public void EveryHubTextBoxIsAtLeastItsLinesTall()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "top, nothing to show");
+
+                controller.Preset(1).Add(_volley);
+                controller.Settings.VisiblePresets.Add(1);
+                controller.Settings.VisibleDemos.UnionWith(new[] { "volley", "boxing", "trex-encounter" });
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "top");
+
+                controller.Settings.StaffWaiting = true;
+                controller.Show(DemoHubController.HubScreen.Top);
+                AssertTextsFitTheirLines(controller, "staff waiting");
+                controller.Settings.StaffWaiting = false;
+
+                controller.Show(DemoHubController.HubScreen.Manage);
+                controller.SelectTab(1);
+                AssertTextsFitTheirLines(controller, "manage, empty plan");
+                controller.SelectTab(0);
+                AssertTextsFitTheirLines(controller, "manage, step hint");
+                controller.SelectStep(0);
+                AssertTextsFitTheirLines(controller, "manage, step editor");
+                controller.SelectTab(DemoHubController.TilesTab);
+                AssertTextsFitTheirLines(controller, "manage, tiles");
+
+                controller.Show(DemoHubController.HubScreen.Finished);
+                AssertTextsFitTheirLines(controller, "finished");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void ManageScreenShowsAll32StepsWithoutPages()
         {
@@ -523,6 +576,292 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(Texts(controller), Has.Member(HubText.StaffWaitingNote));
                 Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.Preset)), Is.False, "Staff waiting hides the launcher.");
                 Assert.That(controller.ManageButton, Is.Not.Null);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [TestCase("{\"version\":1,\"preset\":1}", 1, null)]
+        [TestCase("{\"version\":1,\"preset\":3}", 3, null)]
+        [TestCase("{\"version\":1,\"demo_id\":\"handdemo\",\"options\":{\"tutorial\":\"on\"}}", 0, "handdemo")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\"}", 0, "volley")]
+        public void ExternalStartAcceptsAPresetOrOneDemo(string json, int preset, string demoId)
+        {
+            Assert.That(HubStartRequest.TryParse(json, out var request, out var error), Is.True, error);
+            Assert.That(request.Preset, Is.EqualTo(preset));
+            Assert.That(request.DemoId, Is.EqualTo(demoId));
+        }
+
+        [TestCase("")]
+        [TestCase("not json")]
+        [TestCase("[]")]
+        [TestCase("{\"version\":2,\"preset\":1}")]
+        [TestCase("{\"version\":1}")]
+        [TestCase("{\"version\":1,\"preset\":0}")]
+        [TestCase("{\"version\":1,\"preset\":4}")]
+        [TestCase("{\"version\":1,\"preset\":\"1\"}")]
+        [TestCase("{\"version\":1,\"preset\":1,\"demo_id\":\"volley\"}")]
+        [TestCase("{\"version\":1,\"preset\":1,\"options\":{}}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"Volley\"}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"package\":\"evil.app\"}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"points\":3}}")]
+        [TestCase("{\"version\":1,\"demo_id\":\"volley\",\"demo_id\":\"boxing\"}")]
+        [TestCase("{\"version\":1,\"preset\":1} {}")]
+        [TestCase("{\"version\":1,\"steps\":[]}")]
+        [TestCase("{\"version\":1,\"steps\":null}")]
+        [TestCase("{\"version\":1,\"steps\":{\"demo_id\":\"volley\"}}")]
+        [TestCase("{\"version\":1,\"steps\":[\"volley\"]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"options\":{}}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"Volley\"}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"title\":\"x\"}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"retry\":\"false\"}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"points\":3}}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":[]}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"demo_id\":\"boxing\"}]}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"}],\"options\":{}}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"}],\"finish\":\"jp.hapbeat.demohub\"}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"}],\"preset\":1}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"}],\"demo_id\":\"volley\"}")]
+        [TestCase("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"}],\"preset\":1,\"demo_id\":\"volley\"}")]
+        public void ExternalStartRejectsInvalidRequests(string json)
+        {
+            Assert.That(HubStartRequest.TryParse(json, out var request, out var error), Is.False);
+            Assert.That(request, Is.Null);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        [Test]
+        public void ExternalStartRejectsOver4096Bytes()
+        {
+            var json = "{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"scene\":\"" + new string('x', HubStartRequest.MaxBytes) + "\"}}";
+            Assert.That(HubStartRequest.TryParse(json, out _, out _), Is.False);
+        }
+
+        [Test]
+        public void ExternalStartAcceptsAnExternalPlan()
+        {
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"}},{\"demo_id\":\"trex-encounter\",\"retry\":false}]}",
+                out var request, out var error), Is.True, error);
+            Assert.That(request.Preset, Is.Zero);
+            Assert.That(request.DemoId, Is.Null);
+            Assert.That(request.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
+            Assert.That(request.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive" }));
+            Assert.That(request.Steps[0].Retry, Is.True, "retry defaults to true.");
+            Assert.That(request.Steps[1].Options, Is.Empty);
+            Assert.That(request.Steps[1].Retry, Is.False);
+        }
+
+        [Test]
+        public void ExternalPlanAllowsAtMost32Steps()
+        {
+            string Plan(int count) => "{\"version\":1,\"steps\":[" + string.Join(",", Enumerable.Repeat("{\"demo_id\":\"volley\"}", count)) + "]}";
+            Assert.That(HubStartRequest.TryParse(Plan(HubPlan.MaxSteps), out var request, out var error), Is.True, error);
+            Assert.That(request.Steps.Count, Is.EqualTo(32));
+            Assert.That(HubStartRequest.TryParse(Plan(HubPlan.MaxSteps + 1), out request, out error), Is.False);
+            Assert.That(request, Is.Null);
+            Assert.That(error, Is.Not.Empty);
+        }
+
+        [Test]
+        public void ExternalPlanErrorsNameTheStep()
+        {
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"},{\"demo_id\":\"boxing\",\"retry\":1}]}", out _, out var error), Is.False);
+            Assert.That(error, Does.StartWith(string.Format(HubText.StartStep, 2)));
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"package\":\"evil.app\"}]}", out _, out error), Is.False);
+            Assert.That(error, Does.StartWith(string.Format(HubText.StartStep, 1)));
+        }
+
+        [Test]
+        public void ExternalPlanBuildsTheTicketAndLeavesPresetsAlone()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var settings = new HubSettings { HapticsUi = true, RecenterUi = false, HandStyle = DemoHandStyle.Skin };
+            var store = new HubPlanStore(_directory);
+            var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
+            presets[0].Add(_boxing);
+            store.Save(presets[0], HubPlanStore.PresetSlot(1));
+            var saved = File.ReadAllText(Path.Combine(_directory, HubPlanStore.PresetSlot(1) + ".json"));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\",\"speed\":\"fast\"}},"
+                + "{\"demo_id\":\"trex-encounter\",\"retry\":false},{\"demo_id\":\"volley\"}]}", out var request, out var error), Is.True, error);
+            LogAssert.Expect(LogType.Warning, new Regex("speed=fast"));
+            var ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
+            Assert.That(ticket, Is.Not.Null, error);
+            Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out error), Is.True, error);
+            Assert.That(parsed.Index, Is.Zero);
+            Assert.That(parsed.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter", "volley" }));
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["balls"] = "10" }),
+                "Given value kept, unknown option dropped, defaults for the rest, active options only.");
+            Assert.That(parsed.Steps[2].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["points"] = "7" }));
+            Assert.That(parsed.Steps.Select(s => s.Retry), Is.EqualTo(new[] { true, false, true }));
+            Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
+            Assert.That(parsed.HapticsUi, Is.True);
+            Assert.That(parsed.RecenterUi, Is.False);
+            Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(presets[0].Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "boxing" }), "The external plan is not a preset.");
+            Assert.That(presets[1].Steps, Is.Empty);
+            Assert.That(File.ReadAllText(Path.Combine(_directory, HubPlanStore.PresetSlot(1) + ".json")), Is.EqualTo(saved));
+            Assert.That(Directory.GetFiles(_directory).Length, Is.EqualTo(1), "Nothing else is saved.");
+        }
+
+        [Test]
+        public void ExternalPlanWithAnUninstalledStepStartsNothing()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"},{\"demo_id\":\"handdemo\"},{\"demo_id\":\"boxing\"}]}",
+                out var request, out var error), Is.True, error);
+            Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), new HubSettings(), out error), Is.Null);
+            Assert.That(error, Is.EqualTo(string.Format(HubText.StartStep, 2) + HubText.StartNotInstalled + "handdemo"));
+        }
+
+        [Test]
+        public void ExternalStartBuildsTheTicketWithManageSettings()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var settings = new HubSettings { HapticsUi = true, RecenterUi = true, HandStyle = DemoHandStyle.Skin };
+            var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
+            presets[0].Add(_volley);
+            presets[0].Add(_trex);
+            presets[1].Steps.Add(new HubPlanStep("not-installed", null, true));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":1}", out var request, out var error), Is.True, error);
+            var ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
+            Assert.That(ticket, Is.Not.Null, error);
+            Assert.That(ticket.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
+            Assert.That(ticket.HapticsUi && ticket.RecenterUi, Is.True);
+            Assert.That(ticket.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":2}", out request, out _), Is.True);
+            Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error), Is.Null);
+            Assert.That(error, Is.EqualTo(string.Format(HubText.StartPresetEmpty, 2)));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"handdemo\"}", out request, out _), Is.True);
+            Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error), Is.Null);
+            Assert.That(error, Is.EqualTo(HubText.StartNotInstalled + "handdemo"));
+
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\",\"balls\":\"99\",\"speed\":\"fast\"}}", out request, out _), Is.True);
+            LogAssert.Expect(LogType.Warning, new Regex("balls=99"));
+            LogAssert.Expect(LogType.Warning, new Regex("speed=fast"));
+            ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
+            Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out error), Is.True, error);
+            Assert.That(parsed.Steps.Count, Is.EqualTo(1));
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["balls"] = "10" }),
+                "Given value kept, unknown value and option replaced by the defaults, inactive options left out.");
+            Assert.That(parsed.Steps[0].Retry, Is.True);
+            Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
+            Assert.That(parsed.HapticsUi, Is.True);
+            Assert.That(parsed.RecenterUi, Is.True);
+            Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+        }
+
+        [Test]
+        public void RejectedOrFailedExternalStartOpensTheTopWithTheReason()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                LogAssert.Expect(LogType.Warning, new Regex("External start rejected"));
+                controller.StartExternal("{\"version\":1,\"demo_id\":\"handdemo\"}");
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller), Has.Member(HubText.StartRejected + HubText.StartNotInstalled + "handdemo"));
+
+                LogAssert.Expect(LogType.Warning, new Regex("External start rejected"));
+                controller.StartExternal("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\"},{\"demo_id\":\"handdemo\"}]}");
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller), Has.Member(HubText.StartRejected + string.Format(HubText.StartStep, 2) + HubText.StartNotInstalled + "handdemo"));
+
+                controller.Show(DemoHubController.HubScreen.Manage);
+                LogAssert.Expect(LogType.Warning, new Regex("External start rejected"));
+                controller.StartExternal("{\"version\":1,\"preset\":9}");
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.StartRejected)), Is.True);
+
+                // Accepted, but the Editor cannot start applications: the top screen shows the launch error.
+                Object.DestroyImmediate(go);
+                go = new GameObject("hub test");
+                controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
+                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
+                controller.StartExternal("{\"version\":1,\"demo_id\":\"boxing\"}");
+                Assert.That(controller.Panel, Is.Not.Null);
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RemotePresetIsStoredWithNameVisibilityAndRevision()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.IsBusy, Is.False);
+                Assert.That(controller.HasInstalledStep(2), Is.False);
+
+                var steps = new[]
+                {
+                    new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, false),
+                    new DemoSwitchPresetStep("handdemo", null, true)
+                };
+                Assert.That(controller.TryStorePreset(2, "展示 A", true, steps, out var error), Is.True, error);
+                Assert.That(controller.Preset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(1));
+                Assert.That(controller.HasInstalledStep(2), Is.True);
+                Assert.That(store.LoadSettings().VisiblePresets, Has.Member(2), "visible is the saved top-screen choice.");
+                Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nVolley レシーブ 10球"), "The top screen is refreshed.");
+
+                var read = controller.ReadPreset(2);
+                Assert.That(read.Visible, Is.True);
+                Assert.That(read.Revision, Is.EqualTo(1));
+                Assert.That(read.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "handdemo" }), "Uninstalled steps are kept.");
+                Assert.That(read.Steps[0].Options["scene"], Is.EqualTo("receive"));
+                Assert.That(read.Steps[0].Retry, Is.False);
+
+                // The Hub's own editor keeps the name and increases the revision too.
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Assert.That(controller.IsBusy, Is.True);
+                controller.SelectTab(1);
+                controller.RemoveStep(1);
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(2));
+                Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
+                Assert.That(store.LoadPreset(2).Revision, Is.EqualTo(2));
+
+                Assert.That(controller.TryStorePreset(2, "", false, new DemoSwitchPresetStep[0], out error), Is.True, error);
+                Assert.That(controller.Preset(2).Steps, Is.Empty, "An empty list clears the preset.");
+                Assert.That(controller.Preset(2).Revision, Is.EqualTo(3));
+                Assert.That(store.LoadSettings().VisiblePresets, Has.No.Member(2));
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.PresetLabel(1), Does.StartWith(HubText.Preset + " 1\n"), "Without a name the label is unchanged.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RemotePresetStartUsesTheTopScreenStartAndFailsSafelyInTheEditor()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.TryStorePreset(1, "", true, new[] { new DemoSwitchPresetStep("boxing", null, true) }, out var error), Is.True, error);
+                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
+                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
+                string failed = null;
+                Assert.That(controller.TryStartPreset(1, e => failed = e, out error), Is.False);
+                Assert.That(error, Is.Not.Empty);
+                Assert.That(failed, Is.Null, "A start that fails at once is returned, not reported later.");
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
             }
             finally { Object.DestroyImmediate(go); }
         }

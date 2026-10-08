@@ -429,6 +429,30 @@ namespace Hapbeat.DemoSwitch
             set => _scaler.dynamicPixelsPerUnit = value;
         }
 
+        /// <summary>
+        /// Height of one line of the panel font at <paramref name="fontSize"/> in canvas units (millimetres), as laid out at
+        /// this panel's <see cref="GlyphPixelsPerMillimetre"/>. Text boxes truncate vertically, so a box shorter than this
+        /// drops the whole line: every text box must be at least this tall for its font size (a button label for its
+        /// smallest best-fit size).
+        /// </summary>
+        public float LineHeight(int fontSize)
+        {
+            var scale = GlyphPixelsPerMillimetre;
+            var settings = new TextGenerationSettings
+            {
+                font = DemoSessionFont.Get(),
+                fontSize = fontSize,
+                scaleFactor = scale,
+                lineSpacing = 1f,
+                color = Color.white,
+                pivot = new Vector2(0.5f, 0.5f),
+                textAnchor = TextAnchor.MiddleCenter,
+                horizontalOverflow = HorizontalWrapMode.Overflow,
+                verticalOverflow = VerticalWrapMode.Overflow,
+            };
+            return new TextGenerator().GetPreferredHeight("あ", settings) / scale;
+        }
+
         /// <summary>A plain coloured rectangle (e.g. an insertion line); removed with the other content.</summary>
         public Image AddRect(Vector2 centre, Vector2 size, Color color)
         {
@@ -636,6 +660,8 @@ namespace Hapbeat.DemoSwitch
         public const float Distance = 0.55f;
         public const float Drop = 0.12f;
         private const float Width = 440f;
+        /// <summary>At least one line of the font at size 34 (<see cref="DemoSessionPanel.LineHeight"/>, about 49.3).</summary>
+        private const float HeadingHeight = 52f;
         private const float ButtonHeight = 68f;
         private const float ButtonGap = 14f;
         private DemoSessionPanel _panel;
@@ -651,13 +677,13 @@ namespace Hapbeat.DemoSwitch
             var step = ticket.Steps[ticket.Index];
             var buttons = step.Retry ? 2 : 1;
             // Fixed slots: heading, progress, buttons, and a reserved error line (no layout shift).
-            var height = 28f + 46f + 34f + 18f + buttons * (ButtonHeight + ButtonGap) + 52f + 16f;
+            var height = 28f + HeadingHeight + 34f + 18f + buttons * (ButtonHeight + ButtonGap) + 52f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Session Completion", new Vector2(Width, height));
             var completion = panel.gameObject.AddComponent<DemoSessionCompletionPanel>();
             completion._panel = panel;
-            var y = height * 0.5f - 28f - 23f;
-            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 46), "体験完了", 34, Color.white);
-            y -= 23f + 17f;
+            var y = height * 0.5f - 28f - HeadingHeight * 0.5f;
+            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, HeadingHeight), "体験完了", 34, Color.white);
+            y -= HeadingHeight * 0.5f + 17f;
             panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 34), (ticket.Index + 1) + " / " + ticket.Steps.Count, 22, new Color(0.7f, 0.82f, 0.92f));
             y -= 17f + 18f + ButtonHeight * 0.5f;
             var size = new Vector2(Width - 60, ButtonHeight);
@@ -702,14 +728,33 @@ namespace Hapbeat.DemoSwitch
     }
 
     /// <summary>
-    /// Haptics ON/OFF button low-left in view (yaw -30°, pitch -35°, 0.45 m), slowly following the
-    /// head's heading. Visible while the descriptor supports the toggle and haptics UI is shown.
+    /// The two small head-following buttons (haptics ON/OFF and 視線をリセット): low in view, a little left of centre,
+    /// side by side at one height so both stay in view while looking straight ahead (Quest 3S, 2026-10-04). Same
+    /// size for both, a fixed width for every label, English two-line labels. The Unreal plugin uses the same values.
+    /// </summary>
+    public static class DemoSessionCornerButtons
+    {
+        /// <summary>Below the heading, degrees.</summary>
+        public const float PitchDegrees = 30f;
+        public const float Distance = 0.45f;
+        /// <summary>視線をリセット (left) and haptics (right): 14.5° apart, which leaves about 10 mm between them at this pitch.</summary>
+        public const float RecenterYawDegrees = -19.5f;
+        public const float HapticsYawDegrees = -5f;
+        /// <summary>Panel and button size, millimetres (the button fills the panel but a 4 mm margin).</summary>
+        public static readonly Vector2 PanelSize = new Vector2(88, 64);
+        public static readonly Vector2 ButtonSize = new Vector2(80, 56);
+        public const int FontSize = 18;
+    }
+
+    /// <summary>
+    /// Haptics ON/OFF button low in view (<see cref="DemoSessionCornerButtons"/>: yaw -5°, pitch -30°, 0.45 m), slowly
+    /// following the head's heading. Visible while the descriptor supports the toggle and haptics UI is shown.
     /// </summary>
     internal sealed class DemoSessionHapticsButton : MonoBehaviour
     {
-        public const float YawDegrees = -30f;
-        public const float PitchDegrees = 35f;
-        public const float Distance = 0.45f;
+        public const float YawDegrees = DemoSessionCornerButtons.HapticsYawDegrees;
+        public const float PitchDegrees = DemoSessionCornerButtons.PitchDegrees;
+        public const float Distance = DemoSessionCornerButtons.Distance;
         private DemoSessionPanel _panel;
         private DemoSessionButton _button;
         private bool _placed;
@@ -734,16 +779,16 @@ namespace Hapbeat.DemoSwitch
             _button.Highlighted = DemoSession.HapticsEnabled;
         }
 
-        internal static string Label(bool enabled) => enabled ? "触覚 ON" : "触覚 OFF";
+        internal static string Label(bool enabled) => enabled ? "Haptics\nON" : "Haptics\nOFF";
 
         internal static Pose TargetPose(Vector3 headPosition, Vector3 headForward) =>
             DemoHeadingPlacement.Target(headPosition, headForward, YawDegrees, PitchDegrees, Distance);
 
         private void Build()
         {
-            // Width fits the longer "触覚 OFF" so the label never resizes the button.
-            _panel = DemoSessionPanel.Create("Hapbeat Haptics Toggle", new Vector2(132, 54));
-            _button = _panel.AddButton(Vector2.zero, new Vector2(124, 46), Label(true), 22,
+            // Fixed size for "Haptics / OFF" so the label never resizes the button.
+            _panel = DemoSessionPanel.Create("Hapbeat Haptics Toggle", DemoSessionCornerButtons.PanelSize);
+            _button = _panel.AddButton(Vector2.zero, DemoSessionCornerButtons.ButtonSize, Label(true), DemoSessionCornerButtons.FontSize,
                 () => DemoSession.SetHapticsEnabled(!DemoSession.HapticsEnabled));
             if (Application.isPlaying) DontDestroyOnLoad(_panel.gameObject);
         }
@@ -757,17 +802,17 @@ namespace Hapbeat.DemoSwitch
     }
 
     /// <summary>
-    /// "視線をリセット" button low-left in view, above the haptics button (yaw -30°, pitch -27°, 0.45 m), slowly
-    /// following the head's heading. Visible while <see cref="DemoSession.RecenterUiVisible"/> (default hidden),
-    /// in every runtime including the Hub. Press: <see cref="DemoRecenter.ResetView"/>.
+    /// 視線をリセット button ("Reset / View") low in view, left of the haptics button (<see cref="DemoSessionCornerButtons"/>:
+    /// yaw -19.5°, pitch -30°, 0.45 m), slowly following the head's heading. Visible while
+    /// <see cref="DemoSession.RecenterUiVisible"/> (default hidden), in every runtime including the Hub.
+    /// Press: <see cref="DemoRecenter.ResetView"/>.
     /// </summary>
     internal sealed class DemoSessionRecenterButton : MonoBehaviour
     {
-        public const string Label = "視線をリセット";
-        public const float YawDegrees = -30f;
-        /// <summary>The haptics button is at 35° (±3.4° tall at 0.45 m); this one (±3.4°) sits above it with a gap.</summary>
-        public const float PitchDegrees = 27f;
-        public const float Distance = 0.45f;
+        public const string Label = "Reset\nView";
+        public const float YawDegrees = DemoSessionCornerButtons.RecenterYawDegrees;
+        public const float PitchDegrees = DemoSessionCornerButtons.PitchDegrees;
+        public const float Distance = DemoSessionCornerButtons.Distance;
         private DemoSessionPanel _panel;
         private bool _placed;
 
@@ -794,9 +839,8 @@ namespace Hapbeat.DemoSwitch
 
         private void Build()
         {
-            // Fixed width for the label at the haptics button's font size.
-            _panel = DemoSessionPanel.Create("Hapbeat Recenter Button", new Vector2(172, 54));
-            _panel.AddButton(Vector2.zero, new Vector2(164, 46), Label, 22, DemoRecenter.ResetView);
+            _panel = DemoSessionPanel.Create("Hapbeat Recenter Button", DemoSessionCornerButtons.PanelSize);
+            _panel.AddButton(Vector2.zero, DemoSessionCornerButtons.ButtonSize, Label, DemoSessionCornerButtons.FontSize, DemoRecenter.ResetView);
             if (Application.isPlaying) DontDestroyOnLoad(_panel.gameObject);
         }
 

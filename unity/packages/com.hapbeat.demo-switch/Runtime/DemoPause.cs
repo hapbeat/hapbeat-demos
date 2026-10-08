@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.XR;
@@ -27,11 +28,21 @@ namespace Hapbeat.DemoSwitch
         private static DemoPausePanel _panel;
         private static bool _audioWasPaused;
         private static string _hubPackage;
+        private static bool _enabled;
 
         /// <summary>Fires with true when the pause panel opens and false when it closes.</summary>
         public static event Action<bool> PausedChanged;
 
         public static bool IsPaused => _panel != null;
+
+        /// <summary>This runtime hosts the shared pause (settings Pause Menu; never the Hub).</summary>
+        public static bool IsEnabled => _enabled;
+
+        /// <summary>
+        /// CONTROL `menu_open` / `menu_close` / `restart` when the scene has no adapter for them: the panel's
+        /// Pause / Resume and its 最初からやり直す. Only in a runtime that hosts the shared pause.
+        /// </summary>
+        internal static IDemoAppControls SharedControls { get; } = new DemoPauseControls();
 
         public const string HubFailed = "Hub を起動できませんでした";
         public const string LaunchFailed = "起動できませんでした: ";
@@ -39,8 +50,12 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Starts the Hub; the argument receives the error of a start that did not come to the front. Replaced in tests.</summary>
         internal static Func<Action<string>, bool> HubLauncher = StartHub;
 
-        /// <summary>Called by the bootstrap; null disables "Hub に戻る".</summary>
-        internal static void Configure(string hubPackage) => _hubPackage = string.IsNullOrWhiteSpace(hubPackage) ? null : hubPackage;
+        /// <summary>Called by the bootstrap when the shared pause is on; null disables "Hub に戻る".</summary>
+        internal static void Configure(string hubPackage)
+        {
+            _enabled = true;
+            _hubPackage = string.IsNullOrWhiteSpace(hubPackage) ? null : hubPackage;
+        }
 
         internal static bool CanReturnToHub => _hubPackage != null && DemoSession.Platform.IsPackageInstalled(_hubPackage);
 
@@ -50,6 +65,7 @@ namespace Hapbeat.DemoSwitch
         {
             if (_panel != null) DestroyPanel();
             _hubPackage = hubPackage;
+            _enabled = false;
             _audioWasPaused = false;
             HubLauncher = StartHub;
             PausedChanged = null;
@@ -134,6 +150,40 @@ namespace Hapbeat.DemoSwitch
             if (Application.isPlaying) UnityEngine.Object.Destroy(_panel.gameObject);
             else UnityEngine.Object.DestroyImmediate(_panel.gameObject);
             _panel = null;
+        }
+
+        /// <summary>
+        /// `menu_open` opens the panel (not while the completion panel is shown), `menu_close` closes it (also
+        /// when already closed), `restart` is 最初からやり直す and needs a registered scene host. While the
+        /// completion panel is shown `restart` is refused too: its もう一度 decides whether a step may be repeated.
+        /// </summary>
+        private sealed class DemoPauseControls : IDemoAppControls
+        {
+            public bool CanExecuteControl(string action, string sceneId)
+            {
+                if (!_enabled || sceneId != string.Empty) return false;
+                switch (action)
+                {
+                    case "menu_open": return !DemoSession.IsCompletionShown;
+                    case "menu_close": return true;
+                    case "restart": return !DemoSession.IsCompletionShown && DemoSession.CurrentHost != null;
+                    default: return false;
+                }
+            }
+
+            public IEnumerator ExecuteControl(string action, string sceneId)
+            {
+                if (!CanExecuteControl(action, sceneId)) throw new InvalidOperationException("Unsupported pause control.");
+                switch (action)
+                {
+                    case "menu_open":
+                        if (!Pause()) throw new InvalidOperationException("The pause could not open.");
+                        break;
+                    case "menu_close": Resume(); break;
+                    default: RestartFromPause(); break;
+                }
+                yield break;
+            }
         }
     }
 
@@ -262,6 +312,8 @@ namespace Hapbeat.DemoSwitch
         public const float Distance = 0.55f;
         public const float Drop = 0.12f;
         private const float Width = 440f;
+        /// <summary>At least one line of the font at size 34 (<see cref="DemoSessionPanel.LineHeight"/>, about 49.3).</summary>
+        private const float HeadingHeight = 52f;
         private const float ButtonHeight = 68f;
         private const float ButtonGap = 14f;
         private DemoSessionPanel _panel;
@@ -280,13 +332,13 @@ namespace Hapbeat.DemoSwitch
         {
             var buttons = 2 + (next.HasValue ? 1 : 0) + (withHub ? 1 : 0);
             // Fixed slots: heading, buttons, and a reserved error line (no layout shift).
-            var height = 28f + 46f + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
+            var height = 28f + HeadingHeight + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Pause", new Vector2(Width, height));
             var pause = panel.gameObject.AddComponent<DemoPausePanel>();
             pause._panel = panel;
-            var y = height * 0.5f - 28f - 23f;
-            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, 46), "一時停止", 34, Color.white);
-            y -= 23f + 18f + ButtonHeight * 0.5f;
+            var y = height * 0.5f - 28f - HeadingHeight * 0.5f;
+            panel.AddText(new Vector2(0, y), new Vector2(Width - 40, HeadingHeight), "一時停止", 34, Color.white);
+            y -= HeadingHeight * 0.5f + 18f + ButtonHeight * 0.5f;
             var size = new Vector2(Width - 60, ButtonHeight);
             pause.ResumeButton = panel.AddButton(new Vector2(0, y), size, "再開", 24, DemoPause.Resume);
             y -= ButtonHeight + ButtonGap;

@@ -28,18 +28,19 @@ namespace
     constexpr float PanelWidth=440, ButtonHeight=68, ButtonGap=14;
     // Completion and pause panels: by default 55 cm ahead of the eye and 12 cm below it.
     constexpr float PanelDistance=55.f, PanelDrop=12.f;
-    // In-view buttons (Unity: a 132 x 54 mm plate with a 124 x 46 mm button), 45 cm from the eye, 30 deg left of
-    // the heading. Haptics 35 deg below the horizon; 視線をリセット right above it (the 54 mm plate + 10 mm at 45 cm).
-    const FVector2D HapticsPlate(132,54), RecenterPlate(172,54);
+    // In-view buttons (Unity DemoSessionCornerButtons): two 88 x 64 mm plates (an 80 x 56 mm button, two-line English
+    // label), 45 cm from the eye and 30 deg below the horizon, Reset / View 19.5 deg and Haptics / ON|OFF 5 deg left of
+    // the heading (about 10 mm apart). Each keeps its place when the other is hidden.
+    const FVector2D InViewPlate(88,64);
     constexpr float PlateMargin=4;
-    constexpr float InViewDistance=45.f, InViewYawOffset=-30.f, HapticsPitch=-35.f, RecenterPitch=-27.f;
-    // The heading only follows the head once it has turned more than this away (a glance at a button keeps it in place).
-    constexpr float InViewYawDeadZone=25.f;
+    constexpr float InViewDistance=45.f, InViewPitch=-30.f, RecenterYawOffset=-19.5f, HapticsYawOffset=-5.f;
+    // How quickly an in-view button catches up with the head's heading, 1/s (Unity DemoHeadingPlacement.FollowRate).
+    constexpr float InViewFollowRate=2.5f;
     constexpr float RayLength=150.f;
     // Poke depth window in cm in front of the face (FSafetyMillPoke): arm 2.5..12, press at <= 0.6, cancel beyond 18 or behind -3.
     constexpr float ArmNear=2.5f, ArmFar=12.f, PressDepth=.6f, CancelFar=18.f, CancelBehind=-3.f;
     // Unity font sizes are the glyph em in mm; Slate sizes are points at 96 DPI.
-    constexpr float TitleMm=34, SubLineMm=22, ButtonMm=24, ErrorMm=17, InViewMm=22;
+    constexpr float TitleMm=34, SubLineMm=22, ButtonMm=24, ErrorMm=17, InViewMm=18;
     // Unity DemoSessionButton.Press: the pressed colour shows for 0.15 s; DemoSessionClickSound.Volume.
     constexpr float FlashSeconds=.15f, ClickVolume=.5f;
     // Fingertip/ray tolerance around a button in pixels.
@@ -290,9 +291,8 @@ void AHapbeatDemoSessionUi::BuildPauseWidget(bool bHub,const FString& NextLabel)
 void AHapbeatDemoSessionUi::BuildInViewWidget(UWidgetComponent* Widget,FInViewButton& Button,TFunction<FText()> Label,TFunction<bool()> Highlighted)
 {
     // A plate one button wide; its width fits the longest label, so the text never resizes it.
-    const FVector2D Plate=Widget==HapticsButton?HapticsPlate:RecenterPlate;
-    Button.Face.Size=Plate*Px;
-    Button.Face.Buttons={Mm(PlateMargin,PlateMargin,Plate.X-PlateMargin,Plate.Y-PlateMargin)};
+    Button.Face.Size=InViewPlate*Px;
+    Button.Face.Buttons={Mm(PlateMargin,PlateMargin,InViewPlate.X-PlateMargin,InViewPlate.Y-PlateMargin)};
     const FBox2D R=Button.Face.Buttons[0];
     TSharedRef<SCanvas> Canvas=SNew(SCanvas)
         +SCanvas::Slot().Position(FVector2D::ZeroVector).Size(Button.Face.Size)
@@ -351,7 +351,7 @@ void AHapbeatDemoSessionUi::Reposition(const FTransform& At)
         Panel.Press.Reset();
     };
     Move(CompletionPanel,Completion);Move(PausePanel,Pause);
-    bControlsPlaced=Haptics.bPlaced=Recenter.bPlaced=false;
+    Haptics.bPlaced=Recenter.bPlaced=false;
 }
 
 void AHapbeatDemoSessionUi::SetInViewVisible(UWidgetComponent* Widget,FInViewButton& Button,bool bVisible)
@@ -364,34 +364,39 @@ void AHapbeatDemoSessionUi::SetHapticsButton(bool bVisible,bool bOn)
 {
     bHapticsOn=bOn;
     if(bVisible&&Haptics.Face.Buttons.IsEmpty())
-        BuildInViewWidget(HapticsButton,Haptics,[this](){return FText::FromString(bHapticsOn?TEXT("触覚 ON"):TEXT("触覚 OFF"));},[this](){return bHapticsOn;});
+        BuildInViewWidget(HapticsButton,Haptics,[this](){return FText::FromString(bHapticsOn?TEXT("Haptics\nON"):TEXT("Haptics\nOFF"));},[this](){return bHapticsOn;});
     SetInViewVisible(HapticsButton,Haptics,bVisible);
 }
 
 void AHapbeatDemoSessionUi::SetRecenterButton(bool bVisible)
 {
     if(bVisible&&Recenter.Face.Buttons.IsEmpty())
-        BuildInViewWidget(RecenterButton,Recenter,[](){return FText::FromString(TEXT("視線をリセット"));},[](){return false;});
+        BuildInViewWidget(RecenterButton,Recenter,[](){return FText::FromString(TEXT("Reset\nView"));},[](){return false;});
     SetInViewVisible(RecenterButton,Recenter,bVisible);
+}
+
+FVector AHapbeatDemoSessionUi::InViewButtonLocation(const FVector& Eye,float HeadingYaw,bool bRecenter)
+{
+    // Turned from the heading (negative = left), then lowered below the horizon.
+    return Eye+FRotator(InViewPitch,HeadingYaw+(bRecenter?RecenterYawOffset:HapticsYawOffset),0).Vector()*InViewDistance;
 }
 
 void AHapbeatDemoSessionUi::PlaceInViewButtons(const FVector& Eye,const FRotator& View,float Dt)
 {
-    // Lower left of the view, following the head slowly: the heading catches up only beyond the dead zone and
-    // the pitch is fixed below the horizon, so looking down at a button does not push it away.
-    if(!Haptics.Face.bShown&&!Recenter.Face.bShown) {bControlsPlaced=false;return;}
-    if(!bControlsPlaced) ControlsYaw=View.Yaw;
-    bControlsPlaced=true;
-    const float Off=FRotator::NormalizeAxis(View.Yaw-ControlsYaw);
-    if(FMath::Abs(Off)>InViewYawDeadZone) ControlsYaw+=(Off-FMath::Sign(Off)*InViewYawDeadZone)*FMath::Min(1.f,Dt*3.f);
-    auto Place=[&](UWidgetComponent* Widget,FInViewButton& Button,float Pitch)
+    // Lower left of the view, slowly following the head's heading (Unity DemoHeadingPlacement): the head's pitch is
+    // ignored, so looking down at a button keeps it still.
+    const float Alpha=1.f-FMath::Exp(-InViewFollowRate*Dt);
+    auto Place=[&](UWidgetComponent* Widget,FInViewButton& Button,bool bRecenter)
     {
         if(!Button.Face.bShown) return;
-        const FVector Goal=Eye+FRotator(Pitch,ControlsYaw+InViewYawOffset,0).Vector()*InViewDistance;
-        Button.Location=Button.bPlaced?FMath::VInterpTo(Button.Location,Goal,Dt,4.f):Goal;Button.bPlaced=true;
-        Widget->SetWorldLocationAndRotation(Button.Location,(Eye-Button.Location).Rotation());
+        const FVector Goal=InViewButtonLocation(Eye,View.Yaw,bRecenter);
+        const FQuat GoalRotation=(Eye-Goal).Rotation().Quaternion();
+        if(Button.bPlaced) {Button.Location=FMath::Lerp(Button.Location,Goal,Alpha);Button.Rotation=FQuat::Slerp(Button.Rotation,GoalRotation,Alpha);}
+        else {Button.Location=Goal;Button.Rotation=GoalRotation;}
+        Button.bPlaced=true;
+        Widget->SetWorldLocationAndRotation(Button.Location,Button.Rotation);
     };
-    Place(HapticsButton,Haptics,HapticsPitch);Place(RecenterButton,Recenter,RecenterPitch);
+    Place(HapticsButton,Haptics,false);Place(RecenterButton,Recenter,true);
 }
 
 void AHapbeatDemoSessionUi::PlayClick()

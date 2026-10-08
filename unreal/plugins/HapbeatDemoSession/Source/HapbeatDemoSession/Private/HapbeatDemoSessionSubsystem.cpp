@@ -80,6 +80,7 @@ void UHapbeatDemoSessionSubsystem::Load(const FString& DescriptorJson,bool bDesc
     if(bHasDescriptor) {
         Receiver.IsAllowed=[this](const FString& Action){return IsControlAllowed(Action);};
         Receiver.Execute=[this](const FString& Action){return ExecuteControl(Action);};
+        Receiver.GetState=[this](){return GetSwitchState();};
         Receiver.Configure(Descriptor.DemoId);
     }
 }
@@ -133,31 +134,72 @@ void UHapbeatDemoSessionSubsystem::UnregisterControls(const UObject* Owner)
     Controls.RemoveAll([&](const FControl& C){return !C.Owner.IsValid()||C.Owner.Get()==Owner;});
 }
 
-bool UHapbeatDemoSessionSubsystem::IsControlAllowed(const FString& Action) const
+EHapbeatControlRoute UHapbeatDemoSessionSubsystem::RouteControl(const FString& Action,bool bRegistered,bool bPauseEnabled,bool bHapticsToggle)
 {
     // 視線をリセット is common to every Session runtime (with or without a handler of the demo's own).
-    if(Action==TEXT("recenter")||Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) return true;
-    if(Action.StartsWith(TEXT("haptics_"))) return Descriptor.bHapticsToggle
-        &&(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")||Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide"));
-    return Controls.ContainsByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
+    if(Action==TEXT("recenter")||Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) return EHapbeatControlRoute::Plugin;
+    if(Action.StartsWith(TEXT("haptics_"))) return bHapticsToggle
+        &&(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")||Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide"))
+        ?EHapbeatControlRoute::Plugin:EHapbeatControlRoute::NotAllowed;
+    if(bRegistered) return EHapbeatControlRoute::Registered;
+    // Without an app-specific menu / restart the shared pause handles them (spec: shared handlers).
+    if(bPauseEnabled&&(Action==TEXT("menu_open")||Action==TEXT("menu_close"))) return EHapbeatControlRoute::SharedPause;
+    if(bPauseEnabled&&Action==TEXT("restart")) return EHapbeatControlRoute::SharedRestart;
+    return EHapbeatControlRoute::NotAllowed;
+}
+
+bool UHapbeatDemoSessionSubsystem::IsControlAllowed(const FString& Action) const
+{
+    const bool bRegistered=Controls.ContainsByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
+    return RouteControl(Action,bRegistered,PauseSettings.bEnabled,Descriptor.bHapticsToggle)!=EHapbeatControlRoute::NotAllowed;
 }
 
 bool UHapbeatDemoSessionSubsystem::ExecuteControl(const FString& Action)
 {
-    if(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")) {SetHapticsEnabled(Action==TEXT("haptics_on"));return true;}
-    if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return true;}
-    if(Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) {SetRecenterUiVisible(Action==TEXT("recenter_ui_show"));return true;}
-    if(Action==TEXT("recenter")) {
-        // The user is asked to look ahead: the head's yaw is the facing.
-        const UWorld* World=GetTickableGameObjectWorld();
-        const APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
-        return PC&&PC->PlayerCameraManager&&RecenterView(PC->PlayerCameraManager->GetCameraRotation().Yaw,TEXT("control"));
-    }
     const FControl* Control=Controls.FindByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
-    if(!Control||!Control->Handler()) return false;
-    // restart reloads the experience: an open completion or pause panel belongs to the previous run.
-    if(Action==TEXT("restart")) {HideCompletion();HidePause();}
-    return true;
+    switch(RouteControl(Action,Control!=nullptr,PauseSettings.bEnabled,Descriptor.bHapticsToggle)) {
+    case EHapbeatControlRoute::Plugin:
+        if(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")) {SetHapticsEnabled(Action==TEXT("haptics_on"));return true;}
+        if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return true;}
+        if(Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) {SetRecenterUiVisible(Action==TEXT("recenter_ui_show"));return true;}
+        {
+            // recenter: the user is asked to look ahead, so the head's yaw is the facing.
+            const UWorld* World=GetTickableGameObjectWorld();
+            const APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
+            return PC&&PC->PlayerCameraManager&&RecenterView(PC->PlayerCameraManager->GetCameraRotation().Yaw,TEXT("control"));
+        }
+    case EHapbeatControlRoute::Registered:
+        if(!Control->Handler()) return false;
+        // restart reloads the experience: an open completion or pause panel belongs to the previous run.
+        if(Action==TEXT("restart")) {HideCompletion();HidePause();}
+        return true;
+    case EHapbeatControlRoute::SharedPause:
+        // Explicit set operations: an open panel stays open, a closed one stays closed. The pause does not open over
+        // the completion panel or while leaving (the operation then fails).
+        if(Action==TEXT("menu_open")) ShowPause(); else HidePause();
+        return bPauseShown==(Action==TEXT("menu_open"));
+    case EHapbeatControlRoute::SharedRestart:
+        // The pause panel's 最初からやり直す; an open completion panel belongs to the previous run as well.
+        UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE_RESTART source=control"));
+        PauseDetector.Reset();HideCompletion();HidePause();
+        OnRestartRequested.Broadcast();
+        return true;
+    default:
+        return false;
+    }
+}
+
+FHapbeatDemoSwitchState UHapbeatDemoSessionSubsystem::GetSwitchState() const
+{
+    FHapbeatDemoSwitchState S;
+    S.bHapticsOn=bHapticsEnabled;
+    // As drawn: the haptics button also needs supports.haptics_toggle.
+    S.bHapticsUi=bHasDescriptor&&Descriptor.bHapticsToggle&&bHapticsUiVisible;
+    S.bRecenterUi=bRecenterUiVisible;
+    S.bPaused=bPauseShown;
+    S.StepIndex=bSessionActive?Ticket.Index:-1;
+    S.StepCount=bSessionActive?Ticket.Steps.Num():0;
+    return S;
 }
 
 void UHapbeatDemoSessionSubsystem::SetHapticsEnabled(bool bEnabled)
@@ -483,7 +525,7 @@ void UHapbeatDemoSessionSubsystem::Tick(float Dt)
     // While a launch waits for the background the panels stay up, but nothing else is started from them.
     if(IsLeaving()) return;
     if(E.bToggleHaptics) SetHapticsEnabled(!bHapticsEnabled);
-    if(E.bRecenter) RecenterView(View->GetControlsYaw(),TEXT("button"));
+    if(E.bRecenter) RecenterView(Rotation.Yaw,TEXT("button"));
     if(E.bRetry) {
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RETRY step=%d"),Ticket.Index+1);
         HideCompletion();OnRestartRequested.Broadcast();

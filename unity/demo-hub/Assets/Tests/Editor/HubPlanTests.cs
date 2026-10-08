@@ -100,6 +100,79 @@ namespace Hapbeat.DemoHub.Tests
         }
 
         [Test]
+        public void NameAndRevisionRoundTripAndOlderFilesLoad()
+        {
+            var store = new HubPlanStore(_directory);
+            var plan = new HubPlan { Name = "XR Kaigi A", Revision = 5 };
+            plan.Add(_volley);
+            Assert.That(store.Save(plan, HubPlanStore.PresetSlot(1)), Is.True);
+            Assert.That(store.TryLoad(HubPlanStore.PresetSlot(1), out var loaded), Is.True);
+            Assert.That(loaded.Name, Is.EqualTo("XR Kaigi A"));
+            Assert.That(loaded.Revision, Is.EqualTo(5));
+
+            File.WriteAllText(Path.Combine(_directory, "preset-2.json"), "{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{},\"retry\":true}]}");
+            Assert.That(store.TryLoad(HubPlanStore.PresetSlot(2), out var old), Is.True, "Files from before name / revision still load.");
+            Assert.That(old.Name, Is.EqualTo(""));
+            Assert.That(old.Revision, Is.Zero);
+            Assert.That(old.Steps.Single().DemoId, Is.EqualTo("volley"));
+
+            File.WriteAllText(Path.Combine(_directory, "preset-3.json"), "{\"version\":1,\"name\":\" \",\"revision\":-4,\"steps\":[]}");
+            Assert.That(store.TryLoad(HubPlanStore.PresetSlot(3), out var invalid), Is.True);
+            Assert.That(invalid.Name, Is.EqualTo(""), "A name outside the rules is dropped.");
+            Assert.That(invalid.Revision, Is.Zero);
+        }
+
+        [Test]
+        public void EverySavedPresetIncreasesItsRevision()
+        {
+            var store = new HubPlanStore(_directory);
+            var plan = new HubPlan();
+            plan.Add(_boxing);
+            Assert.That(store.SavePreset(plan, 1), Is.True);
+            Assert.That(store.SavePreset(plan, 1), Is.True);
+            Assert.That(plan.Revision, Is.EqualTo(2));
+            Assert.That(store.LoadPreset(1).Revision, Is.EqualTo(2));
+
+            // A file where the directory should be: the write fails and the revision stays.
+            var blocked = new HubPlanStore(Path.Combine(_directory, "preset-1.json"));
+            Assert.That(blocked.SavePreset(plan, 1), Is.False);
+            Assert.That(plan.Revision, Is.EqualTo(2));
+        }
+
+        static DemoSwitchPresetStep Step(string demoId, params (string key, string value)[] options) =>
+            new DemoSwitchPresetStep(demoId, options.ToDictionary(o => o.key, o => o.value), true);
+
+        [Test]
+        public void PresetCheckReportsTheFirstOffendingDemo()
+        {
+            Assert.That(HubPlan.Check(new[] { Step("volley", ("scene", "receive"), ("balls", "20")), Step("trex-encounter") }, _catalog, out var demoId),
+                Is.EqualTo(DemoSwitchPresetCheck.Ok));
+            Assert.That(demoId, Is.Null);
+            Assert.That(HubPlan.Check(new DemoSwitchPresetStep[0], _catalog, out _), Is.EqualTo(DemoSwitchPresetCheck.Ok), "An empty list clears the preset.");
+            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("handdemo"), Step("boxing", ("round", "30")) }, _catalog, out demoId),
+                Is.EqualTo(DemoSwitchPresetCheck.NotInstalled));
+            Assert.That(demoId, Is.EqualTo("handdemo"));
+            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("boxing", ("round", "30")), Step("handdemo") }, _catalog, out demoId),
+                Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
+            Assert.That(demoId, Is.EqualTo("boxing"));
+            Assert.That(HubPlan.Check(new[] { Step("trex-encounter", ("tutorial", "on")) }, _catalog, out demoId), Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
+            Assert.That(demoId, Is.EqualTo("trex-encounter"));
+        }
+
+        [Test]
+        public void PresetStepsKeepTheStoredOptionsIncludingUninstalledDemos()
+        {
+            var plan = HubPlan.FromPreset("A", new[] { Step("handdemo", ("tutorial", "on")), new DemoSwitchPresetStep("volley", null, false) });
+            plan.Steps[1].Options["Bad Key"] = "x";
+            var steps = plan.PresetSteps();
+            Assert.That(plan.Name, Is.EqualTo("A"));
+            Assert.That(steps.Select(s => s.DemoId), Is.EqualTo(new[] { "handdemo", "volley" }));
+            Assert.That(steps[0].Options["tutorial"], Is.EqualTo("on"));
+            Assert.That(steps[1].Retry, Is.False);
+            Assert.That(steps[1].Options, Is.Empty, "Options the wire format cannot carry are left out.");
+        }
+
+        [Test]
         public void TicketSatisfiesTheContractAndSkipsUninstalledDemos()
         {
             var plan = new HubPlan();

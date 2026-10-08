@@ -32,11 +32,13 @@ namespace
         return BytesToHex(Digest,Length).ToLower();
     }
     FString Header(const TCHAR* Kind) {return FString(TEXT("HAPBEAT-DEMO-SWITCH/1\n"))+Kind+TEXT("\n");}
+    /** DISCOVER and QUERY carry a nonce and no sequence. */
+    bool IsNonceRequest(const FString& Type) {return Type==TEXT("DISCOVER")||Type==TEXT("QUERY");}
     FString Command(const FHapbeatDemoSwitchMessage& M)
     {
-        FString C=Header(M.Type==TEXT("DISCOVER")?TEXT("DISCOVER"):TEXT("COMMAND"))
+        FString C=Header(IsNonceRequest(M.Type)?*M.Type:TEXT("COMMAND"))
             +Field(TEXT("version"),TEXT("1"))+Field(TEXT("type"),M.Type)+Field(TEXT("controller_id"),M.ControllerId);
-        if(M.Type==TEXT("DISCOVER")) return C+Field(TEXT("nonce"),M.Nonce);
+        if(IsNonceRequest(M.Type)) return C+Field(TEXT("nonce"),M.Nonce);
         C+=Field(TEXT("seq"),LexToString(M.Sequence))+Field(TEXT("demo_id"),M.DemoId);
         if(M.Type==TEXT("CONTROL")) C+=Field(TEXT("action"),M.Action)+Field(TEXT("scene_id"),M.SceneId);
         return C;
@@ -93,7 +95,7 @@ bool HapbeatDemoSwitchProtocol::Parse(const TArray<uint8>& Bytes,FHapbeatDemoSwi
     if(!Ended || Reader->ReadNext(N) || !Reader->GetErrorMessage().IsEmpty()) return false;
     const FString Type=Fields.FindRef(TEXT("type"));
     TSet<FString> Required={TEXT("version"),TEXT("type"),TEXT("controller_id")};
-    if(Type==TEXT("DISCOVER")) Required.Add(TEXT("nonce"));
+    if(IsNonceRequest(Type)) Required.Add(TEXT("nonce"));
     else if(Type==TEXT("CONTROL")||Type==TEXT("SWITCH")) {
         Required.Add(TEXT("seq"));Required.Add(TEXT("demo_id"));
         if(Type==TEXT("CONTROL")) {Required.Add(TEXT("action"));Required.Add(TEXT("scene_id"));}
@@ -107,7 +109,7 @@ bool HapbeatDemoSwitchProtocol::Parse(const TArray<uint8>& Bytes,FHapbeatDemoSwi
     if(Fields.Contains(TEXT("auth")) && (Numbers.Contains(TEXT("auth"))||!Hex(Fields[TEXT("auth")],64))) return false;
     FHapbeatDemoSwitchMessage M;
     M.Type=Type;M.ControllerId=Fields[TEXT("controller_id")];M.Auth=Fields.FindRef(TEXT("auth"));
-    if(Type==TEXT("DISCOVER")) {M.Nonce=Fields[TEXT("nonce")];if(!Hex(M.Nonce,16)) return false;}
+    if(IsNonceRequest(Type)) {M.Nonce=Fields[TEXT("nonce")];if(!Hex(M.Nonce,16)) return false;}
     else {
         M.Sequence=FCString::Atoi64(*Fields[TEXT("seq")]);M.DemoId=Fields[TEXT("demo_id")];
         if(M.Sequence<1||M.Sequence>9007199254740991LL||!IsIdentifier(M.DemoId)) return false;
@@ -136,13 +138,27 @@ FString HapbeatDemoSwitchProtocol::Here(const FHapbeatDemoSwitchMessage& M,const
         +Field(TEXT("controller_id"),M.ControllerId)+Field(TEXT("nonce"),M.Nonce)+Field(TEXT("current_demo_id"),Demo);
     return Encode(O,C,Secret);
 }
-FString HapbeatDemoSwitchProtocol::Status(const FHapbeatDemoSwitchMessage& M,const FString& Demo,const FString& Type,const FString& Code,const FString& Secret)
+FString HapbeatDemoSwitchProtocol::State(const FHapbeatDemoSwitchMessage& M,const FString& Demo,const FHapbeatDemoSwitchState& S,const FString& Secret)
+{
+    auto O=MakeShared<FJsonObject>();O->SetNumberField(TEXT("version"),1);O->SetStringField(TEXT("type"),TEXT("STATE"));
+    O->SetStringField(TEXT("controller_id"),M.ControllerId);O->SetStringField(TEXT("nonce"),M.Nonce);O->SetStringField(TEXT("current_demo_id"),Demo);
+    O->SetBoolField(TEXT("foreground"),S.bForeground);O->SetBoolField(TEXT("haptics_on"),S.bHapticsOn);O->SetBoolField(TEXT("haptics_ui"),S.bHapticsUi);O->SetBoolField(TEXT("recenter_ui"),S.bRecenterUi);
+    O->SetBoolField(TEXT("paused"),S.bPaused);O->SetNumberField(TEXT("step_index"),S.StepIndex);O->SetNumberField(TEXT("step_count"),S.StepCount);
+    // Booleans are signed as true / false, integers in base 10.
+    auto Bool=[](bool B){return FString(B?TEXT("true"):TEXT("false"));};
+    const FString C=Header(TEXT("STATE"))+Field(TEXT("version"),TEXT("1"))+Field(TEXT("type"),TEXT("STATE"))
+        +Field(TEXT("controller_id"),M.ControllerId)+Field(TEXT("nonce"),M.Nonce)+Field(TEXT("current_demo_id"),Demo)
+        +Field(TEXT("foreground"),Bool(S.bForeground))+Field(TEXT("haptics_on"),Bool(S.bHapticsOn))+Field(TEXT("haptics_ui"),Bool(S.bHapticsUi))+Field(TEXT("recenter_ui"),Bool(S.bRecenterUi))
+        +Field(TEXT("paused"),Bool(S.bPaused))+Field(TEXT("step_index"),LexToString(S.StepIndex))+Field(TEXT("step_count"),LexToString(S.StepCount));
+    return Encode(O,C,Secret);
+}
+FString HapbeatDemoSwitchProtocol::Status(const FHapbeatDemoSwitchMessage& M,const FString& Demo,const FString& Type,const FString& Code,const FString& Secret,const FString& Text)
 {
     auto O=MakeShared<FJsonObject>();O->SetNumberField(TEXT("version"),1);O->SetStringField(TEXT("type"),Type);
     O->SetStringField(TEXT("controller_id"),M.ControllerId);O->SetNumberField(TEXT("seq"),static_cast<double>(M.Sequence));
     O->SetStringField(TEXT("demo_id"),M.DemoId);O->SetStringField(TEXT("current_demo_id"),Demo);
-    O->SetStringField(TEXT("code"),Code);O->SetStringField(TEXT("message"),TEXT(""));
+    O->SetStringField(TEXT("code"),Code);O->SetStringField(TEXT("message"),Text);
     const FString C=Header(TEXT("STATUS"))+Field(TEXT("version"),TEXT("1"))+Field(TEXT("type"),Type)+Field(TEXT("controller_id"),M.ControllerId)
-        +Field(TEXT("seq"),LexToString(M.Sequence))+Field(TEXT("demo_id"),M.DemoId)+Field(TEXT("current_demo_id"),Demo)+Field(TEXT("code"),Code)+Field(TEXT("message"),TEXT(""));
+        +Field(TEXT("seq"),LexToString(M.Sequence))+Field(TEXT("demo_id"),M.DemoId)+Field(TEXT("current_demo_id"),Demo)+Field(TEXT("code"),Code)+Field(TEXT("message"),Text);
     return Encode(O,C,Secret);
 }

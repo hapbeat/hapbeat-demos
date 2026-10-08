@@ -18,6 +18,7 @@ namespace Hapbeat.DemoSwitch
         public const string NotInFrontError = "起動したアプリが前面に出ませんでした";
         private static string _nextDemoId;
         private static Action<string> _onFailed;
+        private static Action<string> _onLeft;
         private static float _deadline;
         private static bool _finished;
         private static DemoAppHandoffWatcher _watcher;
@@ -47,14 +48,29 @@ namespace Hapbeat.DemoSwitch
             }
         }
 
+        /// <summary>
+        /// Runs <paramref name="onLeft"/> (with the started demo ID) once this application has gone to the background,
+        /// while 7710 is still bound (PRESET_START sends READY there). False when no hand-over is pending.
+        /// </summary>
+        internal static bool NotifyWhenLeft(Action<string> onLeft)
+        {
+            if (!IsPending) return false;
+            _onLeft = onLeft;
+            return true;
+        }
+
         /// <summary>Focus lost or paused: the started application is in front. Cleans up and finishes once.</summary>
         internal static void OnBackgrounded()
         {
             if (!IsPending) return;
             var next = _nextDemoId;
+            var onLeft = _onLeft;
             _nextDemoId = null;
             _onFailed = null;
+            _onLeft = null;
             _finished = true;
+            try { onLeft?.Invoke(next); }
+            catch (Exception exception) { Debug.LogException(exception); }
             if (DemoSwitchRuntime.Instance != null) DemoSwitchRuntime.Instance.StopForHandoff(next);
             else DemoSwitch.NotifyBeforeSwitch(next);
             DemoSession.CurrentHost?.SetHapticsEnabled(false);
@@ -71,6 +87,7 @@ namespace Hapbeat.DemoSwitch
             Debug.LogError("[Demo Switch] '" + _nextDemoId + "' did not come to the front within " + TimeoutSeconds + " s; this application keeps running.");
             _nextDemoId = null;
             _onFailed = null;
+            _onLeft = null;
             onFailed?.Invoke(NotInFrontError);
         }
 
@@ -78,6 +95,7 @@ namespace Hapbeat.DemoSwitch
         {
             _nextDemoId = null;
             _onFailed = null;
+            _onLeft = null;
             _finished = false;
         }
     }

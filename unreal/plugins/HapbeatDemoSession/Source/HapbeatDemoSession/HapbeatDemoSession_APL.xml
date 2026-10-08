@@ -16,6 +16,8 @@
       <queries>
         <package android:name="jp.hapbeat.demohub" />
       </queries>
+      <!-- Demo Switch: the receiver holds a Wi-Fi MulticastLock while bound, so a broadcast DISCOVER is not filtered. -->
+      <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     </addElements>
   </androidManifestUpdates>
 
@@ -148,6 +150,44 @@
         }
         catch (Exception e)
         {
+            return false;
+        }
+    }
+
+    private android.net.wifi.WifiManager.MulticastLock HapbeatSessionMulticastLock;
+
+    /** Acquires (held) or releases the Demo Switch receiver's Wi-Fi MulticastLock. True when the lock is now held. */
+    public boolean AndroidThunkJava_HapbeatSession_SetMulticastLock(boolean held)
+    {
+        try
+        {
+            if (!held)
+            {
+                if (HapbeatSessionMulticastLock != null &amp;&amp; HapbeatSessionMulticastLock.isHeld())
+                {
+                    HapbeatSessionMulticastLock.release();
+                }
+                return false;
+            }
+            if (HapbeatSessionMulticastLock == null)
+            {
+                android.net.wifi.WifiManager wifi = (android.net.wifi.WifiManager)getApplicationContext().getSystemService(android.content.Context.WIFI_SERVICE);
+                if (wifi == null)
+                {
+                    return false;
+                }
+                HapbeatSessionMulticastLock = wifi.createMulticastLock("HapbeatDemoSwitch");
+                HapbeatSessionMulticastLock.setReferenceCounted(false);
+            }
+            if (!HapbeatSessionMulticastLock.isHeld())
+            {
+                HapbeatSessionMulticastLock.acquire();
+            }
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.debug("HapbeatDemoSession: multicast lock unavailable: " + e);
             return false;
         }
     }

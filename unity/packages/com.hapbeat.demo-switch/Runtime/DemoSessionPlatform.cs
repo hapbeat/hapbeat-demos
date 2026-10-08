@@ -41,8 +41,8 @@ namespace Hapbeat.DemoSwitch
 
     internal interface IDemoSessionPlatform
     {
-        /// <summary>Reads the ticket extra from the launch Intent and removes it.</summary>
-        bool TryTakeTicketExtra(out string json);
+        /// <summary>Reads a String extra (the ticket, the Hub's start request) from the current Intent and removes it.</summary>
+        bool TryTakeStringExtra(string name, out string value);
         bool TryLaunch(string packageName, string activityName, string ticketJson, out string error);
         void FinishTask();
         bool TryReadOwnAsset(string name, out string text, out string error);
@@ -70,9 +70,9 @@ namespace Hapbeat.DemoSwitch
     /// <summary>Editor and non-Android players: never start or finish another application.</summary>
     internal sealed class SafeDemoSessionPlatform : IDemoSessionPlatform
     {
-        public bool TryTakeTicketExtra(out string json)
+        public bool TryTakeStringExtra(string name, out string value)
         {
-            json = null;
+            value = null;
             return false;
         }
 
@@ -125,23 +125,24 @@ namespace Hapbeat.DemoSwitch
 #if UNITY_ANDROID && !UNITY_EDITOR
     internal sealed class AndroidDemoSessionPlatform : IDemoSessionPlatform
     {
-        public bool TryTakeTicketExtra(out string json)
+        public bool TryTakeStringExtra(string name, out string value)
         {
-            json = null;
+            value = null;
             try
             {
+                // UnityPlayerGameActivity.onNewIntent calls setIntent, so this is also a re-delivered Intent (singleTask).
                 using (var activity = CurrentActivity())
                 using (var intent = activity.Call<AndroidJavaObject>("getIntent"))
                 {
-                    if (intent == null || !intent.Call<bool>("hasExtra", DemoSession.TicketExtra)) return false;
-                    try { json = intent.Call<string>("getStringExtra", DemoSession.TicketExtra); }
-                    finally { intent.Call("removeExtra", DemoSession.TicketExtra); }
-                    return json != null;
+                    if (intent == null || !intent.Call<bool>("hasExtra", name)) return false;
+                    try { value = intent.Call<string>("getStringExtra", name); }
+                    finally { intent.Call("removeExtra", name); }
+                    return value != null;
                 }
             }
             catch (Exception exception)
             {
-                Debug.LogWarning("[Demo Session] Could not read the session ticket: " + exception.Message);
+                Debug.LogWarning("[Demo Session] Could not read the Intent extra " + name + ": " + exception.Message);
                 return false;
             }
         }

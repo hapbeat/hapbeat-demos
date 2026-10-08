@@ -8,6 +8,7 @@
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchProtocol.h"
 #include "HapbeatDemoSessionUi.h"
+#include "Components/WidgetComponent.h"
 #include "HapbeatDemoSessionPanelAnchor.h"
 #include "HapbeatDemoSessionPause.h"
 #include "HapbeatDemoSessionHandoff.h"
@@ -297,6 +298,75 @@ void FHapbeatDemoSessionSpec::Define()
             TestEqual(TEXT("signed status"),Ready->GetStringField(TEXT("auth")).Len(),64);
             const TSharedPtr<FJsonObject> Unsigned=Object(HapbeatDemoSwitchProtocol::Status(M,TEXT("safety-mill"),TEXT("FAILED"),TEXT("not_allowed"),FString()));
             TestTrue(TEXT("unsigned status has no auth"),Unsigned.IsValid()&&!Unsigned->HasField(TEXT("auth")));
+            const TSharedPtr<FJsonObject> Refused=Object(HapbeatDemoSwitchProtocol::Status(M,TEXT("safety-mill"),TEXT("FAILED"),TEXT("not_allowed"),FString(),TEXT("not in foreground")));
+            TestTrue(TEXT("status message"),Refused.IsValid()&&Refused->GetStringField(TEXT("message"))==TEXT("not in foreground"));
+        });
+        // QUERY / STATE (contracts feaf799 fixtures unsigned_query / unsigned_state). Vectors: HMAC-SHA256 with key
+        // "unit-test-secret" (Python's hmac) over these canonical strings:
+        //   QUERY: "HAPBEAT-DEMO-SWITCH/1\nQUERY\nversion=1:1\ntype=5:QUERY\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n"
+        //   STATE: "HAPBEAT-DEMO-SWITCH/1\nSTATE\nversion=1:1\ntype=5:STATE\ncontroller_id=12:remote-pixel\nnonce=16:0123456789abcdef\n
+        //           current_demo_id=8:handdemo\nforeground=4:true\nhaptics_on=4:true\nhaptics_ui=5:false\nrecenter_ui=5:false\npaused=5:false\nstep_index=1:1\nstep_count=1:3\n"
+        //   STATE outside a session, not foreground: "...current_demo_id=11:safety-mill\nforeground=5:false\nhaptics_on=5:false\nhaptics_ui=4:true\nrecenter_ui=4:true\npaused=4:true\n
+        //           step_index=2:-1\nstep_count=1:0\n" (same header and first four fields)
+        const FString Query=TEXT(R"({"version":1,"type":"QUERY","controller_id":"remote-pixel","nonce":"0123456789abcdef"})");
+        It(TEXT("authenticates QUERY and rejects malformed ones"),[this,Secret,Query]()
+        {
+            FHapbeatDemoSwitchMessage M;
+            TestTrue(TEXT("QUERY parses"),HapbeatDemoSwitchProtocol::Parse(Bytes(Query),M));
+            TestEqual(TEXT("nonce"),M.Nonce,FString(TEXT("0123456789abcdef")));
+            TestTrue(TEXT("isolated unsigned"),HapbeatDemoSwitchProtocol::Authenticate(M,FString(),true));
+            TestFalse(TEXT("secret set, no auth"),HapbeatDemoSwitchProtocol::Authenticate(M,Secret,false));
+            const FString Signed=Query.Replace(TEXT("\"}"),TEXT("\",\"auth\":\"78a864c5ba7793ab04e1f174e3d9e39a6452498bb6131e141f8007757d3ced30\"}"));
+            TestTrue(TEXT("signed QUERY parses"),HapbeatDemoSwitchProtocol::Parse(Bytes(Signed),M));
+            TestTrue(TEXT("QUERY signature"),HapbeatDemoSwitchProtocol::Authenticate(M,Secret,false));
+            M.Nonce=TEXT("0123456789abcdee");
+            TestFalse(TEXT("nonce is signed"),HapbeatDemoSwitchProtocol::Authenticate(M,Secret,false));
+            const TArray<FString> Bad={
+                Query.Replace(TEXT("\"}"),TEXT("\",\"seq\":1}")),
+                Query.Replace(TEXT("\"}"),TEXT("\",\"demo_id\":\"handdemo\"}")),
+                Query.Replace(TEXT("0123456789abcdef"),TEXT("0123456789ABCDEF")),
+                Query.Replace(TEXT("\"nonce\":\"0123456789abcdef\""),TEXT("\"nonce\":1")),
+                Query.Replace(TEXT(",\"nonce\":\"0123456789abcdef\""),TEXT("")),
+                Query.Replace(TEXT("QUERY"),TEXT("STATE")),
+            };
+            for(int32 I=0;I<Bad.Num();++I) {FHapbeatDemoSwitchMessage B;TestFalse(FString::Printf(TEXT("malformed QUERY %d"),I),HapbeatDemoSwitchProtocol::Parse(Bytes(Bad[I]),B));}
+        });
+        It(TEXT("answers QUERY with STATE"),[this,Secret,Query]()
+        {
+            FHapbeatDemoSwitchMessage M;HapbeatDemoSwitchProtocol::Parse(Bytes(Query),M);
+            FHapbeatDemoSwitchState S;S.bHapticsOn=true;S.StepIndex=1;S.StepCount=3;
+            TestEqual(TEXT("unsigned STATE = fixture"),HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,FString()),
+                FString(TEXT(R"({"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef","current_demo_id":"handdemo","foreground":true,"haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,"step_index":1,"step_count":3})")));
+            const TSharedPtr<FJsonObject> Signed=Object(HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,Secret));
+            TestTrue(TEXT("signed STATE"),Signed.IsValid()&&Signed->GetStringField(TEXT("auth"))==TEXT("2a0883597008915dd0bd27d89c36a3d852d3071e26ed0eb6580074a9de47a171"));
+            FHapbeatDemoSwitchState Out;Out.bForeground=false;Out.bHapticsOn=false;Out.bHapticsUi=Out.bRecenterUi=Out.bPaused=true;
+            const FString Outside=HapbeatDemoSwitchProtocol::State(M,TEXT("safety-mill"),Out,Secret);
+            TestTrue(TEXT("not foreground, outside a session: -1 / 0"),Outside.Contains(TEXT(R"("current_demo_id":"safety-mill","foreground":false,"haptics_on":false,)"))
+                &&Outside.Contains(TEXT(R"("paused":true,"step_index":-1,"step_count":0,"auth":"b1cb2a833111fba63bf84b73a729dbd5b3d8bd1e3a6d6ab20b4e33683a7befdf")")));
+        });
+    });
+    Describe(TEXT("ControlRoute"),[this]()
+    {
+        auto Route=[](const TCHAR* Action,bool bRegistered,bool bPause,bool bToggle){return UHapbeatDemoSessionSubsystem::RouteControl(Action,bRegistered,bPause,bToggle);};
+        It(TEXT("menu and restart fall back to the shared pause only when no handler is registered"),[this,Route]()
+        {
+            TestTrue(TEXT("menu_open: shared pause"),Route(TEXT("menu_open"),false,true,false)==EHapbeatControlRoute::SharedPause);
+            TestTrue(TEXT("menu_close: shared pause"),Route(TEXT("menu_close"),false,true,false)==EHapbeatControlRoute::SharedPause);
+            TestTrue(TEXT("restart: shared restart"),Route(TEXT("restart"),false,true,false)==EHapbeatControlRoute::SharedRestart);
+            TestTrue(TEXT("menu_open: the demo's own menu"),Route(TEXT("menu_open"),true,true,false)==EHapbeatControlRoute::Registered);
+            TestTrue(TEXT("restart: the demo's own restart"),Route(TEXT("restart"),true,true,false)==EHapbeatControlRoute::Registered);
+            TestTrue(TEXT("menu_open without pause or handler"),Route(TEXT("menu_open"),false,false,false)==EHapbeatControlRoute::NotAllowed);
+            TestTrue(TEXT("restart without pause or handler"),Route(TEXT("restart"),false,false,false)==EHapbeatControlRoute::NotAllowed);
+            TestTrue(TEXT("scene has no shared handler"),Route(TEXT("scene"),false,true,true)==EHapbeatControlRoute::NotAllowed);
+        });
+        It(TEXT("tutorial_start needs a registered handler; haptics and recenter are the plugin's"),[this,Route]()
+        {
+            TestTrue(TEXT("tutorial_start registered"),Route(TEXT("tutorial_start"),true,true,true)==EHapbeatControlRoute::Registered);
+            TestTrue(TEXT("tutorial_start without one"),Route(TEXT("tutorial_start"),false,true,true)==EHapbeatControlRoute::NotAllowed);
+            TestTrue(TEXT("haptics_on with the toggle"),Route(TEXT("haptics_on"),false,false,true)==EHapbeatControlRoute::Plugin);
+            TestTrue(TEXT("haptics_on without the toggle"),Route(TEXT("haptics_on"),true,true,false)==EHapbeatControlRoute::NotAllowed);
+            TestTrue(TEXT("recenter"),Route(TEXT("recenter"),true,false,false)==EHapbeatControlRoute::Plugin);
+            TestTrue(TEXT("recenter_ui_show"),Route(TEXT("recenter_ui_show"),false,false,false)==EHapbeatControlRoute::Plugin);
         });
     });
     Describe(TEXT("Press"),[this]()
@@ -649,7 +719,7 @@ void FHapbeatDemoSessionSpec::Define()
             const float NewFacing=T.GetRotation().Rotator().Yaw+(110-90);
             TestTrue(TEXT("facing the start yaw"),FMath::IsNearlyZero(FRotator::NormalizeAxis(NewFacing),.01f));
         });
-        It(TEXT("the 視線をリセット button presses like the haptics button and reports the controls' heading"),[this]()
+        It(TEXT("the 視線をリセット button presses like the haptics button and sits where Unity puts it"),[this]()
         {
             UWorld* World=UWorld::CreateWorld(EWorldType::EditorPreview,false);
             ON_SCOPE_EXIT { World->DestroyWorld(false); };
@@ -657,25 +727,47 @@ void FHapbeatDemoSessionSpec::Define()
             if(!TestNotNull(TEXT("ui"),Ui)) return;
             const FVector Eye(0,0,160);
             Ui->SetRecenterButton(true);
+            Ui->SetHapticsButton(true,true);
             FHapbeatSessionPointerInput None;
-            Ui->Step(None,Eye,FRotator(0,40,0),.1f);
-            TestTrue(TEXT("heading from the head"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
-            // A glance 20 deg down-left (inside the dead zone) keeps the heading.
-            Ui->Step(None,Eye,FRotator(-30,20,0),.1f);
-            TestTrue(TEXT("a glance keeps it"),FMath::IsNearlyEqual(Ui->GetControlsYaw(),40.f));
-            // Button: 45 cm away, 30 deg left of the heading, 27 deg down, facing the eye; 172 x 54 mm plate.
-            const FVector Centre=Eye+FRotator(-27,40-30,0).Vector()*45.f;
+            // Unity DemoSessionCornerButtons: 45 cm away, 30 deg down; 視線をリセット 19.5 deg and haptics 5 deg left
+            // of the heading, 88 x 64 mm plates about 10 mm apart (side by side, level, not overlapping), facing the eye.
+            const FVector Centre=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,40,true);
+            const FVector Haptics=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,40,false);
+            TestTrue(TEXT("reset at -19.5 deg"),Centre.Equals(Eye+FRotator(-30,40-19.5f,0).Vector()*45.f,.01f));
+            TestTrue(TEXT("haptics at -5 deg"),Haptics.Equals(Eye+FRotator(-30,40-5,0).Vector()*45.f,.01f));
+            const float Gap=FVector::Dist(Centre,Haptics)*10.f-88.f;
+            TestTrue(TEXT("about 10 mm apart, level"),Gap>9.f&&Gap<11.f&&FMath::IsNearlyEqual(Centre.Z,Haptics.Z,.01f));
+            TestTrue(TEXT("reset on the left"),FVector::DotProduct(Haptics-Centre,FRotator(0,40,0).Quaternion().GetRightVector())>0);
+            // Placed at once from the head's heading; the head's pitch is ignored.
+            Ui->Step(None,Eye,FRotator(-50,40,0),.1f);
+            TArray<UWidgetComponent*> Widgets;Ui->GetComponents(Widgets);
+            auto Find=[&Widgets](const TCHAR* Name){for(UWidgetComponent* W:Widgets) if(W->GetName()==Name) return W;return (UWidgetComponent*)nullptr;};
+            UWidgetComponent* ResetWidget=Find(TEXT("RecenterButton"));UWidgetComponent* HapticsWidget=Find(TEXT("HapticsButton"));
+            if(!TestNotNull(TEXT("widgets"),ResetWidget)||!TestNotNull(TEXT("haptics widget"),HapticsWidget)) return;
+            TestTrue(TEXT("reset placed"),ResetWidget->GetComponentLocation().Equals(Centre,.01f));
+            TestTrue(TEXT("haptics placed"),HapticsWidget->GetComponentLocation().Equals(Haptics,.01f));
+            TestTrue(TEXT("facing the eye"),ResetWidget->GetForwardVector().Equals((Eye-Centre).GetSafeNormal(),.001f));
+            TestTrue(TEXT("88 x 64 mm"),ResetWidget->GetDrawSize().Equals(FVector2D(176,128))&&HapticsWidget->GetDrawSize().Equals(FVector2D(176,128)));
+            // Hiding one keeps the other where it is.
+            Ui->SetHapticsButton(false,true);Ui->Step(None,Eye,FRotator(0,40,0),.1f);
+            TestTrue(TEXT("reset stays"),ResetWidget->GetComponentLocation().Equals(Centre,.01f));
+            // Then it follows a head turn slowly (1 - e^(-2.5 dt) of the way per frame), not at once.
+            Ui->Step(None,Eye,FRotator(0,80,0),.1f);
+            const FVector Turned=AHapbeatDemoSessionUi::InViewButtonLocation(Eye,80,true);
+            TestTrue(TEXT("follows slowly"),ResetWidget->GetComponentLocation().Equals(FMath::Lerp(Centre,Turned,1.f-FMath::Exp(-.25f)),.01f));
+            Ui->SetRecenterButton(false);Ui->SetRecenterButton(true);Ui->Step(None,Eye,FRotator(0,40,0),.1f);
+            // Looking down at the button (same heading) keeps it still.
             const FTransform At((Eye-Centre).Rotation(),Centre);
-            const FVector2D Plate(344,108);
+            const FVector2D Plate(176,128);
             FHapbeatSessionPointerInput In;In.bFinger[0]=true;In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);
-            TestFalse(TEXT("approach"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
+            TestFalse(TEXT("approach"),Ui->Step(In,Eye,FRotator(-30,40,0),.1f).bRecenter);
             In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
-            const auto E=Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            const auto E=Ui->Step(In,Eye,FRotator(-30,40,0),.1f);
             TestTrue(TEXT("pressed"),E.bRecenter);TestFalse(TEXT("not haptics"),E.bToggleHaptics);
             Ui->SetRecenterButton(false);
-            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);Ui->Step(In,Eye,FRotator(-30,20,0),.1f);
+            In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,8);Ui->Step(In,Eye,FRotator(-30,40,0),.1f);
             In.Finger[0]=PanelPoint(At,Plate,Plate*.5f,0);
-            TestFalse(TEXT("hidden: nothing"),Ui->Step(In,Eye,FRotator(-30,20,0),.1f).bRecenter);
+            TestFalse(TEXT("hidden: nothing"),Ui->Step(In,Eye,FRotator(-30,40,0),.1f).bRecenter);
         });
     });
     Describe(TEXT("Handoff"),[this]()

@@ -64,7 +64,7 @@ struct FHapbeatSessionPanelLayout
 /**
  * World-space Demo Session UI, driven by UHapbeatDemoSessionSubsystem every frame: the completion panel
  * (in front of the user below eye level, or at the demo's UHapbeatDemoSessionPanelAnchor), the pause panel
- * (in front of the user), the in-view haptics ON/OFF and 視線をリセット buttons (lower left of the view), plus a
+ * (in front of the user), the in-view haptics ON/OFF and 視線をリセット buttons (lower left of the view, side by side), plus a
  * thin ray from each tracked controller while the UI is visible. Panels stay where they appeared.
  *
  * Looks like the Unity package's panels (DemoSessionUi.cs): the same colours, Noto Sans CJK JP, sizes and vertical
@@ -123,10 +123,11 @@ public:
     void SetHapticsButton(bool bVisible,bool bOn);
     void SetRecenterButton(bool bVisible);
     /**
-     * World yaw the in-view buttons are placed from. It follows the head only once it has turned more than a dead
-     * zone away, so it stays the user's facing while they glance down-left at a button.
+     * Centre of an in-view button for the head's heading (world yaw), as in Unity's DemoSessionCornerButtons: 45 cm
+     * from the eye, 30 deg below the horizon, 視線をリセット (bRecenter) 19.5 deg and haptics 5 deg left of the heading;
+     * 88 x 64 mm each, about 10 mm apart.
      */
-    float GetControlsYaw() const {return ControlsYaw;}
+    static FVector InViewButtonLocation(const FVector& Eye,float HeadingYaw,bool bRecenter);
     FEvents Step(const FHapbeatSessionPointerInput& Input,const FVector& Eye,const FRotator& ViewRotation,float Dt);
 private:
     /** One floating panel's input and look state; its widget is CompletionPanel / PausePanel / HapticsButton / RecenterButton. */
@@ -149,6 +150,7 @@ private:
     {
         FPanel Face;
         FVector Location=FVector::ZeroVector;
+        FQuat Rotation=FQuat::Identity;
         bool bPlaced=false;
     };
     void BuildCompletionWidget();
@@ -179,6 +181,5 @@ private:
     int32 RetryButton=INDEX_NONE, NextButton=INDEX_NONE;
     int32 ResumeButton=INDEX_NONE, RestartButton=INDEX_NONE, PauseNextButton=INDEX_NONE, HubButton=INDEX_NONE;
     FString PauseNextLabel;
-    bool bHapticsOn=true, bControlsPlaced=false;
-    float ControlsYaw=0;
+    bool bHapticsOn=true;
 };
