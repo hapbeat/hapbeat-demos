@@ -63,11 +63,23 @@ class ControlAvailabilityTest {
         val editor = QuestState("192.168.0.20", "未確認 .20", editor = true)
         val headset = QuestState("192.168.0.37", "HMD #1", editor = false)
         val unknown = QuestState("192.168.0.38", "未確認 .38")
-        assertFalse(QuestVisibility.isListed(editor, showEditors = false, selectedIp = null))
-        assertTrue(QuestVisibility.isListed(editor, showEditors = true, selectedIp = null))
-        assertTrue(QuestVisibility.isListed(editor, showEditors = false, selectedIp = "192.168.0.20"))
-        assertTrue(QuestVisibility.isListed(headset, showEditors = false, selectedIp = null))
-        assertTrue(QuestVisibility.isListed(unknown, showEditors = false, selectedIp = null))
+        assertFalse(QuestVisibility.isListed(editor, showEditors = false, selectedIp = null, nowMs = 0))
+        assertTrue(QuestVisibility.isListed(editor, showEditors = true, selectedIp = null, nowMs = 0))
+        assertTrue(QuestVisibility.isListed(editor, showEditors = false, selectedIp = "192.168.0.20", nowMs = 0))
+        assertTrue(QuestVisibility.isListed(headset, showEditors = false, selectedIp = null, nowMs = 0))
+        assertTrue(QuestVisibility.isListed(unknown, showEditors = false, selectedIp = null, nowMs = 0))
+    }
+
+    @Test
+    fun newResponderWaitsForItsState() {
+        // Added by a HERE at t=10 000 ms: hidden until STATE (or adb) identifies it, at most STATE_WAIT_MS.
+        val fresh = QuestState("192.168.0.67", "未確認 .67", addedAtMs = 10_000)
+        assertFalse(QuestVisibility.isListed(fresh, showEditors = false, selectedIp = null, nowMs = 10_500))
+        assertTrue(QuestVisibility.isListed(fresh, showEditors = false, selectedIp = null, nowMs = 11_500))
+        assertFalse(QuestVisibility.isListed(fresh.copy(editor = true), showEditors = false, selectedIp = null, nowMs = 10_500))
+        assertFalse(QuestVisibility.isListed(fresh.copy(editor = true), showEditors = false, selectedIp = null, nowMs = 99_000))
+        assertTrue(QuestVisibility.isListed(fresh.copy(editor = false, deviceModel = "Oculus Quest 3S"), showEditors = false, selectedIp = null, nowMs = 10_500))
+        assertTrue(QuestVisibility.isListed(fresh, showEditors = true, selectedIp = null, nowMs = 10_500))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.hapbeat.demoremote
 
+import android.os.SystemClock
 import android.app.Application
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -100,6 +101,8 @@ data class QuestState(
     val deviceModel: String? = null,
     /** STATE `editor` last reported (true: a development editor, not a headset); null until a STATE carried it. */
     val editor: Boolean? = null,
+    /** When a Demo Switch answer added the entry (elapsedRealtime); 0 = added otherwise (adb scan, USB). */
+    val addedAtMs: Long = 0,
 )
 
 enum class LogState { SENT, ACK, READY, FAILED, NO_RESPONSE, INFO, ERROR }
@@ -214,7 +217,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
     /** HMD list entries shown (see [QuestVisibility.isListed]). */
-    val listedQuests: List<QuestState> get() = quests.filter { QuestVisibility.isListed(it, showEditors, selectedIp) }
+    val listedQuests: List<QuestState> get() = quests.filter { QuestVisibility.isListed(it, showEditors, selectedIp, SystemClock.elapsedRealtime()) }
 
     /** Hub-wide settings last read from the selected HMD, or null. */
     val selectedHubSettings: HubSettingsSnapshot? get() = selectedIp?.let { hubSettings[it] }
@@ -641,7 +644,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (quests.none { it.ip == source }) {
             // A Demo Switch answer alone does not prove a headset (a PC running a demo in the Unity editor answers
             // too): it stays "未確認" until adb reports a Quest model.
-            quests.add(QuestState(source, unconfirmedLabel(source)))
+            quests.add(QuestState(source, unconfirmedLabel(source), addedAtMs = SystemClock.elapsedRealtime()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
         // Once per responder: its STATE tells the device model and whether it is an editor (the selected one is asked anyway).

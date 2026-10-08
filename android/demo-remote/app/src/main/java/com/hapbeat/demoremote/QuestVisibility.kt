@@ -17,12 +17,22 @@ object QuestVisibility {
     fun matchesRemembered(quest: QuestState, serial: String, ip: String): Boolean =
         if (serial.isNotEmpty()) quest.serial == serial else ip.isNotEmpty() && quest.ip == ip
 
+    /** How long a new Demo Switch responder stays out of the list while its STATE (device model, editor) is awaited. */
+    const val STATE_WAIT_MS = 1500L
+
     /**
      * Shown in the HMD list: not a responder that runs inside a development editor (STATE `editor`), unless
-     * [showEditors] or it is the [selectedIp].
+     * [showEditors] or it is the [selectedIp]. A responder that only answered DISCOVER is held back for [STATE_WAIT_MS]
+     * until its STATE (or adb) tells what it is, so a PC editor never flashes up as a headset; after that it is listed
+     * as "未確認" (a runtime without the STATE fields).
      */
-    fun isListed(quest: QuestState, showEditors: Boolean, selectedIp: String?): Boolean =
-        showEditors || quest.editor != true || quest.ip == selectedIp
+    fun isListed(quest: QuestState, showEditors: Boolean, selectedIp: String?, nowMs: Long): Boolean {
+        if (showEditors || quest.ip == selectedIp) return true
+        if (quest.editor == true) return false
+        val identified = quest.editor != null || quest.remoteState != null || quest.deviceModel != null ||
+            quest.model.isNotEmpty() || quest.adb != AdbState.DISCONNECTED || quest.adbPortOpen == true
+        return identified || quest.addedAtMs == 0L || nowMs - quest.addedAtMs >= STATE_WAIT_MS
+    }
 
     /** Label of an entry not confirmed by adb: "未確認 .37". */
     fun unconfirmedLabel(ip: String): String = "未確認 ." + ip.substringAfterLast('.')
