@@ -55,7 +55,7 @@ object DemoCatalog {
     )
 
     val apps: List<DemoApp> = listOf(
-        DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
+        DemoApp(HUB_ID, "Demo Hub", HUB_PACKAGE),
         DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley", VOLLEY_OPTIONS, thumbnail = "thumbs/volley.webp"),
         DemoApp("boxing", "Boxing", "com.hapbeat.boxing", BOXING_OPTIONS, thumbnail = "thumbs/boxing.webp"),
         DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2", thumbnail = "thumbs/handdemo.webp"),
@@ -137,7 +137,8 @@ object DemoCatalog {
         options.forEach { (key, value) -> require(table.any { o -> o.id == key && o.values.any { it.value == value } }) }
     }
 
-    private const val HUB_COMPONENT = "jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity"
+    const val HUB_PACKAGE = "jp.hapbeat.demohub"
+    private const val HUB_COMPONENT = "$HUB_PACKAGE/com.unity3d.player.UnityPlayerGameActivity"
     private const val HUB_START_EXTRA = "com.hapbeat.demo_hub.start"
 
     /**
@@ -158,6 +159,17 @@ object DemoCatalog {
      * defense in depth on top of the pattern check (demo-session.md).
      */
     fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+
+    /**
+     * Shell command (ending in "; ") that force-stops every running demo of [apps] except [targetPackage]. A start
+     * through adb bypasses the hand-over, so the previous demo would stay alive in the background holding UDP 7710
+     * (demo-switch-control.md: bound while the process lives) and the next demo could not bind it.
+     */
+    fun stopOtherDemosCommand(targetPackage: String): String {
+        val others = apps.map { it.packageName }.filter { it.isNotEmpty() && it != targetPackage }.distinct()
+        if (others.isEmpty()) return ""
+        return "for p in ${others.joinToString(" ")}; do pidof \$p >/dev/null && am force-stop \$p; done; "
+    }
 
     /** Shell command that resolves the launcher activity of [app] and starts it. */
     fun launchCommand(app: DemoApp): String =

@@ -1798,7 +1798,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (quest.adb != AdbState.CONNECTED) return
         viewModelScope.launch {
             val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
-            val response = adbShell(quest.ip, command)
+            val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(DemoCatalog.HUB_PACKAGE) + command)
             if (response == null) {
                 updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
                 return@launch
@@ -1821,7 +1821,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (quest.adb != AdbState.CONNECTED) return
         viewModelScope.launch {
             val logId = addLog(quest.label, "起動 ${app.label}（adb）", null, LogState.SENT)
-            val response = adbShell(quest.ip, DemoCatalog.launchCommand(app))
+            val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(app.packageName) + DemoCatalog.launchCommand(app))
             if (response == null) {
                 updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
                 return@launch
