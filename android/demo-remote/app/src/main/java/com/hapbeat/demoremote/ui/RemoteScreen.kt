@@ -40,6 +40,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,8 +50,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -70,12 +73,14 @@ import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
 
 @Composable
 fun RemoteScreen(
     vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}, onOpenHubSettings: () -> Unit = {},
 ) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
+    if (vm.sleepHintIp != null) SleepHintDialog(vm)
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (wide) {
@@ -448,8 +453,32 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
     val candidates = DemoCatalog.sessionCandidates(hubDemos)
     var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
     var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // Why a long press did not start (shown for a few seconds in the fixed line below).
+    var longPressNote by remember { mutableStateOf("") }
+    LaunchedEffect(longPressNote) {
+        if (longPressNote.isNotEmpty()) {
+            delay(LONG_PRESS_NOTE_MS)
+            longPressNote = ""
+        }
+    }
+    val haptic = LocalHapticFeedback.current
     ButtonGrid(candidates, columns = 3) { app, modifier ->
-        DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId) { chosen = app.demoId }
+        // Long press: choose it and start at once with the options shown (another demo's: its defaults), like the button.
+        DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId, onLongPress = {
+            val chosenOptions = if (chosen == app.demoId) options else emptyMap()
+            chosen = app.demoId
+            val blocked = if (vm.sessionStarting) "開始中…" else vm.sessionStartBlockReason(app)
+            if (blocked != null) {
+                longPressNote = "長押しで開始できません: $blocked"
+            } else {
+                longPressNote = ""
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                vm.startSession(demoId = app.demoId, options = chosenOptions)
+            }
+        }) {
+            chosen = app.demoId
+            longPressNote = ""
+        }
     }
     val app = candidates.firstOrNull { it.demoId == chosen }
     OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
@@ -458,17 +487,34 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
         vm.sessionStarting -> "開始中…"
         else -> vm.sessionStartBlockReason(app)
     }
-    // Fixed one line: why the button is gray.
+    // Fixed one line: why the button is gray, or why a long press did not start.
     Text(
-        reason ?: " ",
+        longPressNote.ifEmpty { reason ?: " " },
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (longPressNote.isNotEmpty()) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
     ActionButton("このデモで始める", enabled = reason == null, modifier = Modifier.fillMaxWidth()) {
         vm.startSession(demoId = chosen, options = options)
     }
+}
+
+/** How long the fixed line of the single-demo start shows why a long press did not start. */
+private const val LONG_PRESS_NOTE_MS = 4_000L
+
+/**
+ * A user-started Wi-Fi adb connect gets no answer (the Quest's Wi-Fi is likely in power save). The connect keeps trying
+ * while this is up and closes it when it ends; 閉じる only hides it.
+ */
+@Composable
+private fun SleepHintDialog(vm: RemoteViewModel) {
+    AlertDialog(
+        onDismissRequest = vm::dismissSleepHint,
+        title = { Text("Quest が寝ているかもしれません") },
+        text = { Text("Quest の電源ボタンを短く押して画面をつけるか、ヘッドセットを被ってください。起きると自動でつながります。") },
+        confirmButton = { TextButton(onClick = vm::dismissSleepHint) { Text("閉じる") } },
+    )
 }
 
 /**

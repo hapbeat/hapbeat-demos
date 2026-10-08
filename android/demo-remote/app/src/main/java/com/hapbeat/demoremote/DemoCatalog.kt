@@ -97,6 +97,16 @@ object DemoCatalog {
     fun activeOptionsFor(demoId: String, values: Map<String, String>): List<DemoOption> =
         optionsFor(demoId).filter { isActive(demoId, it, values) }
 
+    /** The value shown as chosen for [option]: the one in [values], else the descriptor default. */
+    fun chosenValue(option: DemoOption, values: Map<String, String>): String = values[option.id] ?: option.default
+
+    /**
+     * [values] with [value] chosen for [option]. The descriptor default is stored as a missing key (the demo uses its
+     * default then, and the summary stays empty), so choosing it removes the key.
+     */
+    fun withChoice(values: Map<String, String>, option: DemoOption, value: String): Map<String, String> =
+        if (value == option.default) values - option.id else values + (option.id to value)
+
     /** [values] without keys whose option does not apply; this is what goes to the Hub. */
     fun applicableOptions(demoId: String, values: Map<String, String>): Map<String, String> {
         val active = activeOptionsFor(demoId, values).map { it.id }.toSet()

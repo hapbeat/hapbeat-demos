@@ -130,7 +130,8 @@ class QuestAdb(val ip: String, private val keyPair: AdbKeyPair) {
 
     companion object {
         const val PORT = 5555
-        const val CONNECT_TIMEOUT_MS = 3000
+        /** TCP connect / dadb socket timeout: a Quest with its Wi-Fi in power save can take seconds to answer. */
+        const val CONNECT_TIMEOUT_MS = 5000
         const val AUTH_WAIT_MS = 30_000L
         const val AUTH_HINT_DELAY_MS = 1500L
         const val SHELL_TIMEOUT_MS = 10_000L

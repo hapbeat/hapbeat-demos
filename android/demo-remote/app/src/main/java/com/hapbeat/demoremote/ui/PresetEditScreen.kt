@@ -155,18 +155,23 @@ private fun StepRow(
 }
 
 /**
- * One row per descriptor option of a demo: "既定" (key left out, the demo decides) or one of its values.
- * Shared by the preset editor and the single-demo start. Demos without options show nothing.
+ * One row per descriptor option of a demo, one chip per value; a missing key shows its descriptor default as chosen
+ * ([DemoCatalog.chosenValue], [DemoCatalog.withChoice]). Shared by the preset editor and the single-demo start. Demos
+ * without options show nothing.
  */
 @Composable
 fun OptionChooser(options: List<DemoOption>, values: Map<String, String>, onChange: (Map<String, String>) -> Unit) {
     options.forEach { option ->
+        val chosen = DemoCatalog.chosenValue(option, values)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(option.label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilterChip(selected = option.id !in values, onClick = { onChange(values - option.id) }, label = { Text("既定") })
                 option.values.forEach { v ->
-                    FilterChip(selected = values[option.id] == v.value, onClick = { onChange(values + (option.id to v.value)) }, label = { Text(v.label) })
+                    FilterChip(
+                        selected = chosen == v.value,
+                        onClick = { onChange(DemoCatalog.withChoice(values, option, v.value)) },
+                        label = { Text(v.label) },
+                    )
                 }
             }
         }

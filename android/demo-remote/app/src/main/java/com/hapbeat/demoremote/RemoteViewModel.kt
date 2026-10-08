@@ -25,6 +25,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hapbeat.demoremote.adb.AdbConnectResult
 import com.hapbeat.demoremote.adb.AdbKeys
+import com.hapbeat.demoremote.adb.AdbRetryPolicy
 import com.hapbeat.demoremote.adb.QuestAdb
 import com.hapbeat.demoremote.adb.UsbAdb
 import com.hapbeat.demoremote.adb.UsbAdbException
@@ -49,6 +50,7 @@ import com.hapbeat.demoremote.data.TransferResult
 import com.hapbeat.demoremote.mirror.MirrorSession
 import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
+import com.hapbeat.demoremote.net.QuestWake
 import com.hapbeat.demoremote.net.WifiBinding
 import com.hapbeat.demoremote.protocol.AuthConfig
 import com.hapbeat.demoremote.protocol.DemoSwitchMessage
@@ -122,6 +124,9 @@ private class PendingCommand(
     val seq: Long, val demoId: String, val ip: String, val logId: Long, val action: String, var terminal: Boolean = false,
     val listener: ((LogState, String) -> Unit)? = null,
 )
+
+/** Last result of a retried Wi-Fi adb connect; [answered]: at least one try got an answer (not HostUnreachable). */
+private data class RetriedConnect(val result: AdbConnectResult, val answered: Boolean)
 
 class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsStore(app)
@@ -213,6 +218,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var hubSettingsSaving by mutableStateOf(false); private set
     /** A one-demo start is running (it may switch to the Hub and wait for it first). */
     var sessionStarting by mutableStateOf(false); private set
+    /** A user-started Wi-Fi adb connect to this IP gets no answer: the "Quest may be asleep" dialog is up. */
+    var sleepHintIp by mutableStateOf<String?>(null); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -266,6 +273,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val adbConnections = mutableMapOf<String, QuestAdb>()
     private var adbJob: Job? = null
     private var batteryJob: Job? = null
+    private var keepaliveJob: Job? = null
     private var mirrorSurface: Surface? = null
     private var mirrorSession: MirrorSession? = null
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
@@ -319,6 +327,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         startBatteryPolling()
+        startKeepalive()
         scanAdbHosts()
         // Rescan while the selected Quest has no adb: it may come back on a new IP or after waking.
         rescanLoop?.cancel()
@@ -342,6 +351,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         rescanLoop?.cancel()
         rescanLoop = null
         batteryJob?.cancel()
+        keepaliveJob?.cancel()
         socket.close()
         activeNonces.clear()
         stopMirror()
@@ -939,44 +949,106 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- adb -------------------------------------------------------------------------------------
 
-    /** [manual] false: the automatic connect on open / select / reconnect, whose failure reads as gray "waiting". */
+    /**
+     * [manual] false: the automatic connect on open / select / reconnect, whose failure reads as gray "waiting" and which
+     * never brings up the "Quest may be asleep" dialog.
+     */
     fun connectAdb(manual: Boolean = true) {
         val ip = selectedIp ?: return
         adbJob?.cancel()
         adbJob = viewModelScope.launch {
-            handleAdbResult(ip, attemptAdb(ip), manual)
+            handleAdbResult(ip, connectWithRetry(ip, retryPortClosed = false, sleepHint = manual).result, manual)
         }
     }
 
-    /** One Wi-Fi adb connect to [ip]; leaves the state CONNECTING for [handleAdbResult] (DISCONNECTED on cancel). */
+    /**
+     * Wi-Fi adb connect to [ip] that rides out a Quest whose Wi-Fi is in power save: wakes it with a few UDP packets before
+     * every try and retries "no answer" with growing gaps for about 30 s ([AdbRetryPolicy]). PortClosed ends it at once
+     * unless [retryPortClosed] (right after `adb tcpip`). [sleepHint]: a user-started connect, which brings up the
+     * "Quest may be asleep" dialog once when tries get no answer; it closes when this connect ends. [firstDelayMs] is
+     * waited before the first try. The tries go to the file log as one summary line. Leaves the state CONNECTING for the
+     * caller (DISCONNECTED on cancel).
+     */
+    private suspend fun connectWithRetry(ip: String, retryPortClosed: Boolean, sleepHint: Boolean, firstDelayMs: Long = 0): RetriedConnect {
+        val results = mutableListOf<AdbConnectResult>()
+        var unanswered = 0
+        var hinted = false
+        updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
+        try {
+            if (firstDelayMs > 0) delay(firstDelayMs)
+            val startedAt = SystemClock.elapsedRealtime()
+            return coroutineScope {
+                // Elapsed seconds so a slow connect reads as progress, not a hang.
+                val ticker = launch {
+                    while (isActive) {
+                        val s = (SystemClock.elapsedRealtime() - startedAt) / 1000
+                        if (ip == selectedIp && quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTING) {
+                            setAdbMessage(AdbRetryPolicy.connectingText(s, sleepSuspect = unanswered > 0))
+                        }
+                        delay(1_000)
+                    }
+                }
+                try {
+                    while (true) {
+                        wakeQuest(ip)
+                        val result = attemptAdb(ip)
+                        results += result
+                        if (result == AdbConnectResult.HostUnreachable) unanswered++
+                        if (sleepHint && !hinted && AdbRetryPolicy.showSleepHint(unanswered)) {
+                            hinted = true
+                            sleepHintIp = ip
+                        }
+                        val elapsed = SystemClock.elapsedRealtime() - startedAt
+                        val wait = AdbRetryPolicy.nextDelayMs(results.size, elapsed, result, retryPortClosed) ?: break
+                        delay(wait)
+                    }
+                    val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+                    fileLog("Wi-Fi adb $ip: ${results.joinToString(", ")}（${results.size} 回・$seconds 秒）")
+                    RetriedConnect(results.last(), answered = unanswered < results.size)
+                } finally {
+                    ticker.cancel()
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
+            if (ip == selectedIp) setAdbMessage("adb 接続を中止しました")
+            throw e
+        } finally {
+            if (sleepHintIp == ip) sleepHintIp = null
+        }
+    }
+
+    /** One Wi-Fi adb connect to [ip]; leaves the state CONNECTING (or AUTH_WAIT) for the caller. */
     private suspend fun attemptAdb(ip: String): AdbConnectResult {
         val keys = withContext(Dispatchers.IO) { keyPair } // first use generates RSA-2048
         val adb = adbConnections.getOrPut(ip) { QuestAdb(ip, keys) }
         updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
-        // Elapsed seconds so a slow handshake reads as progress, not a hang.
-        val startedAt = System.currentTimeMillis()
-        return coroutineScope {
-            val ticker = launch {
-                while (isActive) {
-                    val s = (System.currentTimeMillis() - startedAt) / 1000
-                    if (ip == selectedIp && quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTING) setAdbMessage("adb 接続中…（${s} 秒）")
-                    delay(1_000)
-                }
-            }
-            try {
-                adb.connect(onAuthWaiting = {
-                    // Called on this coroutine (main thread), so a later cancel cannot be overtaken by it.
-                    updateQuest(ip) { it.copy(adb = AdbState.AUTH_WAIT) }
-                    if (ip == selectedIp) setAdbMessage("ヘッドセット内で「このコンピューターから常に許可」にチェックして許可してください（最大 30 秒）")
-                })
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
-                if (ip == selectedIp) setAdbMessage("adb 接続を中止しました")
-                throw e
-            } finally {
-                ticker.cancel()
-            }
-        }
+        return adb.connect(onAuthWaiting = {
+            // Called on this coroutine (main thread), so a later cancel cannot be overtaken by it.
+            updateQuest(ip) { it.copy(adb = AdbState.AUTH_WAIT) }
+            if (ip == selectedIp) setAdbMessage("ヘッドセット内で「このコンピューターから常に許可」にチェックして許可してください（最大 30 秒）")
+        })
+    }
+
+    /** A few UDP packets to [ip] before an adb connect, so a Quest with its Wi-Fi in power save answers ([QuestWake]). */
+    private suspend fun wakeQuest(ip: String) {
+        val payload = wakePayload() ?: return
+        QuestWake.wake(ip, payload)
+    }
+
+    /**
+     * A unicast DISCOVER for [QuestWake] (sent from its own socket, so an answer is never read); null while Demo Switch
+     * authentication is not set up, when nothing is sent.
+     */
+    private fun wakePayload(): ByteArray? {
+        val config = authConfig
+        if (!config.canSend) return null
+        return DemoSwitchProtocol.buildDiscover(controllerId, DemoSwitchProtocol.newNonce(), config).toByteArray(Charsets.UTF_8)
+    }
+
+    /** "閉じる" on the "Quest may be asleep" dialog; the connect keeps trying. */
+    fun dismissSleepHint() {
+        sleepHintIp = null
     }
 
     private suspend fun handleAdbResult(ip: String, result: AdbConnectResult, manual: Boolean) {
@@ -1029,13 +1101,44 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun adbLost(ip: String) {
+        // Already handled: another shell on the same connection failed too, or a connect has replaced it.
+        if (quests.firstOrNull { it.ip == ip }?.adb != AdbState.CONNECTED) return
         adbConnections[ip]?.close()
         updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null) }
         if (ip == selectedIp) {
             stopMirror()
             setAdbMessage("adb 接続が切れました。再接続しています…")
-            // One automatic retry (Quest woke up / Wi-Fi came back); a failure shows its own guidance.
-            if (foreground) connectAdb(manual = false)
+            if (foreground) reconnectAfterLoss(ip)
+        }
+    }
+
+    /**
+     * Reconnects the lost connection to the selected [ip]: the first round always runs; while the tries get no answer and
+     * Demo Switch still sees the headset (it answered one of the last two discovery rounds), further rounds follow with
+     * growing gaps ([AdbRetryPolicy.reconnectDelayMs]). Logged on screen once at the start and once at the end; no dialog.
+     */
+    private fun reconnectAfterLoss(ip: String) {
+        adbJob?.cancel()
+        val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+        addLog(label, "adb 切断 $ip", null, LogState.INFO, "自動で再接続します")
+        adbJob = viewModelScope.launch {
+            var round = 0
+            var result: AdbConnectResult = AdbConnectResult.HostUnreachable
+            while (true) {
+                round++
+                result = connectWithRetry(ip, retryPortClosed = false, sleepHint = false).result
+                if (result != AdbConnectResult.HostUnreachable) break
+                val q = quests.firstOrNull { it.ip == ip }
+                val seen = q != null && (q.respondedLastRound == true || q.respondedPrevRound == true)
+                if (!seen || ip != selectedIp || !foreground) break
+                updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
+                val wait = AdbRetryPolicy.reconnectDelayMs(round)
+                setAdbMessage("接続待ち: Quest（$ip）に届きません。${wait / 1000} 秒後にもう一度つなぎます（$round 回目）")
+                delay(wait)
+            }
+            fileLog("$label $ip adb 自動再接続: $round 回目で $result")
+            if (result == AdbConnectResult.Connected) addLog(label, "adb 再接続 $ip", null, LogState.READY)
+            handleAdbResult(ip, result, manual = false)
         }
     }
 
@@ -1074,6 +1177,17 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val info = QuestAdb.describeState(developer, adbEnabled, build, uptime)
         updateQuest(ip) { it.copy(info = info) }
         fileLog("${quests.firstOrNull { it.ip == ip }?.label ?: ip} $ip 状態: $info")
+    }
+
+    /** Keeps connected Quests' Wi-Fi awake with a short shell command; a failure marks the connection lost ([adbShell]). */
+    private fun startKeepalive() {
+        keepaliveJob?.cancel()
+        keepaliveJob = viewModelScope.launch {
+            while (isActive) {
+                delay(KEEPALIVE_INTERVAL_MS)
+                quests.filter { it.adb == AdbState.CONNECTED }.map { it.ip }.forEach { adbShell(it, "true") }
+            }
+        }
     }
 
     private fun startBatteryPolling() {
@@ -1786,8 +1900,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Wi-Fi adb connect after the USB step: PortClosed right after tcpip means adbd is not listening yet,
-     * so up to [USB_WIFI_ATTEMPTS] tries [USB_WIFI_RETRY_MS] apart.
+     * Wi-Fi adb connect after the USB step: PortClosed right after tcpip means adbd is not listening yet, so it is retried
+     * like "no answer" ([connectWithRetry]), starting [USB_WIFI_FIRST_DELAY_MS] after the step.
      */
     private fun connectAfterUsb(ip: String) {
         // Any old Wi-Fi connection to this IP died with the adbd restart.
@@ -1796,23 +1910,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
         setAdbMessage("Wi-Fi adb を有効にしました。接続します…")
         adbJob = viewModelScope.launch {
-            var result: AdbConnectResult = AdbConnectResult.HostUnreachable
-            var allUnreachable = true
-            try {
-                for (attempt in 1..USB_WIFI_ATTEMPTS) {
-                    delay(USB_WIFI_RETRY_MS)
-                    result = attemptAdb(ip)
-                    fileLog("Wi-Fi adb 試行 $attempt/$USB_WIFI_ATTEMPTS $ip → $result")
-                    if (result != AdbConnectResult.HostUnreachable) allUnreachable = false
-                    // attemptAdb leaves the state CONNECTING, so the UI keeps showing progress between tries.
-                    if (result != AdbConnectResult.PortClosed && result != AdbConnectResult.HostUnreachable) break
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED) }
-                if (ip == selectedIp) setAdbMessage("adb 接続を中止しました")
-                throw e
-            }
-            if (allUnreachable) {
+            val (result, answered) = connectWithRetry(ip, retryPortClosed = true, sleepHint = true, firstDelayMs = USB_WIFI_FIRST_DELAY_MS)
+            if (!answered) {
                 // USB worked, so Wi-Fi adb is on: the problem is the path, not the headset. No "USB で有効化" here.
                 addLog(quests.firstOrNull { it.ip == ip }?.label ?: ip, "adb 接続 $ip", null, LogState.ERROR, result.toString())
                 if (ip == selectedIp) wifiAdbOff = false
@@ -1883,7 +1982,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         mirrorStatus = "ミラー開始中…"
         var session: MirrorSession? = null
-        session = MirrorSession({ Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, 0) },
+        val wake = wakePayload()
+        session = MirrorSession({
+            // The mirror's own adb connection gets the same wake-up as the control one.
+            wake?.let { QuestWake.wakeBlocking(ip, it) }
+            Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, 0)
+        },
             { app.assets.open("scrcpy-server.jar") }, mirrorSettings, surface,
             object : MirrorSession.Listener {
                 override fun onVideoSize(width: Int, height: Int) {
@@ -1932,6 +2036,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val CONTROL_TIMEOUT_MS = 5_000L
         const val SWITCH_TIMEOUT_MS = 20_000L
         const val BATTERY_INTERVAL_MS = 30_000L
+        /** Shell keepalive while adb is connected: keeps the Quest's Wi-Fi out of power save. */
+        const val KEEPALIVE_INTERVAL_MS = 20_000L
         const val LAUNCH_REDISCOVER_DELAY_MS = 3_000L
         const val MAX_LOGS = 20
         const val FOLLOW_AUTH_WAIT_MS = 3_000L
@@ -1951,8 +2057,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val USB_PERMISSION_WAIT_MS = 60_000L
         /** tcpip restarts adbd, which re-enumerates on USB and sends ATTACHED again. */
         const val USB_REATTACH_IGNORE_MS = 20_000L
-        const val USB_WIFI_ATTEMPTS = 6
-        const val USB_WIFI_RETRY_MS = 1_500L
+        const val USB_WIFI_FIRST_DELAY_MS = 1_500L
         const val USB_DONE_CLOSE_MS = 3_000L
         const val NOTICE_CLEAR_MS = 15_000L
         const val NOT_FOREGROUND_TEXT = "Quest のデモが前面にありません（HMD 内でメニューや一時停止を閉じてください）"
