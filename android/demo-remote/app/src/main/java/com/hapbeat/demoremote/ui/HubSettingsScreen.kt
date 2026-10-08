@@ -52,7 +52,11 @@ fun HubSettingsScreen(vm: RemoteViewModel, onDone: () -> Unit) {
     )
     // A change after a save makes its result stale.
     LaunchedEffect(draft) { if (!vm.hubSettingsSaving) vm.clearHubSettingsSaveStatus() }
-    LaunchedEffect(Unit) { vm.clearHubHapticsTestStatus() }
+    LaunchedEffect(Unit) {
+        vm.clearHubHapticsTestStatus()
+        // The reasons below come from the last STATE: ask for a fresh one now.
+        vm.refreshHubState()
+    }
     val block = vm.hubPresetBlockReason
     val problem = draft?.let { HubSettingsAccess.problem(vm.controllerId, it) }
     val canEdit = read != null

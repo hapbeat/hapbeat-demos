@@ -26,8 +26,9 @@ sealed interface TransferResult {
 /**
  * Presets handed over from the web showcase by QR or link (demo-session.md「リモコンへのプリセット受け渡し（QR /
  * リンク）」, demo-remote-preset.schema.json). Pure Kotlin so the whole check runs in JVM unit tests.
- * Anything that breaks a rule rejects the whole payload; nothing is imported partially. Accepted presets are not
- * kept on the phone: each is written into the Hub slot the user picks (PRESET_SET, see HubPresets).
+ * Anything that breaks a rule rejects the whole payload; nothing is imported partially. Accepted presets are written
+ * into the Hub slot the user picks (PRESET_SET, see HubPresets), or kept on the phone as unwritten until then
+ * ([UnwrittenPresets]).
  */
 object PresetTransfer {
     const val WEB_PREFIX = "https://devtools.hapbeat.com/remote/preset#"
@@ -90,7 +91,11 @@ object PresetTransfer {
         if (text.toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD_BYTES) return TransferResult.Rejected(ERROR_TOO_LARGE)
         val root = try { MiniJson.parse(text) } catch (_: JsonException) { return TransferResult.Rejected(ERROR_CONTENT) }
         val presets = readRoot(root) ?: return TransferResult.Rejected(ERROR_CONTENT)
-        // Schema passed: now the device allow list (Hub-startable demos) and each demo's descriptor options.
+        return checkDemos(presets)
+    }
+
+    /** Schema passed: the device allow list (Hub-startable demos) and each demo's descriptor options. */
+    fun checkDemos(presets: List<RemotePreset>): TransferResult {
         val unknown = presets.flatMap { p -> p.steps.map { it.demoId } }.filter { id -> DemoCatalog.sessionApps.none { it.demoId == id } }
         if (unknown.isNotEmpty()) return TransferResult.Rejected(ERROR_UNKNOWN_DEMO + unknown.distinct().joinToString(", "))
         for (step in presets.flatMap { it.steps }) {
@@ -115,7 +120,8 @@ object PresetTransfer {
         return items.map { readPreset(it) ?: return null }
     }
 
-    private fun readPreset(value: JsonValue): RemotePreset? {
+    /** One preset object of the payload (`name`, `steps`), or null when it breaks the schema. */
+    fun readPreset(value: JsonValue): RemotePreset? {
         val f = (value as? JsonObject)?.fields ?: return null
         if (f.keys != setOf("name", "steps")) return null
         val name = (f["name"] as? JsonString)?.value ?: return null
@@ -149,6 +155,17 @@ object PresetTransfer {
         }
         return PresetStep(demoId, options, retry)
     }
+
+    /** [preset] as a payload preset object (validated values only; `options` / `retry` only when not the default). */
+    fun presetJson(preset: RemotePreset): Map<String, Any?> = linkedMapOf(
+        "name" to preset.name,
+        "steps" to preset.steps.map { step ->
+            linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
+                if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
+                if (!step.retry) put("retry", false)
+            }
+        },
+    )
 
     /**
      * 1..40 code points, at least one non-whitespace character (ECMAScript `\S`, as the schema pattern), and no

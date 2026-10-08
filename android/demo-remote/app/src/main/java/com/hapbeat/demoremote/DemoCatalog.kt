@@ -186,7 +186,8 @@ object ControlCatalog {
             ControlAction("最初から", "restart"),
             menuOpen,
             ControlAction("メニューを閉じる", "menu_close"),
-        )),
+            ControlAction("次へ", "session_next"),
+        ), stateful = true),
         ControlGroup("視線・触覚", listOf(
             ControlAction("視線リセット", "recenter"),
             ControlAction("触覚 ON", "haptics_on"),
@@ -201,10 +202,6 @@ object ControlCatalog {
         ControlGroup("手の見た目", listOf(
             ControlAction("ゴースト", "hand_style_ghost"),
             ControlAction("肌", "hand_style_skin"),
-        ), stateful = true),
-        ControlGroup("セッション", listOf(
-            ControlAction("次へ", "session_next"),
-            ControlAction("もう一度", "session_retry"),
         ), stateful = true),
         ControlGroup("Hub", listOf(
             ControlAction("トップへ", "hub_top", demoId = DemoCatalog.HUB_ID),
@@ -228,7 +225,7 @@ object ControlCatalog {
     val hubTop = ControlAction("管理画面を閉じる", "hub_top", demoId = DemoCatalog.HUB_ID)
 
     /** Actions that leave the current scene or demo: READY comes after a launch, so they wait as long as SWITCH. */
-    val LAUNCHING_ACTIONS = setOf("session_next", "session_retry", "hub_replay")
+    val LAUNCHING_ACTIONS = setOf("session_next", "hub_replay")
 
     /**
      * Why [control] cannot be sent to the demo [state] describes (the last STATE, null = none), or null. Only the
@@ -243,11 +240,6 @@ object ControlCatalog {
         "session_next" -> when {
             state == null -> STATE_UNKNOWN
             state.stepIndex < 0 -> "セッション中（Hub から始めたデモ）だけ使えます"
-            else -> null
-        }
-        "session_retry" -> when {
-            state == null -> STATE_UNKNOWN
-            state.currentDemoId == DemoCatalog.HUB_ID || state.screen != "completion" -> "デモの完了画面が出ているときだけ使えます"
             else -> null
         }
         "hub_top" -> when {
