@@ -274,7 +274,7 @@ namespace Hapbeat.DemoSwitch
 
         /// <summary>
         /// The adapter for a CONTROL action. haptics_*, recenter / recenter_ui_*, tutorial_start, hand_style_*,
-        /// session_retry and hub_top belong to the shared Demo Session layer (hand_style_* and hub_top use the Hub's
+        /// session_retry, hub_top and haptics_test belong to the shared Demo Session layer (hand_style_*, hub_top and haptics_test use the Hub's
         /// <paramref name="hub"/> when there is one). Other actions go to the scene's adapter when it accepts them; otherwise
         /// menu_open, menu_close and restart fall back to the shared pause (<see cref="DemoPause.SharedControls"/>, which accepts
         /// them only where the shared pause is on). The caller rejects the action when the result cannot execute it.
@@ -288,13 +288,14 @@ namespace Hapbeat.DemoSwitch
             if (DemoSwitchProtocol.IsHandStyleAction(action)) return new DemoHandStyleControls(hub);
             if (action == "session_retry") return SessionRetryControls;
             if (action == "hub_top") return new DemoHubTopControls(hub);
+            if (action == "haptics_test") return new DemoHubHapticsTestControls(hub);
             if (sceneControls != null && sceneControls.CanExecuteControl(action, sceneId)) return sceneControls;
             return DemoSwitchProtocol.IsSharedPauseAction(action) ? DemoPause.SharedControls : sceneControls;
         }
 
         private static bool IsSharedLayerAction(string action) => DemoSwitchProtocol.IsHapticsAction(action)
             || DemoSwitchProtocol.IsRecenterAction(action) || action == "tutorial_start" || DemoSwitchProtocol.IsHandStyleAction(action)
-            || action == "session_retry" || action == "hub_top";
+            || action == "session_retry" || action == "hub_top" || action == "haptics_test";
 
         private static bool IsHubMessage(string type) => type == "PRESET_GET" || type == "PRESET_SET" || type == "PRESET_START"
             || type == "HUB_SETTINGS_GET" || type == "HUB_SETTINGS_SET" || type == "HUB_START";

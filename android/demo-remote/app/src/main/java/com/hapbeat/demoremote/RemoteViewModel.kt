@@ -216,6 +216,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Progress / result of the Hub settings screen's HUB_SETTINGS_SET (text, state); null before saving. */
     var hubSettingsSaveStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     var hubSettingsSaving by mutableStateOf(false); private set
+    /** Progress / result of the Hub settings screen's 触覚テスト (text, state); null before sending. */
+    var hubHapticsTestStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     /** A one-demo start is running (it may switch to the Hub and wait for it first). */
     var sessionStarting by mutableStateOf(false); private set
     /** A user-started Wi-Fi adb connect to this IP gets no answer: the "Quest may be asleep" dialog is up. */
@@ -806,29 +808,62 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Confirms the foreground demo with a unicast DISCOVER first (spec), then sends CONTROL to it. */
-    fun sendControl(control: ControlAction) {
+    /**
+     * Confirms the foreground demo with a unicast DISCOVER first (spec), then sends CONTROL to it. [listener] receives
+     * the result as the log shows it, also when the CONTROL is not sent.
+     */
+    fun sendControl(control: ControlAction, listener: ((LogState, String) -> Unit)? = null) {
         val quest = selectedQuest ?: return
         val config = authConfig
         if (!config.canSend) return
         viewModelScope.launch {
+            val refused = { reason: String ->
+                addLog(quest.label, control.label, null, LogState.ERROR, reason)
+                listener?.invoke(LogState.ERROR, reason)
+            }
             val current = probeForegroundDemo(quest.ip, config)
             if (current == null) {
-                addLog(quest.label, control.label, null, LogState.ERROR,
-                    "応答なし（デモが起動していない／スリープ／届いていない）")
+                refused("応答なし（デモが起動していない／スリープ／届いていない）")
                 return@launch
             }
             // A demo answers DISCOVER even when it is not in the foreground, but then refuses CONTROL.
-            if (refusedNotForeground(quest.ip, quest.label, control.label)) return@launch
-            if (control.demoId != null && current != control.demoId) {
-                addLog(quest.label, control.label, null, LogState.ERROR,
-                    "前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
+            if (refusedNotForeground(quest.ip, quest.label, control.label)) {
+                listener?.invoke(LogState.ERROR, NOT_FOREGROUND_TEXT)
                 return@launch
             }
-            val seq = reserveSeq() ?: return@launch
+            if (control.demoId != null && current != control.demoId) {
+                refused("前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
+                return@launch
+            }
+            val seq = reserveSeq()
+            if (seq == null) {
+                listener?.invoke(LogState.ERROR, "sequence を確保できなかったため送信を中止しました")
+                return@launch
+            }
             val payload = DemoSwitchProtocol.buildControl(controllerId, seq, current, control.action, control.sceneId, config)
             val timeout = if (control.action in ControlCatalog.LAUNCHING_ACTIONS) SWITCH_TIMEOUT_MS else CONTROL_TIMEOUT_MS
-            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, timeout, control.action)
+            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, timeout, control.action, listener)
+        }
+    }
+
+    /** Clears the Hub settings screen's last 触覚テスト result (opening the screen). */
+    fun clearHubHapticsTestStatus() {
+        hubHapticsTestStatus = null
+    }
+
+    /**
+     * The Hub settings screen's 触覚テスト: CONTROL `haptics_test` to the selected HMD's Hub (it plays 100 Hz for 1 s to its
+     * Hapbeat address). The result shows on that screen and in the log; no confirmation (a staff operation).
+     */
+    fun sendHubHapticsTest() {
+        if (selectedQuest == null || !authConfig.canSend) return
+        hubHapticsTestStatus = "送信中…" to LogState.SENT
+        sendControl(ControlCatalog.hubHapticsTest) { state, detail ->
+            hubHapticsTestStatus = when (state) {
+                LogState.ACK -> "Hub が受け付けました…" to state
+                LogState.READY -> "Hub が触覚を送りました（100 Hz・1 秒、この HMD の宛先へ）" to state
+                else -> detail to state
+            }
         }
     }
 

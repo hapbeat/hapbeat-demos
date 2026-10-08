@@ -47,8 +47,9 @@ namespace Hapbeat.DemoHub.Editor
             foreach (var shader in new[] { DemoGhostHands.ShaderResourcePath, DemoHands.GhostShaderPath, DemoHands.SkinShaderPath, DemoHands.OutlineShaderPath })
                 Require(Resources.Load<Shader>(shader) != null, "Hand shader in the package: " + shader);
             var meta = Resources.Load<GameObject>(DemoHands.MetaLeftModelPath) != null && Resources.Load<GameObject>(DemoHands.MetaRightModelPath) != null;
+            Require(Hapbeat.DemoHub.HubHapticsTest.SdkOutput != null, "Hapbeat SDK for the 触覚テスト (com.hapbeat.sdk in the manifest)");
             Require(EditorBuildSettings.scenes.Length == 1 && EditorBuildSettings.scenes[0].path == HubProject.ScenePath, "Hub-only build");
-            Debug.Log("[Hub] Validation passed: scene, tracking, Japanese glyphs, session controller, no audio, switch allowlist, hands ("
+            Debug.Log("[Hub] Validation passed: scene, tracking, Japanese glyphs, session controller, no audio, switch allowlist, Hapbeat SDK, hands ("
                 + (meta ? "Meta hand meshes from the private assets" : "private assets not linked: procedural ghost hands") + ").");
         }
 

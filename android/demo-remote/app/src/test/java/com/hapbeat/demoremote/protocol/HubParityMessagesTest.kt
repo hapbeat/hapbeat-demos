@@ -96,7 +96,7 @@ class HubParityMessagesTest {
 
     @Test
     fun newControlActions() {
-        listOf("hand_style_ghost", "hand_style_skin", "session_next", "session_retry", "hub_top", "hub_replay").forEach { action ->
+        listOf("hand_style_ghost", "hand_style_skin", "session_next", "session_retry", "hub_top", "hub_replay", "haptics_test").forEach { action ->
             assertTrue(action, parse(controlSkin.replace("hand_style_skin", action)) is DemoSwitchMessage.Control)
         }
         assertEquals(controlSkin, DemoSwitchProtocol.buildControl("remote-pixel", 48, "handdemo", "hand_style_skin", "", unsigned))

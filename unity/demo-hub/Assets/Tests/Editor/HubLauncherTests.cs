@@ -308,14 +308,76 @@ namespace Hapbeat.DemoHub.Tests
                 controller.SelectStep(9);
                 Assert.That(controller.GridRows, Is.EqualTo(10));
 
-                // Nothing between the grid and the footer, and 完了 right after 手の見た目.
+                // Nothing between the grid and the footer, then 手の見た目, 触覚テスト and 完了 side by side.
                 var buttons = Buttons(controller);
                 var lastRow = buttons.Where(b => b.Label.StartsWith("10. ")).Single();
                 var hand = buttons.Single(b => b.Label == HubText.HandStyleGhost);
+                var test = buttons.Single(b => b.Label == HubText.HapticsTest);
                 var done = buttons.Single(b => b.Label == HubText.Done);
                 Assert.That(Bottom(lastRow) - Top(hand), Is.LessThan(10f), "No empty rows above the footer.");
-                Assert.That(Left(done) - Right(hand), Is.EqualTo(8f).Within(1e-3f));
+                Assert.That(Left(test) - Right(hand), Is.EqualTo(8f).Within(1e-3f));
+                Assert.That(Left(done) - Right(test), Is.EqualTo(8f).Within(1e-3f));
                 Assert.That(controller.Panel.Size.x * 0.5f - Right(done), Is.LessThan(40f), "No wide blank on the right of the footer.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void HapticsTestHandsTheToneToTheOutputAndShowsTheAddress()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                float[] samples = null;
+                int rate = 0, calls = 0;
+                float gain = 0f;
+                string failure = null;
+                // Never the SDK: nothing is sent to a device.
+                controller.HapticsOutput = (float[] s, int r, float g, out string error) =>
+                {
+                    calls++;
+                    samples = s;
+                    rate = r;
+                    gain = g;
+                    error = failure;
+                    return failure == null;
+                };
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Manage);
+                var size = controller.Panel.Size;
+
+                Press(Buttons(controller).Single(b => b.Label == HubText.HapticsTest));
+                Assert.That(calls, Is.EqualTo(1));
+                Assert.That(rate, Is.EqualTo(16000));
+                Assert.That(gain, Is.EqualTo(0.5f), "Fixed moderate level.");
+                Assert.That(samples.Length, Is.EqualTo(16000), "1 s.");
+                Assert.That(samples[0], Is.EqualTo(0f).Within(1e-6f));
+                Assert.That(samples[40], Is.EqualTo(1f).Within(1e-4f), "100 Hz: the first peak a quarter period (2.5 ms) in.");
+                Assert.That(samples[120], Is.EqualTo(-1f).Within(1e-4f));
+                Assert.That(samples.Max(), Is.EqualTo(1f).Within(1e-4f));
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Manage), "The screen stays.");
+                Assert.That(Texts(controller), Has.Member("触覚テスト: プレイヤー 指定なし / グループ 指定なし へ 100 Hz・1 秒"));
+                Assert.That(controller.Panel.Size, Is.EqualTo(size), "The status line never moves the footer.");
+                AssertInsideWithoutOverlap(controller);
+                Assert.That(DemoHubController.HapticsTestLine(new DemoDeviceAddress(3, 7)), Is.EqualTo("触覚テスト: プレイヤー 3 / グループ 7 へ 100 Hz・1 秒"));
+
+                // CONTROL haptics_test on the top screen.
+                controller.Show(DemoHubController.HubScreen.Top);
+                failure = "The Hapbeat SDK is not connected.";
+                Assert.That(controller.TryPlayHapticsTest(out var error), Is.False);
+                Assert.That(error, Is.EqualTo(failure));
+                Assert.That(Texts(controller), Has.Member(HubText.HapticsTestFailed + failure));
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top));
+
+                // A Hub built without the SDK: refused, and the button cannot be pressed.
+                controller.HapticsOutput = null;
+                Assert.That(controller.HasHapticsTest, Is.False);
+                Assert.That(controller.TryPlayHapticsTest(out error), Is.False);
+                Assert.That(error, Is.Not.Empty);
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Assert.That(Buttons(controller).Single(b => b.Label == HubText.HapticsTest).Interactable, Is.False);
+                Assert.That(calls, Is.EqualTo(2));
             }
             finally { Object.DestroyImmediate(go); }
         }

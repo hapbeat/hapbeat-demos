@@ -130,7 +130,7 @@ object DemoSwitchProtocol {
     val CONTROL_ACTIONS = setOf(
         "menu_open", "menu_close", "recenter", "restart", "scene", "haptics_on", "haptics_off",
         "haptics_ui_show", "haptics_ui_hide", "recenter_ui_show", "recenter_ui_hide", "tutorial_start",
-        "hand_style_ghost", "hand_style_skin", "session_next", "session_retry", "hub_top", "hub_replay",
+        "hand_style_ghost", "hand_style_skin", "session_next", "session_retry", "hub_top", "hub_replay", "haptics_test",
     )
 
     private const val HEADER = "HAPBEAT-DEMO-SWITCH/1\n"

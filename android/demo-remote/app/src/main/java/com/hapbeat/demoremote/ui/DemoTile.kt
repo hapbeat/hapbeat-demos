@@ -64,7 +64,7 @@ private val TileHeight = 92.dp
 private const val DISABLED_ALPHA = 0.38f
 
 /** How long a tile with a long-press action must be held. */
-private const val LONG_PRESS_MS = 1000
+private const val LONG_PRESS_MS = 600
 
 /**
  * Demo button: thumbnail (16:9) above the name; name only when the demo has no thumbnail. With [onLongPress], holding

@@ -177,6 +177,9 @@ data class ControlGroup(val title: String, val actions: List<ControlAction>, val
 object ControlCatalog {
     val menuOpen = ControlAction("メニューを開く", "menu_open")
 
+    /** CONTROL `haptics_test`: the Hub plays 100 Hz for 1 s to the HMD's Hapbeat address (any Hub screen). */
+    val hubHapticsTest = ControlAction("触覚テスト（100 Hz・1 秒）", "haptics_test", demoId = DemoCatalog.HUB_ID)
+
     val groups: List<ControlGroup> = listOf(
         ControlGroup("進行", listOf(
             ControlAction("チュートリアル開始", "tutorial_start"),
@@ -206,6 +209,7 @@ object ControlCatalog {
         ControlGroup("Hub", listOf(
             ControlAction("トップへ", "hub_top", demoId = DemoCatalog.HUB_ID),
             ControlAction("最初から（同じプラン）", "hub_replay", demoId = DemoCatalog.HUB_ID),
+            hubHapticsTest,
         ), stateful = true),
         ControlGroup("Volley", listOf(
             // Same IDs as the Volley descriptor's scenes (block is its default).
@@ -257,6 +261,11 @@ object ControlCatalog {
             state == null -> STATE_UNKNOWN
             state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
             state.screen != "completion" -> "Hub の終了画面が出ているときだけ使えます"
+            else -> null
+        }
+        "haptics_test" -> when {
+            state == null -> STATE_UNKNOWN
+            state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
             else -> null
         }
         else -> null

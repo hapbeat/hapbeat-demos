@@ -53,6 +53,18 @@ class ControlAvailabilityTest {
     }
 
     @Test
+    fun hapticsTestOnEveryHubScreen() {
+        assertNotNull(reason("haptics_test", null))
+        assertNotNull(reason("haptics_test", state()))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "main")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "manage")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "completion")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID)))
+        assertEquals(DemoCatalog.HUB_ID, action("haptics_test").demoId)
+        assertEquals(ControlCatalog.hubHapticsTest, action("haptics_test"))
+    }
+
+    @Test
     fun otherActionsDoNotDependOnState() {
         assertNull(reason("recenter", null))
         assertNull(reason("menu_open", null))

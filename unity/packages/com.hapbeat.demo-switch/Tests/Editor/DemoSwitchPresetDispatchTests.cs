@@ -35,9 +35,9 @@ namespace Hapbeat.DemoSwitch.Tests
 
         sealed class FakeHost : IDemoSwitchHubHost
         {
-            public bool Busy, Stores = true, Installed = true, Starts = true;
+            public bool Busy, Stores = true, Installed = true, Starts = true, HapticsSdk = true;
             public DemoSwitchPresetCheck Check = DemoSwitchPresetCheck.Ok;
-            public int Stored, Started, SettingsStored, TopShown, Replayed;
+            public int Stored, Started, SettingsStored, TopShown, Replayed, HapticsTests;
             public string StoredName;
             public string Screen = DemoSwitchScreens.Main;
             public IReadOnlyList<string> StoredVisible;
@@ -83,6 +83,13 @@ namespace Hapbeat.DemoSwitch.Tests
                 if (!Starts) return false;
                 Replayed++;
                 DemoAppHandoff.Begin("volley", onFailed, Time.realtimeSinceStartup);
+                return true;
+            }
+            public bool HasHapticsTest => HapticsSdk;
+            public bool TryPlayHapticsTest(out string error)
+            {
+                error = null;
+                HapticsTests++;
                 return true;
             }
             public DemoSwitchPreset ReadPreset(int number) =>
@@ -365,6 +372,8 @@ namespace Hapbeat.DemoSwitch.Tests
             ExpectStatus("FAILED", "not_allowed");
             Send(Control(4, "hub_replay"));
             ExpectStatus("FAILED", "not_allowed");
+            Send(Control(5, "haptics_test"));
+            ExpectStatus("FAILED", "not_allowed");
         }
 
         [Test]
@@ -452,6 +461,25 @@ namespace Hapbeat.DemoSwitch.Tests
             ExpectStatus("ACK", "ok");
             Assert.That(host.TopShown, Is.EqualTo(1), "Executed on the application thread right after ACK.");
             Assert.That(host.CurrentScreen, Is.EqualTo(DemoSwitchScreens.Main));
+        }
+
+        [Test]
+        public void HapticsTestIsRefusedWithoutTheSdkAndAcceptedOnTheManageScreen()
+        {
+            var host = new FakeHost { HapticsSdk = false };
+            DemoSwitchHub.RegisterHost(host);
+
+            Send(Control(1, "haptics_test"));
+            ExpectStatus("FAILED", "not_allowed");
+            Assert.That(host.HapticsTests, Is.Zero);
+
+            host.HapticsSdk = true;
+            host.Busy = true;
+            host.Screen = DemoSwitchScreens.Manage;
+            Send(Control(2, "haptics_test"));
+            ExpectStatus("ACK", "ok");
+            Assert.That(host.HapticsTests, Is.EqualTo(1), "Played on the application thread right after ACK, on the manage screen too.");
+            Assert.That(host.CurrentScreen, Is.EqualTo(DemoSwitchScreens.Manage), "The screen stays.");
         }
 
         [Test]
