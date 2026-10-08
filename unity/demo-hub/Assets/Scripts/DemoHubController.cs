@@ -275,7 +275,8 @@ namespace Hapbeat.DemoHub
         /// <summary>視線をリセット and a system recenter: the only moves after the first placement.</summary>
         internal void PlaceInFrontOf(Transform head)
         {
-            var pose = HubPanelPlacement.Target(head.position, head.forward, head.up);
+            // The participant's front, not where a head looking down at the 視線をリセット button points.
+            var pose = HubPanelPlacement.Target(head.position, DemoRecenter.Front(head), head.up);
             _panel.transform.SetPositionAndRotation(pose.position, pose.rotation);
         }
 

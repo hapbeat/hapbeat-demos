@@ -243,14 +243,21 @@ namespace Hapbeat.DemoSwitch
             Closed?.Invoke();
         }
 
-        /// <summary>A system recenter: the shown completion panel goes in front of the HMD again.</summary>
+        /// <summary>A recenter: the shown completion panel goes in front of the HMD again (also while hidden by the pause).</summary>
         internal static void OnRecenter()
         {
             if (_completion != null) _completion.PlaceInFront();
         }
 
+        /// <summary>The shared pause opened over the completion panel hides it until the pause closes (<see cref="DemoPause"/>).</summary>
+        internal static void SetCompletionHidden(bool hidden)
+        {
+            if (_completion != null) _completion.SetHidden(hidden);
+        }
+
         internal static void RetryFromCompletion()
         {
+            DemoPause.Resume();
             CloseCompletion();
             Host?.Restart();
         }

@@ -24,6 +24,17 @@ namespace Hapbeat.DemoSwitch
         public const float JumpMetres = 0.25f;
         /// <summary>Longer frames (loading, returning from the background) are not compared.</summary>
         public const float MaxFrameSeconds = 0.05f;
+        /// <summary>
+        /// Headings are compared only while the head is pitched at most 60° (horizontal part of its forward at least
+        /// this long): looking at the floor, a small head shake swings the horizontal part of the forward by tens of degrees.
+        /// </summary>
+        public const float MinHorizontalForward = 0.5f;
+        /// <summary>The head counts as looking ahead (its heading is the participant's front) within this pitch, degrees.</summary>
+        public const float LevelPitchDegrees = 20f;
+        /// <summary>How long the last level heading stands in for the heading of a head looking down.</summary>
+        public const float LevelHeadingSeconds = 3f;
+        /// <summary>A last level heading farther than this from the head's heading is not used (the participant turned).</summary>
+        public const float LevelHeadingMaxTurnDegrees = 60f;
 
         /// <summary>Raised every frame while a recenter settles (also by tracking recovery jumps and 視線をリセット).</summary>
         public static event Action Recentered;
@@ -33,16 +44,65 @@ namespace Hapbeat.DemoSwitch
         private static Transform _startRig;
         private static Vector3 _startPosition;
         private static Vector3 _startForward;
+        private static Transform _levelSpace;
+        private static Vector3 _levelHeading;
+        private static float _levelAt = -1f;
 
         internal static void ResetForTests()
         {
             SettleUntil = -1f;
             _startRig = null;
+            _levelSpace = null;
+            _levelAt = -1f;
         }
 
         /// <summary>
-        /// 視線をリセット: the current head position and heading become this runtime's start position and front
-        /// (app space; the floor height and the OS tracking origin stay). The registered host's
+        /// The participant's front for 視線をリセット and for the shared panels placed in front of the HMD: the head's
+        /// horizontal heading, except while the head is pitched more than <see cref="LevelPitchDegrees"/>. Pressing the
+        /// low-left 視線をリセット button or making the left-hand menu gesture turns the head down and aside; then the
+        /// heading of the last level look (within <see cref="LevelHeadingSeconds"/> and <see cref="LevelHeadingMaxTurnDegrees"/>)
+        /// is the front, so that the reset front and the pause panel do not end up where the button or the hand was.
+        /// </summary>
+        public static Vector3 Front(Transform head) => Front(head, Time.realtimeSinceStartup);
+
+        internal static Vector3 Front(Transform head, float now)
+        {
+            if (head == null) return Vector3.forward;
+            var current = Heading(head.forward, head.up);
+            if (IsLevel(head.forward) || _levelAt < 0f || now - _levelAt > LevelHeadingSeconds || _levelSpace != head.parent) return current;
+            var level = _levelSpace != null ? _levelSpace.TransformDirection(_levelHeading) : _levelHeading;
+            level = Vector3.ProjectOnPlane(level, Vector3.up);
+            if (level.sqrMagnitude < 0.0001f) return current;
+            level.Normalize();
+            return Vector3.Angle(level, current) <= LevelHeadingMaxTurnDegrees ? level : current;
+        }
+
+        /// <summary>
+        /// Remembers the head's heading while it looks ahead (every frame, <see cref="DemoRecenterWatch"/>), in its parent's
+        /// space so that a later turn of the XR Origin (an alignment) turns it too.
+        /// </summary>
+        internal static void TrackLevelHeading(Transform head, float now)
+        {
+            if (head == null || !IsLevel(head.forward)) return;
+            var heading = Heading(head.forward, head.up);
+            _levelSpace = head.parent;
+            _levelHeading = _levelSpace != null ? _levelSpace.InverseTransformDirection(heading) : heading;
+            _levelAt = now;
+        }
+
+        private static bool IsLevel(Vector3 forward) => Mathf.Abs(forward.normalized.y) <= Mathf.Sin(LevelPitchDegrees * Mathf.Deg2Rad);
+
+        /// <summary>The horizontal direction the head faces; looking straight down (up), the top (bottom) of the head points that way.</summary>
+        internal static Vector3 Heading(Vector3 forward, Vector3 up)
+        {
+            var heading = Vector3.ProjectOnPlane(forward, Vector3.up);
+            if (heading.sqrMagnitude < 0.0001f) heading = Vector3.ProjectOnPlane(forward.y < 0f ? up : -up, Vector3.up);
+            return heading.sqrMagnitude < 0.0001f ? Vector3.forward : heading.normalized;
+        }
+
+        /// <summary>
+        /// 視線をリセット: the current head position and the participant's front (<see cref="Front(Transform)"/>) become
+        /// this runtime's start position and front (app space; the floor height and the OS tracking origin stay). The registered host's
         /// <see cref="IDemoSessionRecenter"/> wins; otherwise the scene's <see cref="XrStartAlignment"/> aligns again;
         /// otherwise the XR Origin is turned and moved so the head is at the origin's pose when the scene loaded.
         /// The Hub has no start pose: only its panel moves. Then the open panels go in front, as after a system recenter.
@@ -81,10 +141,10 @@ namespace Hapbeat.DemoSwitch
             AlignRig(rig, head, _startPosition, _startForward);
         }
 
-        /// <summary>Turns <paramref name="rig"/> about the head, then moves it horizontally, so the head is at <paramref name="startPosition"/> facing <paramref name="startForward"/>.</summary>
+        /// <summary>Turns <paramref name="rig"/> about the head, then moves it horizontally, so the head is at <paramref name="startPosition"/> with its front (<see cref="Front(Transform)"/>) along <paramref name="startForward"/>.</summary>
         internal static void AlignRig(Transform rig, Transform head, Vector3 startPosition, Vector3 startForward)
         {
-            rig.RotateAround(head.position, Vector3.up, XrStartAlignment.ComputeYaw(head.forward, startForward, Vector3.up));
+            rig.RotateAround(head.position, Vector3.up, XrStartAlignment.ComputeYaw(Front(head), startForward, Vector3.up));
             rig.position += XrStartAlignment.ComputeHorizontalDelta(head.position, startPosition);
         }
 
@@ -122,7 +182,8 @@ namespace Hapbeat.DemoSwitch
             var moved = Vector3.ProjectOnPlane(position - previousPosition, Vector3.up).magnitude;
             var before = Vector3.ProjectOnPlane(previousRotation * Vector3.forward, Vector3.up);
             var after = Vector3.ProjectOnPlane(rotation * Vector3.forward, Vector3.up);
-            var turned = before.sqrMagnitude > 0.0001f && after.sqrMagnitude > 0.0001f ? Vector3.Angle(before, after) : 0f;
+            var minimum = MinHorizontalForward * MinHorizontalForward;
+            var turned = before.sqrMagnitude >= minimum && after.sqrMagnitude >= minimum ? Vector3.Angle(before, after) : 0f;
             return moved > JumpMetres || turned > JumpYawDegrees;
         }
     }
@@ -174,6 +235,8 @@ namespace Hapbeat.DemoSwitch
             else _hasHead = false;
 
             var now = Time.realtimeSinceStartup;
+            var camera = Camera.main;
+            DemoRecenter.TrackLevelHeading(camera != null ? camera.transform : null, now);
             if (source != null)
             {
                 Debug.Log("[Demo Session] DEMO_SESSION_RECENTER (" + source + ")");

@@ -517,14 +517,14 @@ namespace Hapbeat.DemoSwitch
         public void EnableInputAfter(float seconds) => _inputEnabledAt = Time.realtimeSinceStartup + seconds;
         internal bool AcceptsInputAt(float realtime) => realtime >= _inputEnabledAt;
 
-        /// <summary>Places the panel in front of <paramref name="head"/>, facing it, lowered by <paramref name="drop"/> metres.</summary>
+        /// <summary>
+        /// Places the panel in front of <paramref name="head"/> along the participant's front (<see cref="DemoRecenter.Front(Transform)"/>:
+        /// not where a head looking down at a hand or the 視線をリセット button points), facing it, lowered by <paramref name="drop"/> metres.
+        /// </summary>
         public void PlaceInFront(Transform head, float distance, float drop)
         {
             if (head == null) return;
-            var forward = Vector3.ProjectOnPlane(head.forward, Vector3.up);
-            if (forward.sqrMagnitude < 0.0001f) forward = Vector3.ProjectOnPlane(head.up, Vector3.up);
-            forward.Normalize();
-            var position = head.position + forward * distance + Vector3.down * drop;
+            var position = head.position + DemoRecenter.Front(head) * distance + Vector3.down * drop;
             transform.SetPositionAndRotation(position, Quaternion.LookRotation(position - head.position, Vector3.up));
         }
 
@@ -657,6 +657,7 @@ namespace Hapbeat.DemoSwitch
     internal sealed class DemoSessionCompletionPanel : MonoBehaviour
     {
         public const float InputDelaySeconds = 1f;
+        public const float ShownAgainInputDelaySeconds = 0.5f;
         public const float Distance = 0.55f;
         public const float Drop = 0.12f;
         private const float Width = 440f;
@@ -705,11 +706,21 @@ namespace Hapbeat.DemoSwitch
             return completion;
         }
 
-        /// <summary>After a system recenter: in front of the HMD, also when it was at a scene anchor.</summary>
+        /// <summary>After a recenter (system or 視線をリセット): in front of the HMD, also when it was at a scene anchor.</summary>
         internal void PlaceInFront()
         {
             var camera = Camera.main;
             if (camera != null) _panel.PlaceInFront(camera.transform, Distance, Drop);
+        }
+
+        /// <summary>
+        /// Hidden (no input) while the shared pause is open over it. Shown again, it takes input after
+        /// <see cref="ShownAgainInputDelaySeconds"/>: the fingertip that pressed the pause's 閉じる may be where it is.
+        /// </summary>
+        internal void SetHidden(bool hidden)
+        {
+            if (gameObject.activeSelf == hidden) gameObject.SetActive(!hidden);
+            if (!hidden) _panel.EnableInputAfter(ShownAgainInputDelaySeconds);
         }
 
         private void LaunchForward()

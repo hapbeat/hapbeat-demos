@@ -94,10 +94,11 @@ namespace Hapbeat.DemoSwitch
                    tracked;
         }
 
+        /// <summary>The head's front (<see cref="DemoRecenter.Front(Transform)"/>) along the anchor's forward, the head over the anchor.</summary>
         internal static void Align(XROrigin xrOrigin, Transform anchor)
         {
             var camera = xrOrigin.Camera;
-            var yaw = ComputeYaw(camera.transform.forward, anchor.forward, xrOrigin.Origin.transform.up);
+            var yaw = ComputeYaw(DemoRecenter.Front(camera.transform), anchor.forward, xrOrigin.Origin.transform.up);
             xrOrigin.RotateAroundCameraUsingOriginUp(yaw);
 
             // RotateAroundCameraUsingOriginUp moves the origin. Re-read the camera afterwards,

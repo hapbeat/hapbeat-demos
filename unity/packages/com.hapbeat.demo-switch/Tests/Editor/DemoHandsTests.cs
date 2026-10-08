@@ -19,6 +19,17 @@ namespace Hapbeat.DemoSwitch.Tests
         private static bool MetaModelsPresent =>
             Resources.Load<GameObject>(DemoHands.MetaLeftModelPath) != null && Resources.Load<GameObject>(DemoHands.MetaRightModelPath) != null;
 
+        [Test]
+        public void BuildStopsWhenTheHandsWouldFallBackUnnoticed()
+        {
+            Assert.That(Editor.DemoHandsBuildCheck.Check(false, false, null), Is.Null, "Hands off: nothing to check.");
+            Assert.That(Editor.DemoHandsBuildCheck.Check(true, true, null), Is.Null, "Meta's mesh linked.");
+            var error = Editor.DemoHandsBuildCheck.Check(true, false, null);
+            Assert.That(error, Does.Contain("link-").And.Contain(Editor.DemoHandsBuildCheck.AllowProceduralVariable), "Missing private assets stop the build.");
+            Assert.That(Editor.DemoHandsBuildCheck.Check(true, false, "1"), Is.Null, "Explicit procedural build (public clone).");
+            Assert.That(Editor.DemoHandsBuildCheck.MetaHandsPresent(), Is.EqualTo(MetaModelsPresent));
+        }
+
         /// <summary>The ghost-hands test hand with XR Hands joint rotations: +Z along each bone, +Y up (back of the hand).</summary>
         private static (Pose[] poses, bool[] valid) OpenHandPoses()
         {

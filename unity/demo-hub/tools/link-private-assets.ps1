@@ -38,14 +38,28 @@ if (-not (Test-Path -LiteralPath $WorkspaceRoot)) { throw "Workspace root not fo
 $WorkspaceRoot = (Resolve-Path -LiteralPath $WorkspaceRoot).Path
 
 $path = Join-Path $ProjectPath 'Assets\HapbeatPrivate'
-$target = Join-Path $WorkspaceRoot 'hapbeat-demos\private-assets\unity\demo-hub\HapbeatPrivate'
+$relative = 'hapbeat-demos\private-assets\unity\demo-hub\HapbeatPrivate'
+$target = Join-Path $WorkspaceRoot $relative
+
+# A git worktree of hapbeat-demos has no private-assets checkout: use the main checkout's workspace.
+if (-not (Test-Path -LiteralPath $target)) {
+    $common = git -C $ProjectPath rev-parse --path-format=absolute --git-common-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and $common) {
+        $mainWorkspace = Split-Path -Parent (Split-Path -Parent $common)
+        $candidate = Join-Path $mainWorkspace $relative
+        if (Test-Path -LiteralPath $candidate) {
+            $WorkspaceRoot = $mainWorkspace
+            $target = $candidate
+        }
+    }
+}
 
 Write-Output "link-private-assets"
 Write-Output "  project   : $ProjectPath"
 Write-Output "  workspace : $WorkspaceRoot"
 
 if (-not (Test-Path -LiteralPath $target)) {
-    Write-Output "  skip    Assets\HapbeatPrivate  (target not found: $target; the procedural ghost hands are used)"
+    Write-Output "  skip    Assets\HapbeatPrivate  (target not found: $target; an APK build needs HAPBEAT_DEMO_PROCEDURAL_HANDS=1 for the procedural ghost hands)"
     exit 0
 }
 $target = (Resolve-Path -LiteralPath $target).Path

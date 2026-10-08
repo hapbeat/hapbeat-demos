@@ -373,13 +373,13 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchRuntime.ResolveControls("recenter", "", menu), Is.SameAs(DemoSession.RecenterControls));
             Assert.That(DemoSwitchRuntime.ResolveControls("tutorial_start", "", menu), Is.SameAs(DemoSession.TutorialControls));
 
-            // The completion panel owns input: neither the pause nor a restart from outside.
+            // Over the completion panel the pause still opens (to reach 視線をリセット / Hub に戻る), but no restart from outside.
             DemoSession.ResetForTests(_platform, "volley", Volley());
             DemoPause.Configure(null);
             Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
             DemoSession.RegisterHost(host);
             DemoSession.ShowCompletion();
-            Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_open", ""), Is.False);
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_open", ""), Is.True);
             Assert.That(DemoPause.SharedControls.CanExecuteControl("restart", ""), Is.False);
             Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_close", ""), Is.True);
         }
@@ -994,6 +994,9 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoRecenter.IsJump(head, facing, head + Vector3.right * 0.02f, Quaternion.Euler(0, 28, 0), 0.014f), Is.False, "A fast head turn (570°/s)");
             Assert.That(DemoRecenter.IsJump(head, facing, head, Quaternion.Euler(50, 20, 0), 0.014f), Is.False, "Looking down");
             Assert.That(DemoRecenter.IsJump(head, facing, head, Quaternion.Euler(0, 140, 0), 0.5f), Is.False, "Long frames are not compared");
+            // At the floor, a 3° head shake swings the horizontal part of the forward by about 40°.
+            var down = Quaternion.Euler(86, 20, 0);
+            Assert.That(DemoRecenter.IsJump(head, down, head, down * Quaternion.Euler(0, 3, 0), 0.014f), Is.False, "Head shake while looking at the floor");
         }
 
         [Test]
@@ -1032,19 +1035,116 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
-        public void PauseAndCompletionNeverStack()
+        public void PauseOpensOverTheCompletionPanelAndHidesIt()
         {
             Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
             var host = new Host();
             DemoSession.RegisterHost(host);
+            DemoPause.Configure("jp.hapbeat.demohub");
             DemoPause.Pause();
             DemoSession.ShowCompletion();
             Assert.That(DemoPause.IsPaused, Is.False, "Completion closes the pause first.");
             Assert.That(DemoSession.IsCompletionShown, Is.True);
             Assert.That(host.Paused, Is.True);
             Assert.That(AudioListener.pause, Is.False);
-            Assert.That(DemoPause.Pause(), Is.False, "No pause over the completion panel.");
+            var completion = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("menu_open", ""), Is.True, "CONTROL menu_open over the completion panel.");
+            Assert.That(DemoPause.SharedControls.CanExecuteControl("restart", ""), Is.False, "もう一度 belongs to the completion panel.");
+            Assert.That(DemoPause.Pause(), Is.True, "The pause opens over the completion panel.");
+            Assert.That(completion.gameObject.activeSelf, Is.False, "The completion panel is hidden meanwhile (no input, no overlap).");
+            var panel = DemoPause.Panel;
+            Assert.That(panel.ResumeButton.Label, Is.EqualTo("閉じる"));
+            Assert.That(panel.RestartButton, Is.Null);
+            Assert.That(panel.NextButton, Is.Null);
+            Assert.That(panel.RecenterButton.Label, Is.EqualTo("視線をリセット"));
+            Assert.That(panel.HubButton.Label, Is.EqualTo("Hub に戻る"));
+
+            panel.ResumeButton.Press();
             Assert.That(DemoPause.IsPaused, Is.False);
+            Assert.That(completion.gameObject.activeSelf, Is.True, "The completion panel comes back.");
+            Assert.That(host.Paused, Is.True, "Gameplay stays paused under the completion panel.");
+            Assert.That(AudioListener.pause, Is.False);
+
+            DemoPause.Pause();
+            DemoSession.RetryFromCompletion();
+            Assert.That(DemoPause.IsPaused, Is.False, "もう一度 (CONTROL session_retry) closes the pause too.");
+            Assert.That(DemoSession.IsCompletionShown, Is.False);
+            Assert.That(host.Paused, Is.False);
+            Assert.That(host.Restarts, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ResetViewFromThePauseBringsTheHiddenCompletionPanelInFront()
+        {
+            var camera = MainCamera(new Vector3(0, 1.6f, 0), Vector3.forward);
+            try
+            {
+                Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+                DemoSession.RegisterHost(new RecenterHost());
+                DemoSession.ShowCompletion();
+                var completion = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+                completion.transform.position = new Vector3(5f, 0f, -4f);
+                DemoPause.Pause();
+                camera.transform.SetPositionAndRotation(new Vector3(0.3f, 1.5f, 0.2f), Quaternion.LookRotation(Vector3.right));
+                DemoPause.Panel.RecenterButton.Press();
+                AssertInFrontOfHead(DemoPause.Panel.transform, DemoPausePanel.Distance, DemoPausePanel.Drop, "The pause panel goes in front.");
+                AssertInFrontOfHead(completion.transform, DemoSessionCompletionPanel.Distance, DemoSessionCompletionPanel.Drop, "So does the hidden completion panel.");
+                DemoPause.Resume();
+                Assert.That(completion.gameObject.activeSelf, Is.True);
+                Assert.That(completion.Panel.AcceptsInputAt(Time.realtimeSinceStartup + 0.1f), Is.False, "The fingertip that pressed 閉じる presses nothing at once.");
+                Assert.That(completion.Panel.AcceptsInputAt(Time.realtimeSinceStartup + DemoSessionCompletionPanel.ShownAgainInputDelaySeconds + 0.01f), Is.True);
+            }
+            finally { Object.DestroyImmediate(camera); }
+        }
+
+        [Test]
+        public void FrontIsTheLastLevelHeadingWhileLookingDown()
+        {
+            var rig = new GameObject("test rig");
+            var head = new GameObject("test head");
+            try
+            {
+                head.transform.SetParent(rig.transform, false);
+                head.transform.localPosition = new Vector3(0f, 1.6f, 0f);
+                head.transform.localRotation = Quaternion.Euler(5, 0, 0);
+                DemoRecenter.TrackLevelHeading(head.transform, 10f);
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 10f), Vector3.forward), Is.LessThan(0.01f));
+
+                // Looking down-left at the 視線をリセット button: the front stays where the participant looked ahead.
+                head.transform.localRotation = Quaternion.Euler(35, -20, 0);
+                DemoRecenter.TrackLevelHeading(head.transform, 11f);
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 11f), Vector3.forward), Is.LessThan(0.01f));
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 12.9f), Vector3.forward), Is.LessThan(0.01f), "Within 3 s.");
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 13.5f), Quaternion.Euler(0, -20, 0) * Vector3.forward), Is.LessThan(0.01f), "Older: the head's own heading.");
+
+                // An alignment turns the rig: the remembered heading turns with it.
+                rig.transform.rotation = Quaternion.Euler(0, 90, 0);
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 12f), Vector3.right), Is.LessThan(0.01f));
+                rig.transform.rotation = Quaternion.identity;
+
+                // Turned around while looking down: the head's own heading.
+                head.transform.localRotation = Quaternion.Euler(35, 120, 0);
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 12f), Quaternion.Euler(0, 120, 0) * Vector3.forward), Is.LessThan(0.01f));
+
+                // Level again: always the head's heading.
+                head.transform.localRotation = Quaternion.Euler(-10, 40, 0);
+                Assert.That(Vector3.Angle(DemoRecenter.Front(head.transform, 12f), Quaternion.Euler(0, 40, 0) * Vector3.forward), Is.LessThan(0.01f));
+
+                // The 視線をリセット default alignment uses the same front.
+                head.transform.localRotation = Quaternion.Euler(5, 0, 0);
+                DemoRecenter.TrackLevelHeading(head.transform, 20f);
+                head.transform.localRotation = Quaternion.Euler(35, -20, 0);
+                var front = Quaternion.Euler(0, 70, 0) * Vector3.forward;
+                DemoRecenter.AlignRig(rig.transform, head.transform, Vector3.zero, front);
+                Assert.That(Vector3.Angle(rig.transform.forward, front), Is.LessThan(0.5f), "The look-ahead heading, not the glance at the button, becomes the front.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(head);
+                Object.DestroyImmediate(rig);
+                DemoRecenter.ResetForTests();
+            }
         }
 
         // Left hand, fingers up, palm toward -Z (thumb/index side at -X).

@@ -20,8 +20,10 @@ namespace Hapbeat.DemoSwitch
     /// <summary>
     /// Shared pause for demos without their own menu (settings: Pause Menu). While paused the host's
     /// gameplay is paused, its haptics are off and Unity audio is paused; the panel offers
-    /// "再開", "最初からやり直す", in a session "次へ：<title>" or "デモを終了", and, when the Hub is
-    /// installed, "Hub に戻る". Works with or without a session.
+    /// "再開", "最初からやり直す", in a session "次へ：<title>" or "デモを終了", "視線をリセット" and, when the Hub is
+    /// installed, "Hub に戻る". Works with or without a session. It also opens over the completion panel, which it
+    /// hides until it closes: then only "閉じる", "視線をリセット" and "Hub に戻る" (the completion panel decides もう一度 / 次へ),
+    /// so that a completion panel shown out of reach can still be brought in front or left.
     /// </summary>
     public static class DemoPause
     {
@@ -78,30 +80,35 @@ namespace Hapbeat.DemoSwitch
             else Pause();
         }
 
-        /// <summary>Opens the pause panel in front of the HMD. Refused while the completion panel is shown.</summary>
+        /// <summary>Opens the pause panel in front of the HMD; over a shown completion panel, hides that panel.</summary>
         public static bool Pause()
         {
             if (IsPaused) return true;
-            if (DemoSession.IsCompletionShown) return false;
+            var completion = DemoSession.IsCompletionShown;
             var host = DemoSession.CurrentHost;
             host?.SetGameplayPaused(true);
             host?.SetHapticsEnabled(false);
             _audioWasPaused = AudioListener.pause;
             AudioListener.pause = true;
-            _panel = DemoPausePanel.Create(CanReturnToHub, DemoSession.IsActive ? DemoSession.Next : (DemoSessionNext?)null);
-            Debug.Log("[Demo Pause] Paused.");
+            DemoSession.SetCompletionHidden(true);
+            _panel = DemoPausePanel.Create(CanReturnToHub, DemoSession.IsActive && !completion ? DemoSession.Next : (DemoSessionNext?)null, completion);
+            Debug.Log(completion ? "[Demo Pause] Paused over the completion panel." : "[Demo Pause] Paused.");
             PausedChanged?.Invoke(true);
             return true;
         }
 
-        /// <summary>Closes the panel and restores haptics (the session's ON/OFF state), audio and gameplay.</summary>
+        /// <summary>
+        /// Closes the panel and restores haptics (the session's ON/OFF state) and audio, and gameplay unless the
+        /// completion panel is shown (it comes back and keeps the gameplay paused).
+        /// </summary>
         public static void Resume()
         {
             if (!IsPaused) return;
             DestroyPanel();
             var host = DemoSession.CurrentHost;
             host?.SetHapticsEnabled(DemoSession.HapticsEnabled);
-            host?.SetGameplayPaused(false);
+            if (DemoSession.IsCompletionShown) DemoSession.SetCompletionHidden(false);
+            else host?.SetGameplayPaused(false);
             AudioListener.pause = _audioWasPaused;
             Debug.Log("[Demo Pause] Resumed.");
             PausedChanged?.Invoke(false);
@@ -139,7 +146,7 @@ namespace Hapbeat.DemoSwitch
             if (_panel != null) _panel.ShowError(message);
         }
 
-        /// <summary>A system recenter: the open panel goes in front of the HMD again.</summary>
+        /// <summary>A recenter (system or 視線をリセット): the open panel goes in front of the HMD again.</summary>
         internal static void OnRecenter()
         {
             if (_panel != null) _panel.PlaceInFront();
@@ -153,9 +160,9 @@ namespace Hapbeat.DemoSwitch
         }
 
         /// <summary>
-        /// `menu_open` opens the panel (not while the completion panel is shown), `menu_close` closes it (also
-        /// when already closed), `restart` is 最初からやり直す and needs a registered scene host. While the
-        /// completion panel is shown `restart` is refused too: its もう一度 decides whether a step may be repeated.
+        /// `menu_open` opens the panel (also over the completion panel), `menu_close` closes it (also when already
+        /// closed), `restart` is 最初からやり直す and needs a registered scene host. While the completion panel is
+        /// shown `restart` is refused: its もう一度 decides whether a step may be repeated.
         /// </summary>
         private sealed class DemoPauseControls : IDemoAppControls
         {
@@ -164,7 +171,7 @@ namespace Hapbeat.DemoSwitch
                 if (!_enabled || sceneId != string.Empty) return false;
                 switch (action)
                 {
-                    case "menu_open": return !DemoSession.IsCompletionShown;
+                    case "menu_open": return true;
                     case "menu_close": return true;
                     case "restart": return !DemoSession.IsCompletionShown && DemoSession.CurrentHost != null;
                     default: return false;
@@ -260,8 +267,8 @@ namespace Hapbeat.DemoSwitch
                 _systemMenuWas = system;
             }
             else fired |= SamplePalmPinch(deltaTime);
-            // The completion panel owns input; never stack the pause on it, nor toggle it while leaving.
-            return fired && !DemoSession.IsCompletionShown && !DemoAppHandoff.IsPending;
+            // Never toggle while leaving. Over the completion panel it opens too (DemoPause hides that panel meanwhile).
+            return fired && !DemoAppHandoff.IsPending;
         }
 
         private static bool ControllerMenuHeld()
@@ -303,8 +310,9 @@ namespace Hapbeat.DemoSwitch
     }
 
     /// <summary>
-    /// "一時停止" panel: 0.55 m in front of the HMD when opened, then fixed in place (a system recenter
-    /// places it in front again). Buttons: 再開 / 最初からやり直す / 次へ (or デモを終了, in a session) / Hub に戻る.
+    /// "一時停止" panel: 0.55 m in front of the HMD when opened, then fixed in place (a recenter places it in front
+    /// again). Buttons: 再開 / 最初からやり直す / 次へ (or デモを終了, in a session) / 視線をリセット / Hub に戻る; over
+    /// the completion panel: 閉じる / 視線をリセット / Hub に戻る.
     /// </summary>
     internal sealed class DemoPausePanel : MonoBehaviour
     {
@@ -320,17 +328,22 @@ namespace Hapbeat.DemoSwitch
         private Text _error;
 
         internal DemoSessionPanel Panel => _panel;
+        /// <summary>"再開", or "閉じる" over the completion panel.</summary>
         internal DemoSessionButton ResumeButton { get; private set; }
+        /// <summary>Null over the completion panel.</summary>
         internal DemoSessionButton RestartButton { get; private set; }
-        /// <summary>"次へ：<title>" or "デモを終了"; null outside a session.</summary>
+        /// <summary>"次へ：<title>" or "デモを終了"; null outside a session and over the completion panel.</summary>
         internal DemoSessionButton NextButton { get; private set; }
+        internal DemoSessionButton RecenterButton { get; private set; }
         /// <summary>Null when the Hub is not installed.</summary>
         internal DemoSessionButton HubButton { get; private set; }
         internal string ErrorText => _error.text;
 
-        public static DemoPausePanel Create(bool withHub, DemoSessionNext? next)
+        /// <param name="overCompletion">Opened over the completion panel: 閉じる / 視線をリセット / Hub に戻る only.</param>
+        public static DemoPausePanel Create(bool withHub, DemoSessionNext? next, bool overCompletion = false)
         {
-            var buttons = 2 + (next.HasValue ? 1 : 0) + (withHub ? 1 : 0);
+            if (overCompletion) next = null;
+            var buttons = (overCompletion ? 2 : 3) + (next.HasValue ? 1 : 0) + (withHub ? 1 : 0);
             // Fixed slots: heading, buttons, and a reserved error line (no layout shift).
             var height = 28f + HeadingHeight + 18f + buttons * (ButtonHeight + ButtonGap) + 40f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Pause", new Vector2(Width, height));
@@ -340,15 +353,20 @@ namespace Hapbeat.DemoSwitch
             panel.AddText(new Vector2(0, y), new Vector2(Width - 40, HeadingHeight), "一時停止", 34, Color.white);
             y -= HeadingHeight * 0.5f + 18f + ButtonHeight * 0.5f;
             var size = new Vector2(Width - 60, ButtonHeight);
-            pause.ResumeButton = panel.AddButton(new Vector2(0, y), size, "再開", 24, DemoPause.Resume);
-            y -= ButtonHeight + ButtonGap;
-            pause.RestartButton = panel.AddButton(new Vector2(0, y), size, "最初からやり直す", 24, DemoPause.RestartFromPause);
+            pause.ResumeButton = panel.AddButton(new Vector2(0, y), size, overCompletion ? "閉じる" : "再開", 24, DemoPause.Resume);
+            if (!overCompletion)
+            {
+                y -= ButtonHeight + ButtonGap;
+                pause.RestartButton = panel.AddButton(new Vector2(0, y), size, "最初からやり直す", 24, DemoPause.RestartFromPause);
+            }
             if (next.HasValue)
             {
                 y -= ButtonHeight + ButtonGap;
                 var label = next.Value.IsFinish ? "デモを終了" : "次へ：" + next.Value.Step.Title;
                 pause.NextButton = panel.AddButton(new Vector2(0, y), size, label, 24, () => DemoPause.NextFromPause());
             }
+            y -= ButtonHeight + ButtonGap;
+            pause.RecenterButton = panel.AddButton(new Vector2(0, y), size, "視線をリセット", 24, DemoRecenter.ResetView);
             if (withHub)
             {
                 y -= ButtonHeight + ButtonGap;
@@ -361,7 +379,7 @@ namespace Hapbeat.DemoSwitch
             return pause;
         }
 
-        /// <summary>In front of the HMD: when opened and after a system recenter.</summary>
+        /// <summary>In front of the HMD: when opened and after a recenter.</summary>
         internal void PlaceInFront()
         {
             var camera = Camera.main;
