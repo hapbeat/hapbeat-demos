@@ -344,6 +344,61 @@ void FHapbeatDemoSessionSpec::Define()
             TestTrue(TEXT("not foreground, outside a session: -1 / 0"),Outside.Contains(TEXT(R"("current_demo_id":"safety-mill","foreground":false,"haptics_on":false,)"))
                 &&Outside.Contains(TEXT(R"("paused":true,"step_index":-1,"step_count":0,"auth":"b1cb2a833111fba63bf84b73a729dbd5b3d8bd1e3a6d6ab20b4e33683a7befdf")")));
         });
+        // The optional STATE fields and the new CONTROL actions (contracts 59b81f8 fixtures unsigned_state_extended /
+        // unsigned_state_partial / unsigned_control_hand_style; HMAC with key "test-secret", the vectors every
+        // implementation shares: subrepo-devs/demos/instructions/instructions-remote-hub-parity-202610081900.md §1).
+        const FString ExtendedVector=TEXT("4722f50769469f635991a711f24fe04dd847136b02d1e6a2e241840d48b85cf1");
+        const FString PartialVector=TEXT("c1529021a52273598596f8cefde5c5da6d58ee912bee05219f29c4e1569b1a74");
+        const FString HandStyleVector=TEXT("19428bbb3df765bcb2606f517c3a41328574b5acd23537c306768ea4478eee80");
+        // Python's hmac over "...seq=2:49\ndemo_id=14:trex-encounter\naction=12:session_next\nscene_id=0:\n".
+        const FString NextVector=TEXT("cf2375e7f6bf0cfc53fa570358aa586a258283cb7073c744c399a19be1937ca4");
+        It(TEXT("adds the optional STATE fields in order, each signed only when present"),[this,Query,ExtendedVector,PartialVector]()
+        {
+            const FString Key=TEXT("test-secret");
+            FHapbeatDemoSwitchMessage M;HapbeatDemoSwitchProtocol::Parse(Bytes(Query),M);
+            FHapbeatDemoSwitchState S;S.bHapticsOn=true;S.StepIndex=1;S.StepCount=3;
+            S.DeviceModel=TEXT("Oculus Quest 3");S.bEditor=false;S.Screen=TEXT("main");S.HandStyle=TEXT("ghost");
+            const FString Extended=TEXT(R"({"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef","current_demo_id":"handdemo","foreground":true,"haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,"step_index":1,"step_count":3,"device_model":"Oculus Quest 3","editor":false,"screen":"main","hand_style":"ghost")");
+            TestEqual(TEXT("unsigned extended STATE = fixture"),HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,FString()),Extended+TEXT("}"));
+            const FString SignedExtended=HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),S,Key);
+            const TSharedPtr<FJsonObject> E1=Object(SignedExtended);
+            TestTrue(TEXT("extended STATE vector"),SignedExtended.StartsWith(Extended+TEXT(","))&&E1.IsValid()&&E1->GetStringField(TEXT("auth"))==ExtendedVector);
+            FHapbeatDemoSwitchState P;P.bHapticsOn=true;P.StepIndex=1;P.StepCount=3;P.Screen=TEXT("completion");
+            const FString Partial=TEXT(R"({"version":1,"type":"STATE","controller_id":"remote-pixel","nonce":"0123456789abcdef","current_demo_id":"handdemo","foreground":true,"haptics_on":true,"haptics_ui":false,"recenter_ui":false,"paused":false,"step_index":1,"step_count":3,"screen":"completion")");
+            TestEqual(TEXT("unsigned partial STATE = fixture"),HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),P,FString()),Partial+TEXT("}"));
+            const FString SignedPartial=HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),P,Key);
+            const TSharedPtr<FJsonObject> P1=Object(SignedPartial);
+            TestTrue(TEXT("partial STATE vector"),SignedPartial.StartsWith(Partial+TEXT(","))&&P1.IsValid()&&P1->GetStringField(TEXT("auth"))==PartialVector);
+            FHapbeatDemoSwitchState E;E.bEditor=true;
+            TestTrue(TEXT("editor true"),HapbeatDemoSwitchProtocol::State(M,TEXT("handdemo"),E,FString()).EndsWith(TEXT(R"("step_count":0,"editor":true})")));
+        });
+        It(TEXT("authenticates the new CONTROL actions"),[this,HandStyleVector,NextVector]()
+        {
+            const FString Key=TEXT("test-secret");
+            // The signed packet is the fixture with its vector appended as the last field.
+            auto Signed=[](const FString& Json,const FString& Vector){return Json.LeftChop(1)+TEXT(",\"auth\":\"")+Vector+TEXT("\"}");};
+            const FString HandStyle=TEXT(R"({"version":1,"type":"CONTROL","controller_id":"remote-pixel","seq":48,"demo_id":"handdemo","action":"hand_style_skin","scene_id":""})");
+            FHapbeatDemoSwitchMessage M;
+            TestTrue(TEXT("hand_style_skin parses"),HapbeatDemoSwitchProtocol::Parse(Bytes(Signed(HandStyle,HandStyleVector)),M));
+            TestEqual(TEXT("action"),M.Action,FString(TEXT("hand_style_skin")));
+            TestTrue(TEXT("hand_style_skin vector"),HapbeatDemoSwitchProtocol::Authenticate(M,Key,false));
+            const FString Next=Signed(TEXT(R"({"version":1,"type":"CONTROL","controller_id":"remote-pixel","seq":49,"demo_id":"trex-encounter","action":"session_next","scene_id":""})"),NextVector);
+            TestTrue(TEXT("session_next parses"),HapbeatDemoSwitchProtocol::Parse(Bytes(Next),M));
+            TestTrue(TEXT("session_next signature"),HapbeatDemoSwitchProtocol::Authenticate(M,Key,false));
+            FHapbeatDemoSwitchMessage B;
+            TestFalse(TEXT("session_next takes no scene_id"),HapbeatDemoSwitchProtocol::Parse(Bytes(Next.Replace(TEXT("\"scene_id\":\"\""),TEXT("\"scene_id\":\"block\""))),B));
+        });
+        It(TEXT("normalizes the device model"),[this]()
+        {
+            using HapbeatDemoSwitchProtocol::NormalizeDeviceModel;
+            TestEqual(TEXT("as is"),NormalizeDeviceModel(TEXT("Oculus Quest 3")),FString(TEXT("Oculus Quest 3")));
+            TestEqual(TEXT("control characters removed"),NormalizeDeviceModel(FString(TEXT("Quest\t3\n"))+TCHAR(0x7F)+TCHAR(0x85)),FString(TEXT("Quest3")));
+            TestEqual(TEXT("empty: left out"),NormalizeDeviceModel(TEXT("\r\n")),FString());
+            TestEqual(TEXT("64 code points"),NormalizeDeviceModel(FString::ChrN(70,TEXT('a'))),FString::ChrN(64,TEXT('a')));
+            // U+1F600 is one code point (a UTF-16 surrogate pair): 63 + 1 = 64, the pair is not split.
+            const FString Pair=FString::ChrN(1,TCHAR(0xD83D))+FString::ChrN(1,TCHAR(0xDE00));
+            TestEqual(TEXT("surrogate pair"),NormalizeDeviceModel(FString::ChrN(63,TEXT('a'))+Pair+TEXT("b")),FString::ChrN(63,TEXT('a'))+Pair);
+        });
     });
     Describe(TEXT("ControlRoute"),[this]()
     {
@@ -367,6 +422,14 @@ void FHapbeatDemoSessionSpec::Define()
             TestTrue(TEXT("haptics_on without the toggle"),Route(TEXT("haptics_on"),true,true,false)==EHapbeatControlRoute::NotAllowed);
             TestTrue(TEXT("recenter"),Route(TEXT("recenter"),true,false,false)==EHapbeatControlRoute::Plugin);
             TestTrue(TEXT("recenter_ui_show"),Route(TEXT("recenter_ui_show"),false,false,false)==EHapbeatControlRoute::Plugin);
+        });
+        It(TEXT("session_next / session_retry are the panels'; hand_style_* and hub_* are refused"),[this,Route]()
+        {
+            TestTrue(TEXT("session_next"),Route(TEXT("session_next"),true,false,false)==EHapbeatControlRoute::SessionNext);
+            TestTrue(TEXT("session_retry"),Route(TEXT("session_retry"),true,true,true)==EHapbeatControlRoute::SessionRetry);
+            for(const TCHAR* Action:{TEXT("hand_style_ghost"),TEXT("hand_style_skin"),TEXT("hub_top"),TEXT("hub_replay")})
+                TestTrue(FString::Printf(TEXT("%s refused, registered or not"),Action),
+                    Route(Action,true,true,true)==EHapbeatControlRoute::NotAllowed&&Route(Action,false,true,true)==EHapbeatControlRoute::NotAllowed);
         });
     });
     Describe(TEXT("Press"),[this]()

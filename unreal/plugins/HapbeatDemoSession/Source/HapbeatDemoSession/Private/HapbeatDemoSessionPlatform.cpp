@@ -137,3 +137,12 @@ void HapbeatDemoSessionPlatform::FinishTask()
             FJavaWrapper::CallVoidMethod(Env,FJavaWrapper::GameActivityThis,M);
 #endif
 }
+
+FString HapbeatDemoSessionPlatform::DeviceModel()
+{
+#if PLATFORM_ANDROID
+    return (FAndroidMisc::GetDeviceMake()+TEXT(" ")+FAndroidMisc::GetDeviceModel()).TrimStartAndEnd();
+#else
+    return FPlatformMisc::GetDeviceMakeAndModel().Replace(TEXT("|"),TEXT(" ")).TrimStartAndEnd();
+#endif
+}

@@ -29,6 +29,10 @@ enum class EHapbeatControlRoute : uint8
     SharedPause,
     /** restart without a registered handler: the shared pause's 最初からやり直す. */
     SharedRestart,
+    /** session_next: the panels' 次へ / デモを終了 (in a session); READY once this runtime has left the foreground. */
+    SessionNext,
+    /** session_retry: the completion panel's もう一度 (while it offers it). */
+    SessionRetry,
 };
 
 /**
@@ -44,7 +48,9 @@ enum class EHapbeatControlRoute : uint8
  *
  * The demo registers its CONTROL actions (restart / menu_open / menu_close / tutorial_start) with RegisterControl.
  * Without a registered handler, menu_open / menu_close open / close the shared pause and restart is the pause's
- * 最初からやり直す, when the shared pause is enabled (RouteControl). QUERY is answered with GetSwitchState().
+ * 最初からやり直す, when the shared pause is enabled (RouteControl). session_next / session_retry are the panels' 次へ /
+ * もう一度. This plugin draws no shared hands and is not the Hub: hand_style_* and hub_top / hub_replay are refused.
+ * QUERY is answered with GetSwitchState().
  *
  * 視線をリセット: the in-view button (shown while IsRecenterUiVisible(): ticket recenter_ui, or CONTROL
  * recenter_ui_show/hide) and CONTROL recenter call the demo's own start alignment (SetRecenterHandler), or else
@@ -110,13 +116,13 @@ public:
     void ReturnToHub();
     bool IsHubInstalled() const {return bHubInstalled;}
     /**
-     * Starts steps[index+1] (or the finish runtime) with the next ticket (completion panel, or the pause panel's
-     * 次へ / デモを終了). Once this application has gone to the background: haptics off, sounds and the 7710
-     * listener stopped, then this task finishes, once. When the launch fails, or this application is still in
-     * front after FHapbeatLaunchHandoff::TimeoutSeconds, the open panel shows an error and the demo stays.
-     * Off Android nothing is launched (logged only).
+     * Starts steps[index+1] (or the finish runtime) with the next ticket (completion panel, the pause panel's
+     * 次へ / デモを終了, or CONTROL session_next). Once this application has gone to the background: haptics off,
+     * sounds and the 7710 listener stopped, then this task finishes, once. When the launch fails, or this application
+     * is still in front after FHapbeatLaunchHandoff::TimeoutSeconds, the open panel shows an error and the demo stays.
+     * Off Android nothing is launched (logged only). True when the launch started and the hand-over is waiting.
      */
-    void LaunchNextOrFinish();
+    bool LaunchNextOrFinish();
     /** A launch is waiting for this application to go to the background, or this demo is ending. */
     bool IsLeaving() const {return bExiting||Handoff.IsWaiting();}
 
@@ -155,7 +161,11 @@ public:
      * e.g. tutorial_start without a registered handler, is not allowed.
      */
     static EHapbeatControlRoute RouteControl(const FString& Action,bool bRegistered,bool bPauseEnabled,bool bHapticsToggle);
-    /** What a Demo Switch STATE reports: haptics, the in-view buttons as drawn, the shared pause, the session step (-1 / 0 outside). */
+    /**
+     * What a Demo Switch STATE reports: haptics, the in-view buttons as drawn, the shared pause, the session step (-1 / 0
+     * outside), the device model, whether this runs in the editor and the screen (completion while the completion panel
+     * is up, else main). No hand_style: this plugin draws no shared hands.
+     */
     FHapbeatDemoSwitchState GetSwitchState() const;
 
     /** "もう一度": restart the same step inside the demo (the panel is already closed). */
@@ -172,6 +182,8 @@ public:
     FHapbeatDemoSessionFlag OnPauseChanged;
     /** The Demo Hub (the component Unity's Demo Switch settings also trust as demo_hub). */
     static const FHapbeatDemoSessionComponent& HubComponent();
+    /** The Hub's demo_id, which READY names after a launch of the finish runtime (as the Unity runtimes do). */
+    static const TCHAR* HubDemoId() {return TEXT("demo_hub");}
 
     /** The ticket LaunchNextOrFinish hands over (index + 1, current haptics_ui and recenter_ui). */
     FString MakeNextTicketJson() const;
@@ -180,7 +192,7 @@ private:
     /** hapbeat-device.json -> UHapbeatSubsystem::SetAddressOverride(persist: false). Nothing without a file. */
     void ApplyDeviceAddress();
     bool IsControlAllowed(const FString& Action) const;
-    bool ExecuteControl(const FString& Action);
+    EHapbeatControlResult ExecuteControl(const FString& Action);
     FHapbeatSessionPointerInput ReadPointers(APlayerController* PlayerController) const;
     /** One frame of the pause gesture input; nothing while the application has no focus (system menu open). */
     FHapbeatPauseInput ReadPauseInput(APlayerController* PlayerController,const FVector& Eye) const;
@@ -189,8 +201,8 @@ private:
     void KeepHandMeshesTicking(bool bPaused);
     /** "次へ：<title>" or "デモを終了" (session mode). */
     FString NextLabel() const;
-    /** The next runtime (or the Hub) was started: wait for the background (FHapbeatLaunchHandoff). */
-    void StartHandoff();
+    /** The next runtime (or the Hub) was started: wait for the background (FHapbeatLaunchHandoff). DemoId: the started demo. */
+    void StartHandoff(const FString& DemoId);
     void UpdateHandoff(bool bBackgrounded,float Dt);
     /** Error line of the panel the launch came from (the pause panel when it is open, else the completion panel). */
     void ShowLaunchError(const FString& Text);
@@ -224,6 +236,8 @@ private:
     FHapbeatPauseSettings PauseSettings;
     FHapbeatPauseDetector PauseDetector;
     FHapbeatLaunchHandoff Handoff;
+    /** The demo the waiting hand-over started (READY of a pending CONTROL session_next names it). */
+    FString HandoffDemoId;
     FDelegateHandle DeactivateHandle, RecenterHandle;
     /** Seconds left in which open panels are put back in front of the head after a recenter (-1: none). */
     float RecenterSeconds=-1;

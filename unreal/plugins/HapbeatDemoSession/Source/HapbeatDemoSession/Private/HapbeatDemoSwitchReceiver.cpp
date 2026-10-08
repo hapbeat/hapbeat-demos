@@ -95,7 +95,15 @@ void FHapbeatDemoSwitchReceiver::Close()
 void FHapbeatDemoSwitchReceiver::Stop()
 {
     if(Socket) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_STOPPED"));
-    Close();bEnabled=false;Secret.Empty();
+    Close();bEnabled=false;Secret.Empty();PendingSource.Reset();
+}
+void FHapbeatDemoSwitchReceiver::FinishPending(bool bSuccess,const FString& LaunchedDemoId,const FString& Text)
+{
+    if(!PendingSource.IsValid()) return;
+    const TSharedPtr<FInternetAddr> Destination=MoveTemp(PendingSource);
+    UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_CONTROL action=%s ok=%d launched=%s"),*PendingMessage.Action,bSuccess,*LaunchedDemoId);
+    Send(bSuccess?HapbeatDemoSwitchProtocol::Status(PendingMessage,LaunchedDemoId,TEXT("READY"),TEXT("ok"),Secret)
+        :HapbeatDemoSwitchProtocol::Status(PendingMessage,DemoId,TEXT("FAILED"),TEXT("launch_failed"),Secret,Text),*Destination);
 }
 void FHapbeatDemoSwitchReceiver::Send(const FString& Payload,const FInternetAddr& Destination)
 {
@@ -151,13 +159,23 @@ void FHapbeatDemoSwitchReceiver::Tick()
             Send(HapbeatDemoSwitchProtocol::State(M,DemoId,State,Secret),*Source);continue;
         }
         if(!bForeground) {Status(TEXT("FAILED"),TEXT("not_allowed"),TEXT("not in foreground"));continue;}
+        // One operation at a time: nothing else while a session_next waits for the hand-over.
+        if(PendingSource.IsValid()) {Status(TEXT("FAILED"),TEXT("not_allowed"),TEXT("a launch is in progress"));continue;}
         // Launching another application (SWITCH) is not part of this receiver.
         const bool Allowed=M.Type==TEXT("CONTROL")&&M.DemoId==DemoId&&IsAllowed&&IsAllowed(M.Action);
         if(!Allowed) {Status(TEXT("FAILED"),TEXT("not_allowed"));continue;}
         if(M.Sequence<=Sequences.FindRef(M.ControllerId)) {Status(TEXT("FAILED"),TEXT("replay"));continue;}
         if(!Reserve(M.ControllerId,M.Sequence)) {Status(TEXT("FAILED"),TEXT("launch_failed"));continue;}
         Status(TEXT("ACK"),TEXT("ok"));
-        const bool Success=Execute&&Execute(M.Action);
+        // Pending before Execute: the hand-over may already end inside it (FinishPending).
+        PendingMessage=M;PendingSource=Source;
+        const EHapbeatControlResult Result=Execute?Execute(M.Action):EHapbeatControlResult::Failed;
+        if(Result==EHapbeatControlResult::Pending) {
+            UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_CONTROL action=%s pending"),*M.Action);
+            continue;
+        }
+        PendingSource.Reset();
+        const bool Success=Result==EHapbeatControlResult::Ready;
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_CONTROL action=%s ok=%d"),*M.Action,Success);
         Status(Success?TEXT("READY"):TEXT("FAILED"),Success?TEXT("ok"):TEXT("launch_failed"));
     }

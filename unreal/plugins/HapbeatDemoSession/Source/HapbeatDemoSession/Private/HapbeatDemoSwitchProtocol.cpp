@@ -67,6 +67,19 @@ bool HapbeatDemoSwitchProtocol::IsIdentifier(const FString& V)
     }
     return true;
 }
+FString HapbeatDemoSwitchProtocol::NormalizeDeviceModel(const FString& Value)
+{
+    FString Out;
+    for(int32 I=0,Count=0;I<Value.Len()&&Count<64;++I) {
+        const TCHAR C=Value[I];
+        if(C<=0x1F||(C>=0x7F&&C<=0x9F)) continue;
+        Out.AppendChar(C);
+        // A UTF-16 surrogate pair is one code point.
+        if(C>=0xD800&&C<=0xDBFF&&I+1<Value.Len()&&Value[I+1]>=0xDC00&&Value[I+1]<=0xDFFF) Out.AppendChar(Value[++I]);
+        ++Count;
+    }
+    return Out;
+}
 bool HapbeatDemoSwitchProtocol::Parse(const TArray<uint8>& Bytes,FHapbeatDemoSwitchMessage& Out)
 {
     if(Bytes.IsEmpty()||Bytes.Num()>1024) return false;
@@ -146,10 +159,16 @@ FString HapbeatDemoSwitchProtocol::State(const FHapbeatDemoSwitchMessage& M,cons
     O->SetBoolField(TEXT("paused"),S.bPaused);O->SetNumberField(TEXT("step_index"),S.StepIndex);O->SetNumberField(TEXT("step_count"),S.StepCount);
     // Booleans are signed as true / false, integers in base 10.
     auto Bool=[](bool B){return FString(B?TEXT("true"):TEXT("false"));};
-    const FString C=Header(TEXT("STATE"))+Field(TEXT("version"),TEXT("1"))+Field(TEXT("type"),TEXT("STATE"))
+    FString C=Header(TEXT("STATE"))+Field(TEXT("version"),TEXT("1"))+Field(TEXT("type"),TEXT("STATE"))
         +Field(TEXT("controller_id"),M.ControllerId)+Field(TEXT("nonce"),M.Nonce)+Field(TEXT("current_demo_id"),Demo)
         +Field(TEXT("foreground"),Bool(S.bForeground))+Field(TEXT("haptics_on"),Bool(S.bHapticsOn))+Field(TEXT("haptics_ui"),Bool(S.bHapticsUi))+Field(TEXT("recenter_ui"),Bool(S.bRecenterUi))
         +Field(TEXT("paused"),Bool(S.bPaused))+Field(TEXT("step_index"),LexToString(S.StepIndex))+Field(TEXT("step_count"),LexToString(S.StepCount));
+    // The optional fields follow in the contract's order, each signed only when present.
+    auto Optional=[&](const TCHAR* Name,const FString& Value){if(!Value.IsEmpty()) {O->SetStringField(Name,Value);C+=Field(Name,Value);}};
+    Optional(TEXT("device_model"),S.DeviceModel);
+    if(S.bEditor.IsSet()) {O->SetBoolField(TEXT("editor"),S.bEditor.GetValue());C+=Field(TEXT("editor"),Bool(S.bEditor.GetValue()));}
+    Optional(TEXT("screen"),S.Screen);
+    Optional(TEXT("hand_style"),S.HandStyle);
     return Encode(O,C,Secret);
 }
 FString HapbeatDemoSwitchProtocol::Status(const FHapbeatDemoSwitchMessage& M,const FString& Demo,const FString& Type,const FString& Code,const FString& Secret,const FString& Text)

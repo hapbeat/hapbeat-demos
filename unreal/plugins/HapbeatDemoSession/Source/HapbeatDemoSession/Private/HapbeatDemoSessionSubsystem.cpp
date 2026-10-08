@@ -141,6 +141,11 @@ EHapbeatControlRoute UHapbeatDemoSessionSubsystem::RouteControl(const FString& A
     if(Action.StartsWith(TEXT("haptics_"))) return bHapticsToggle
         &&(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")||Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide"))
         ?EHapbeatControlRoute::Plugin:EHapbeatControlRoute::NotAllowed;
+    // The session panels' 次へ / もう一度 belong to the shared layer, not to the demo.
+    if(Action==TEXT("session_next")) return EHapbeatControlRoute::SessionNext;
+    if(Action==TEXT("session_retry")) return EHapbeatControlRoute::SessionRetry;
+    // No shared hands here (the demos draw their own) and this is not the Hub.
+    if(Action.StartsWith(TEXT("hand_style_"))||Action.StartsWith(TEXT("hub_"))) return EHapbeatControlRoute::NotAllowed;
     if(bRegistered) return EHapbeatControlRoute::Registered;
     // Without an app-specific menu / restart the shared pause handles them (spec: shared handlers).
     if(bPauseEnabled&&(Action==TEXT("menu_open")||Action==TEXT("menu_close"))) return EHapbeatControlRoute::SharedPause;
@@ -151,41 +156,59 @@ EHapbeatControlRoute UHapbeatDemoSessionSubsystem::RouteControl(const FString& A
 bool UHapbeatDemoSessionSubsystem::IsControlAllowed(const FString& Action) const
 {
     const bool bRegistered=Controls.ContainsByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
-    return RouteControl(Action,bRegistered,PauseSettings.bEnabled,Descriptor.bHapticsToggle)!=EHapbeatControlRoute::NotAllowed;
+    switch(RouteControl(Action,bRegistered,PauseSettings.bEnabled,Descriptor.bHapticsToggle)) {
+    case EHapbeatControlRoute::NotAllowed: return false;
+    // Only in a session (step_index >= 0), and not while a launch is already waiting.
+    case EHapbeatControlRoute::SessionNext: return bSessionActive&&!IsLeaving();
+    // Only while the completion panel offers もう一度 (the step's retry).
+    case EHapbeatControlRoute::SessionRetry: return bSessionActive&&bCompletionShown&&Ticket.Steps[Ticket.Index].bRetry&&!IsLeaving();
+    default: return true;
+    }
 }
 
-bool UHapbeatDemoSessionSubsystem::ExecuteControl(const FString& Action)
+EHapbeatControlResult UHapbeatDemoSessionSubsystem::ExecuteControl(const FString& Action)
 {
+    auto Done=[](bool bOk){return bOk?EHapbeatControlResult::Ready:EHapbeatControlResult::Failed;};
     const FControl* Control=Controls.FindByPredicate([&](const FControl& C){return C.Action==Action&&C.Owner.IsValid();});
     switch(RouteControl(Action,Control!=nullptr,PauseSettings.bEnabled,Descriptor.bHapticsToggle)) {
     case EHapbeatControlRoute::Plugin:
-        if(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")) {SetHapticsEnabled(Action==TEXT("haptics_on"));return true;}
-        if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return true;}
-        if(Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) {SetRecenterUiVisible(Action==TEXT("recenter_ui_show"));return true;}
+        if(Action==TEXT("haptics_on")||Action==TEXT("haptics_off")) {SetHapticsEnabled(Action==TEXT("haptics_on"));return Done(true);}
+        if(Action==TEXT("haptics_ui_show")||Action==TEXT("haptics_ui_hide")) {SetHapticsUiVisible(Action==TEXT("haptics_ui_show"));return Done(true);}
+        if(Action==TEXT("recenter_ui_show")||Action==TEXT("recenter_ui_hide")) {SetRecenterUiVisible(Action==TEXT("recenter_ui_show"));return Done(true);}
         {
             // recenter: the user is asked to look ahead, so the head's yaw is the facing.
             const UWorld* World=GetTickableGameObjectWorld();
             const APlayerController* PC=World?World->GetFirstPlayerController():nullptr;
-            return PC&&PC->PlayerCameraManager&&RecenterView(PC->PlayerCameraManager->GetCameraRotation().Yaw,TEXT("control"));
+            return Done(PC&&PC->PlayerCameraManager&&RecenterView(PC->PlayerCameraManager->GetCameraRotation().Yaw,TEXT("control")));
         }
     case EHapbeatControlRoute::Registered:
-        if(!Control->Handler()) return false;
+        if(!Control->Handler()) return Done(false);
         // restart reloads the experience: an open completion or pause panel belongs to the previous run.
         if(Action==TEXT("restart")) {HideCompletion();HidePause();}
-        return true;
+        return Done(true);
     case EHapbeatControlRoute::SharedPause:
         // Explicit set operations: an open panel stays open, a closed one stays closed. The pause does not open over
         // the completion panel or while leaving (the operation then fails).
         if(Action==TEXT("menu_open")) ShowPause(); else HidePause();
-        return bPauseShown==(Action==TEXT("menu_open"));
+        return Done(bPauseShown==(Action==TEXT("menu_open")));
     case EHapbeatControlRoute::SharedRestart:
         // The pause panel's 最初からやり直す; an open completion panel belongs to the previous run as well.
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_PAUSE_RESTART source=control"));
         PauseDetector.Reset();HideCompletion();HidePause();
         OnRestartRequested.Broadcast();
-        return true;
+        return Done(true);
+    case EHapbeatControlRoute::SessionRetry:
+        // The completion panel's もう一度.
+        UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_RETRY step=%d source=control"),Ticket.Index+1);
+        HideCompletion();OnRestartRequested.Broadcast();
+        return Done(true);
+    case EHapbeatControlRoute::SessionNext:
+        // The panels' 次へ / デモを終了: an open panel stays up while the hand-over waits, as when it is pressed.
+        // READY (naming the started demo) or FAILED follows from the hand-over (UpdateHandoff / ExitAfterLaunch).
+        UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_NEXT source=control"));
+        return LaunchNextOrFinish()?EHapbeatControlResult::Pending:Done(false);
     default:
-        return false;
+        return Done(false);
     }
 }
 
@@ -199,6 +222,9 @@ FHapbeatDemoSwitchState UHapbeatDemoSessionSubsystem::GetSwitchState() const
     S.bPaused=bPauseShown;
     S.StepIndex=bSessionActive?Ticket.Index:-1;
     S.StepCount=bSessionActive?Ticket.Steps.Num():0;
+    S.DeviceModel=HapbeatDemoSwitchProtocol::NormalizeDeviceModel(HapbeatDemoSessionPlatform::DeviceModel());
+    S.bEditor=GIsEditor;
+    S.Screen=bCompletionShown?TEXT("completion"):TEXT("main");
     return S;
 }
 
@@ -339,7 +365,7 @@ void UHapbeatDemoSessionSubsystem::ReturnToHub()
         ShowLaunchError(TEXT("Hub を起動できませんでした。\nスタッフにお知らせください。"));
         return;
     }
-    StartHandoff();
+    StartHandoff(HubDemoId());
 }
 
 FString UHapbeatDemoSessionSubsystem::MakeNextTicketJson() const
@@ -347,22 +373,24 @@ FString UHapbeatDemoSessionSubsystem::MakeNextTicketJson() const
     return bSessionActive?Ticket.MakeNext(bHapticsUiVisible,bRecenterUiVisible).ToJson():FString();
 }
 
-void UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
+bool UHapbeatDemoSessionSubsystem::LaunchNextOrFinish()
 {
-    if(!bSessionActive||IsLeaving()) return;
+    if(!bSessionActive||IsLeaving()) return false;
     const FHapbeatDemoSessionComponent& Target=Ticket.NextTarget();
     const FString Json=MakeNextTicketJson();
     UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_LAUNCH target=%s/%s index=%d haptics_ui=%d recenter_ui=%d"),*Target.Package,*Target.Activity,Ticket.Index+1,bHapticsUiVisible,bRecenterUiVisible);
     if(!HapbeatDemoSessionPlatform::CanLaunch()) {
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_LAUNCH_SKIPPED not Android; ticket=%s"),*Json);
-        return;
+        return false;
     }
     if(!HapbeatDemoSessionPlatform::Launch(Target,Json)) {
         UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SESSION_LAUNCH_FAILED %s/%s"),*Target.Package,*Target.Activity);
         ShowLaunchError(TEXT("次のデモを起動できませんでした。\nスタッフにお知らせください。"));
-        return;
+        return false;
     }
-    StartHandoff();
+    // The finish runtime is the Hub (as the Unity runtimes name it).
+    StartHandoff(Ticket.HasNextStep()?Ticket.Steps[Ticket.Index+1].DemoId:FString(HubDemoId()));
+    return true;
 }
 
 FString UHapbeatDemoSessionSubsystem::NextLabel() const
@@ -377,8 +405,9 @@ void UHapbeatDemoSessionSubsystem::ShowLaunchError(const FString& Text)
     if(bPauseShown) Ui->SetPauseError(Text); else Ui->SetCompletionError(Text);
 }
 
-void UHapbeatDemoSessionSubsystem::StartHandoff()
+void UHapbeatDemoSessionSubsystem::StartHandoff(const FString& DemoId)
 {
+    HandoffDemoId=DemoId;
     // Do not end this task yet: Quest would switch to its home environment and send the starting runtime to the
     // background. Wait until this application itself has gone to the background (UpdateHandoff).
     bHandoffHadVRFocus=FApp::UseVRFocus()&&FApp::HasVRFocus();
@@ -396,6 +425,7 @@ void UHapbeatDemoSessionSubsystem::UpdateHandoff(bool bBackgrounded,float Dt)
     case FHapbeatLaunchHandoff::EStep::Failed:
         UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SESSION_LAUNCH_FAILED still in front after %.0f s"),FHapbeatLaunchHandoff::TimeoutSeconds);
         ShowLaunchError(TEXT("起動を確認できませんでした。\nスタッフにお知らせください。"));
+        Receiver.FinishPending(false,FString(),TEXT("the started application did not come to the front"));
         break;
     default:
         break;
@@ -421,6 +451,8 @@ void UHapbeatDemoSessionSubsystem::ExitAfterLaunch()
     // then end this task. Only once.
     if(bExiting) return;
     bExiting=true;
+    // READY of a CONTROL session_next names the started demo, while 7710 is still bound.
+    Receiver.FinishPending(true,HandoffDemoId);
     SetHapticsEnabled(false);
     if(UWorld* World=GetTickableGameObjectWorld()) {
         FAudioDeviceHandle Audio=World->GetAudioDevice();

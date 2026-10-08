@@ -32,4 +32,9 @@ namespace HapbeatDemoSessionPlatform
     bool SetMulticastLock(bool bHeld);
     /** finishAndRemoveTask(). */
     void FinishTask();
+    /**
+     * The device model as the OS reports it, like Unity's SystemInfo.deviceModel: Android "<Build.MANUFACTURER>
+     * <Build.MODEL>" (e.g. "Oculus Quest 3"); elsewhere FPlatformMisc::GetDeviceMakeAndModel() ("<vendor> <brand>").
+     */
+    FString DeviceModel();
 }
