@@ -103,8 +103,13 @@ namespace Hapbeat.DemoSwitch
     internal sealed class DemoSwitchState
     {
         public DemoSwitchState(string controllerId, string nonce, string currentDemoId, bool foreground, bool hapticsOn, bool hapticsUi,
-            bool recenterUi, bool paused, int stepIndex, int stepCount, string auth = "")
+            bool recenterUi, bool paused, int stepIndex, int stepCount, string deviceModel = null, bool? editor = null,
+            string screen = null, DemoHandStyle? handStyle = null, string auth = "")
         {
+            DeviceModel = deviceModel;
+            Editor = editor;
+            Screen = screen;
+            HandStyle = handStyle;
             ControllerId = controllerId;
             Nonce = nonce;
             CurrentDemoId = currentDemoId;
@@ -131,6 +136,14 @@ namespace Hapbeat.DemoSwitch
         public int StepIndex { get; }
         /// <summary>0 outside a session.</summary>
         public int StepCount { get; }
+        /// <summary>Optional: the OS device model (1-64 code points, no control characters); null when absent.</summary>
+        public string DeviceModel { get; }
+        /// <summary>Optional: running inside a development editor; null when absent.</summary>
+        public bool? Editor { get; }
+        /// <summary>Optional: `main`, `completion` or `manage` (<see cref="DemoSwitchScreens.Main"/> etc.); null when absent.</summary>
+        public string Screen { get; }
+        /// <summary>Optional: the shared hands' look; null when the runtime does not draw them.</summary>
+        public DemoHandStyle? HandStyle { get; }
         public string Auth { get; }
     }
 
@@ -209,6 +222,131 @@ namespace Hapbeat.DemoSwitch
         /// <summary>PRESET_SET only; null for PRESET_START.</summary>
         public IReadOnlyList<DemoSwitchPresetStep> Steps { get; }
         public bool IsStart => Steps == null;
+    }
+
+    /// <summary>HUB_SETTINGS_GET: read the Hub-wide settings and the installed demos from <see cref="From"/> (contracts: Hub settings).</summary>
+    internal sealed class DemoSwitchHubSettingsGet
+    {
+        public DemoSwitchHubSettingsGet(string controllerId, string nonce, int from, string auth)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            From = from;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public int From { get; }
+        public string Auth { get; }
+    }
+
+    /// <summary>HUB_SETTINGS: the Hub-wide settings and one page of installed demos, those from <see cref="From"/> that fit in a datagram.</summary>
+    internal sealed class DemoSwitchHubSettingsPage
+    {
+        public DemoSwitchHubSettingsPage(string controllerId, string nonce, DemoSwitchHubSettings settings, int from,
+            IReadOnlyList<DemoSwitchHubDemo> demos)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            Settings = settings;
+            From = from;
+            Demos = demos;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        /// <summary>Revision, the four values and the device address; `demo_count` is its demo count.</summary>
+        public DemoSwitchHubSettings Settings { get; }
+        public int From { get; }
+        public IReadOnlyList<DemoSwitchHubDemo> Demos { get; }
+    }
+
+    /// <summary>HUB_SETTINGS_SET: the four Hub-wide values and the installed demos shown as tiles; follows the CONTROL rules.</summary>
+    internal sealed class DemoSwitchHubSettingsCommand
+    {
+        public DemoSwitchHubSettingsCommand(string controllerId, long sequence, string demoId, bool hapticsUi, bool recenterUi,
+            DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos, string auth)
+        {
+            ControllerId = controllerId;
+            Sequence = sequence;
+            DemoId = demoId;
+            HapticsUi = hapticsUi;
+            RecenterUi = recenterUi;
+            HandStyle = handStyle;
+            StaffWaiting = staffWaiting;
+            VisibleDemos = visibleDemos;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public long Sequence { get; }
+        public string DemoId { get; }
+        public bool HapticsUi { get; }
+        public bool RecenterUi { get; }
+        public DemoHandStyle HandStyle { get; }
+        public bool StaffWaiting { get; }
+        /// <summary>Distinct demo IDs in the order sent.</summary>
+        public IReadOnlyList<string> VisibleDemos { get; }
+        public string Auth { get; }
+    }
+
+    /// <summary>HUB_START: a Demo Session from 1-32 steps sent by the controller; follows the PRESET_START rules.</summary>
+    internal sealed class DemoSwitchHubStartCommand
+    {
+        public DemoSwitchHubStartCommand(string controllerId, long sequence, string demoId, IReadOnlyList<DemoSwitchPresetStep> steps, string auth)
+        {
+            ControllerId = controllerId;
+            Sequence = sequence;
+            DemoId = demoId;
+            Steps = steps;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public long Sequence { get; }
+        public string DemoId { get; }
+        public IReadOnlyList<DemoSwitchPresetStep> Steps { get; }
+        public string Auth { get; }
+    }
+
+    internal readonly struct HubSettingsGetParseResult
+    {
+        public HubSettingsGetParseResult(DemoSwitchHubSettingsGet request, string errorMessage)
+        {
+            Request = request;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Request != null;
+        public DemoSwitchHubSettingsGet Request { get; }
+        public string ErrorMessage { get; }
+    }
+
+    internal readonly struct HubSettingsCommandParseResult
+    {
+        public HubSettingsCommandParseResult(DemoSwitchHubSettingsCommand command, string errorMessage)
+        {
+            Command = command;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Command != null;
+        public DemoSwitchHubSettingsCommand Command { get; }
+        public string ErrorMessage { get; }
+    }
+
+    internal readonly struct HubStartParseResult
+    {
+        public HubStartParseResult(DemoSwitchHubStartCommand command, string errorMessage)
+        {
+            Command = command;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Command != null;
+        public DemoSwitchHubStartCommand Command { get; }
+        public string ErrorMessage { get; }
     }
 
     internal readonly struct PresetGetParseResult
@@ -330,10 +468,18 @@ namespace Hapbeat.DemoSwitch
         private static readonly string[] StateFields =
         {
             "version", "type", "controller_id", "nonce", "current_demo_id", "foreground", "haptics_on", "haptics_ui", "recenter_ui",
-            "paused", "step_index", "step_count", "auth"
+            "paused", "step_index", "step_count", "device_model", "editor", "screen", "hand_style", "auth"
         };
         /// <summary>Schema bound of `step_index` / `step_count` (a ticket has at most 32 steps).</summary>
         public const int MaxStateSteps = 32;
+        /// <summary>Schema bound of STATE `device_model` in code points.</summary>
+        public const int DeviceModelMaxLength = 64;
+        private static readonly string[] HubSettingsGetFields = { "version", "type", "controller_id", "nonce", "from", "auth" };
+        private static readonly string[] HubSettingsSetFields =
+        {
+            "version", "type", "controller_id", "seq", "demo_id", "haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "visible_demos", "auth"
+        };
+        private static readonly string[] HubStartFields = { "version", "type", "controller_id", "seq", "demo_id", "steps", "auth" };
         private static readonly string[] PresetGetFields = { "version", "type", "controller_id", "nonce", "preset", "from", "auth" };
         private static readonly string[] PresetSetFields = { "version", "type", "controller_id", "seq", "demo_id", "preset", "name", "visible", "steps", "auth" };
         private static readonly string[] PresetStartFields = { "version", "type", "controller_id", "seq", "demo_id", "preset", "auth" };
@@ -615,6 +761,26 @@ namespace Hapbeat.DemoSwitch
                     !IsStepPosition(stepIndex, stepCount))
                     return new StateParseResult(null, "STATE is incomplete or invalid.");
 
+                // Optional fields: absent is unknown, present must be valid.
+                string deviceModel = null, screen = null;
+                bool? editor = null;
+                DemoHandStyle? handStyle = null;
+                if (value.ContainsKey("device_model") && (!TryString(value, "device_model", out deviceModel) || !IsDeviceModel(deviceModel)))
+                    return new StateParseResult(null, "STATE device_model is invalid.");
+                if (value.ContainsKey("editor"))
+                {
+                    if (!TryBoolean(value, "editor", out var editorValue)) return new StateParseResult(null, "STATE editor is invalid.");
+                    editor = editorValue;
+                }
+                if (value.ContainsKey("screen") && (!TryString(value, "screen", out screen) || !IsScreen(screen)))
+                    return new StateParseResult(null, "STATE screen is invalid.");
+                if (value.ContainsKey("hand_style"))
+                {
+                    if (!TryString(value, "hand_style", out var handStyleText) || !DemoHandStyles.TryParse(handStyleText, out var handStyleValue))
+                        return new StateParseResult(null, "STATE hand_style is invalid.");
+                    handStyle = handStyleValue;
+                }
+
                 var auth = string.Empty;
                 if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
                 {
@@ -623,7 +789,7 @@ namespace Hapbeat.DemoSwitch
                     if (!IsLowerHexMac(auth)) return new StateParseResult(null, "STATE auth is invalid.");
                 }
                 return new StateParseResult(new DemoSwitchState(controllerId, nonce, currentDemoId, foreground, hapticsOn, hapticsUi, recenterUi,
-                    paused, (int)stepIndex, (int)stepCount, auth), null);
+                    paused, (int)stepIndex, (int)stepCount, deviceModel, editor, screen, handStyle, auth), null);
             }
             catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
             {
@@ -634,7 +800,8 @@ namespace Hapbeat.DemoSwitch
         public static string SerializeState(DemoSwitchState state, string secret)
         {
             if (state == null || !IsIdentifier(state.ControllerId) || !IsNonce(state.Nonce) || !IsIdentifier(state.CurrentDemoId) ||
-                !IsStepPosition(state.StepIndex, state.StepCount))
+                !IsStepPosition(state.StepIndex, state.StepCount) || (state.DeviceModel != null && !IsDeviceModel(state.DeviceModel)) ||
+                (state.Screen != null && !IsScreen(state.Screen)))
                 throw new ArgumentException("STATE fields do not satisfy the Demo Switch contract.", nameof(state));
 
             var auth = string.IsNullOrEmpty(secret) ? string.Empty : ComputeAuth(state, secret);
@@ -653,6 +820,10 @@ namespace Hapbeat.DemoSwitch
                 ["step_index"] = state.StepIndex,
                 ["step_count"] = state.StepCount
             };
+            if (state.DeviceModel != null) value["device_model"] = state.DeviceModel;
+            if (state.Editor.HasValue) value["editor"] = state.Editor.Value;
+            if (state.Screen != null) value["screen"] = state.Screen;
+            if (state.HandStyle.HasValue) value["hand_style"] = DemoHandStyles.ToValue(state.HandStyle.Value);
             if (auth.Length > 0) value["auth"] = auth;
             var json = value.ToString(Formatting.None);
             if (Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
@@ -827,6 +998,185 @@ namespace Hapbeat.DemoSwitch
             return value.ToString(Formatting.None);
         }
 
+        public static HubSettingsGetParseResult ParseHubSettingsGet(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new HubSettingsGetParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !HubSettingsGetFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new HubSettingsGetParseResult(null, "HUB_SETTINGS_GET contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "HUB_SETTINGS_GET" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce) ||
+                    !TryInteger(value, "from", out var from) || from < 0 || from >= DemoSwitchHub.MaxDemos)
+                    return new HubSettingsGetParseResult(null, "HUB_SETTINGS_GET is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new HubSettingsGetParseResult(null, "HUB_SETTINGS_GET auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new HubSettingsGetParseResult(null, "HUB_SETTINGS_GET auth is invalid.");
+                }
+                return new HubSettingsGetParseResult(new DemoSwitchHubSettingsGet(controllerId, nonce, (int)from, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new HubSettingsGetParseResult(null, exception.Message);
+            }
+        }
+
+        /// <summary>HUB_SETTINGS_SET; `demo_id` must be `demo_hub` (schema const), `visible_demos` 0-64 distinct identifiers.</summary>
+        public static HubSettingsCommandParseResult ParseHubSettingsSet(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new HubSettingsCommandParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !HubSettingsSetFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "HUB_SETTINGS_SET" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryInteger(value, "seq", out var sequence) || sequence < 1 || sequence > MaxSequence ||
+                    !TryString(value, "demo_id", out var demoId) || demoId != DemoSwitchSettings.HubDemoId ||
+                    !TryBoolean(value, "haptics_ui", out var hapticsUi) || !TryBoolean(value, "recenter_ui", out var recenterUi) ||
+                    !TryString(value, "hand_style", out var handStyleText) || !DemoHandStyles.TryParse(handStyleText, out var handStyle) ||
+                    !TryBoolean(value, "staff_waiting", out var staffWaiting) ||
+                    !(value["visible_demos"] is JArray demoArray) || demoArray.Count > DemoSwitchHub.MaxDemos)
+                    return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET is incomplete or invalid.");
+
+                var visibleDemos = new List<string>();
+                foreach (var demoToken in demoArray)
+                {
+                    if (demoToken.Type != JTokenType.String || !IsIdentifier(demoToken.Value<string>()) ||
+                        visibleDemos.Contains(demoToken.Value<string>(), StringComparer.Ordinal))
+                        return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET visible_demos is invalid.");
+                    visibleDemos.Add(demoToken.Value<string>());
+                }
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET auth is invalid.");
+                }
+                return new HubSettingsCommandParseResult(new DemoSwitchHubSettingsCommand(controllerId, sequence, demoId, hapticsUi, recenterUi,
+                    handStyle, staffWaiting, visibleDemos, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new HubSettingsCommandParseResult(null, exception.Message);
+            }
+        }
+
+        /// <summary>HUB_START; `demo_id` must be `demo_hub` (schema const), 1-32 steps with the PRESET_SET step rules.</summary>
+        public static HubStartParseResult ParseHubStart(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new HubStartParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !HubStartFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new HubStartParseResult(null, "HUB_START contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "HUB_START" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryInteger(value, "seq", out var sequence) || sequence < 1 || sequence > MaxSequence ||
+                    !TryString(value, "demo_id", out var demoId) || demoId != DemoSwitchSettings.HubDemoId ||
+                    !(value["steps"] is JArray stepArray) || stepArray.Count < 1 || stepArray.Count > DemoSwitchPresets.MaxSteps)
+                    return new HubStartParseResult(null, "HUB_START is incomplete or invalid.");
+
+                var steps = new List<DemoSwitchPresetStep>();
+                foreach (var stepToken in stepArray)
+                {
+                    if (!TryParsePresetStep(stepToken, out var step))
+                        return new HubStartParseResult(null, "HUB_START step " + (steps.Count + 1) + " is invalid.");
+                    steps.Add(step);
+                }
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new HubStartParseResult(null, "HUB_START auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new HubStartParseResult(null, "HUB_START auth is invalid.");
+                }
+                return new HubStartParseResult(new DemoSwitchHubStartCommand(controllerId, sequence, demoId, steps, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new HubStartParseResult(null, exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// HUB_SETTINGS answering <paramref name="request"/>: the settings and as many demos from `from` as fit, so that the whole
+        /// datagram (with `auth` when <paramref name="secret"/> is set) is at most 1024 UTF-8 bytes. `demos` is empty when `from`
+        /// is past the last demo or the demo at `from` alone does not fit.
+        /// </summary>
+        public static string SerializeHubSettings(DemoSwitchHubSettingsGet request, DemoSwitchHubSettings settings, string secret)
+        {
+            if (request == null || settings == null || !IsIdentifier(request.ControllerId) || !IsNonce(request.Nonce) ||
+                request.From < 0 || request.From >= DemoSwitchHub.MaxDemos || settings.Revision < 0 || settings.Revision > MaxSequence ||
+                !IsAddressAxis(settings.Player) || !IsAddressAxis(settings.Group) || settings.Demos.Count > DemoSwitchHub.MaxDemos ||
+                !settings.Demos.All(d => d != null && IsIdentifier(d.DemoId) && DemoSwitchHub.IsValidTitle(d.Title)))
+                throw new ArgumentException("HUB_SETTINGS fields do not satisfy the Demo Switch contract.", nameof(settings));
+
+            string fitting = null;
+            var available = Math.Max(0, settings.Demos.Count - request.From);
+            for (var count = 0; count <= available; count++)
+            {
+                var page = new DemoSwitchHubSettingsPage(request.ControllerId, request.Nonce, settings, request.From,
+                    settings.Demos.Skip(request.From).Take(count).ToList());
+                var json = SerializeHubSettingsPage(page, secret);
+                if (Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes) break;
+                fitting = json;
+            }
+            if (fitting == null)
+                throw new InvalidOperationException("HUB_SETTINGS fields exceed the 1024-byte payload limit.");
+            return fitting;
+        }
+
+        private static string SerializeHubSettingsPage(DemoSwitchHubSettingsPage page, string secret)
+        {
+            var demos = new JArray();
+            foreach (var demo in page.Demos)
+                demos.Add(new JObject { ["demo_id"] = demo.DemoId, ["title"] = demo.Title, ["visible"] = demo.Visible });
+            var settings = page.Settings;
+            var value = new JObject
+            {
+                ["version"] = 1,
+                ["type"] = "HUB_SETTINGS",
+                ["controller_id"] = page.ControllerId,
+                ["nonce"] = page.Nonce,
+                ["revision"] = settings.Revision,
+                ["haptics_ui"] = settings.HapticsUi,
+                ["recenter_ui"] = settings.RecenterUi,
+                ["hand_style"] = DemoHandStyles.ToValue(settings.HandStyle),
+                ["staff_waiting"] = settings.StaffWaiting,
+                ["player"] = settings.Player,
+                ["group"] = settings.Group,
+                ["demo_count"] = settings.Demos.Count,
+                ["from"] = page.From,
+                ["demos"] = demos
+            };
+            if (!string.IsNullOrEmpty(secret)) value["auth"] = ComputeAuth(page, secret);
+            return value.ToString(Formatting.None);
+        }
+
+        /// <summary>The device address axes: -1 (not specified) or 1..99.</summary>
+        private static bool IsAddressAxis(int value) => value == -1 || (value >= 1 && value <= 99);
+
         private static bool IsPresetNumber(long value) => value >= 1 && value <= DemoSwitchPresets.Count;
 
         private static bool IsPresetStep(DemoSwitchPresetStep step) => step != null && IsIdentifier(step.DemoId) &&
@@ -837,7 +1187,43 @@ namespace Hapbeat.DemoSwitch
             index >= -1 && index <= MaxStateSteps && count >= 0 && count <= MaxStateSteps;
 
         public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
-            || action == "restart" || action == "scene" || action == "tutorial_start" || IsHapticsAction(action) || IsRecenterAction(action);
+            || action == "restart" || action == "scene" || action == "tutorial_start" || IsHapticsAction(action) || IsRecenterAction(action)
+            || IsHandStyleAction(action) || action == "session_next" || action == "session_retry" || action == "hub_top" || action == "hub_replay";
+
+        /// <summary>`hand_style_ghost` / `hand_style_skin`: the look of the shared hands.</summary>
+        public static bool IsHandStyleAction(string action) => action == "hand_style_ghost" || action == "hand_style_skin";
+
+        /// <summary>
+        /// `session_next` and `hub_replay` launch another application: they end like PRESET_START (READY once this runtime has
+        /// left the foreground), not after an operation on this runtime.
+        /// </summary>
+        public static bool IsLaunchAction(string action) => action == "session_next" || action == "hub_replay";
+
+        public static bool IsScreen(string value) => value == DemoSwitchScreens.Main || value == DemoSwitchScreens.Completion || value == DemoSwitchScreens.Manage;
+
+        /// <summary>1-64 code points without C0 / C1 control characters (STATE `device_model`).</summary>
+        public static bool IsDeviceModel(string value) => !string.IsNullOrEmpty(value) &&
+            DemoSessionJson.CodePointLength(value) <= DeviceModelMaxLength && !value.Any(IsControlCharacter);
+
+        /// <summary>
+        /// The OS device model as STATE carries it: control characters removed, at most 64 code points; null when nothing is left.
+        /// </summary>
+        public static string NormalizeDeviceModel(string value)
+        {
+            if (value == null) return null;
+            var builder = new StringBuilder();
+            var count = 0;
+            for (var index = 0; index < value.Length && count < DeviceModelMaxLength; index++)
+            {
+                if (IsControlCharacter(value[index])) continue;
+                builder.Append(value[index]);
+                if (char.IsHighSurrogate(value[index]) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1])) builder.Append(value[++index]);
+                count++;
+            }
+            return builder.Length == 0 ? null : builder.ToString();
+        }
+
+        private static bool IsControlCharacter(char value) => value <= '\u001f' || (value >= '\u007f' && value <= '\u009f');
 
         /// <summary>The actions the shared pause handles when the scene has no adapter for them.</summary>
         public static bool IsSharedPauseAction(string action) => action == "menu_open" || action == "menu_close" || action == "restart";
@@ -885,7 +1271,53 @@ namespace Hapbeat.DemoSwitch
             Field("haptics_on", BooleanText(state.HapticsOn)) + Field("haptics_ui", BooleanText(state.HapticsUi)) +
             Field("recenter_ui", BooleanText(state.RecenterUi)) + Field("paused", BooleanText(state.Paused)) +
             Field("step_index", state.StepIndex.ToString(CultureInfo.InvariantCulture)) +
-            Field("step_count", state.StepCount.ToString(CultureInfo.InvariantCulture));
+            Field("step_count", state.StepCount.ToString(CultureInfo.InvariantCulture)) +
+            (state.DeviceModel != null ? Field("device_model", state.DeviceModel) : "") +
+            (state.Editor.HasValue ? Field("editor", BooleanText(state.Editor.Value)) : "") +
+            (state.Screen != null ? Field("screen", state.Screen) : "") +
+            (state.HandStyle.HasValue ? Field("hand_style", DemoHandStyles.ToValue(state.HandStyle.Value)) : "");
+
+        public static string Canonicalize(DemoSwitchHubSettingsGet request) =>
+            "HAPBEAT-DEMO-SWITCH/1\nHUB_SETTINGS_GET\n" +
+            Field("version", "1") + Field("type", "HUB_SETTINGS_GET") + Field("controller_id", request.ControllerId) +
+            Field("nonce", request.Nonce) + Field("from", request.From.ToString(CultureInfo.InvariantCulture));
+
+        public static string Canonicalize(DemoSwitchHubSettingsPage page)
+        {
+            var settings = page.Settings;
+            return "HAPBEAT-DEMO-SWITCH/1\nHUB_SETTINGS\n" +
+                Field("version", "1") + Field("type", "HUB_SETTINGS") + Field("controller_id", page.ControllerId) +
+                Field("nonce", page.Nonce) + Field("revision", settings.Revision.ToString(CultureInfo.InvariantCulture)) +
+                Field("haptics_ui", BooleanText(settings.HapticsUi)) + Field("recenter_ui", BooleanText(settings.RecenterUi)) +
+                Field("hand_style", DemoHandStyles.ToValue(settings.HandStyle)) + Field("staff_waiting", BooleanText(settings.StaffWaiting)) +
+                Field("player", settings.Player.ToString(CultureInfo.InvariantCulture)) +
+                Field("group", settings.Group.ToString(CultureInfo.InvariantCulture)) +
+                Field("demo_count", settings.Demos.Count.ToString(CultureInfo.InvariantCulture)) +
+                Field("from", page.From.ToString(CultureInfo.InvariantCulture)) + Field("demos", CanonicalDemos(page.Demos));
+        }
+
+        /// <summary>HUB_SETTINGS_SET / HUB_START use the COMMAND header.</summary>
+        public static string Canonicalize(DemoSwitchHubSettingsCommand command) =>
+            "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
+            Field("version", "1") + Field("type", "HUB_SETTINGS_SET") + Field("controller_id", command.ControllerId) +
+            Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", command.DemoId) +
+            Field("haptics_ui", BooleanText(command.HapticsUi)) + Field("recenter_ui", BooleanText(command.RecenterUi)) +
+            Field("hand_style", DemoHandStyles.ToValue(command.HandStyle)) + Field("staff_waiting", BooleanText(command.StaffWaiting)) +
+            Field("visible_demos", string.Join("|", command.VisibleDemos));
+
+        public static string Canonicalize(DemoSwitchHubStartCommand command) =>
+            "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
+            Field("version", "1") + Field("type", "HUB_START") + Field("controller_id", command.ControllerId) +
+            Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", command.DemoId) +
+            Field("steps", CanonicalSteps(command.Steps));
+
+        /// <summary>
+        /// The signed `demos` value: demos joined with `|`, each `demo_id;visible;N:title` with visible `1` / `0` and N the
+        /// title's UTF-8 byte count.
+        /// </summary>
+        public static string CanonicalDemos(IReadOnlyList<DemoSwitchHubDemo> demos) =>
+            string.Join("|", demos.Select(demo => demo.DemoId + ";" + (demo.Visible ? "1" : "0") + ";" +
+                Encoding.UTF8.GetByteCount(demo.Title).ToString(CultureInfo.InvariantCulture) + ":" + demo.Title));
 
         public static string Canonicalize(DemoSwitchPresetGet request) =>
             "HAPBEAT-DEMO-SWITCH/1\nPRESET_GET\n" +
@@ -919,6 +1351,13 @@ namespace Hapbeat.DemoSwitch
                 string.Join(",", step.Options.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value)) +
                 ";" + (step.Retry ? "1" : "0")));
 
+        public static string ComputeAuth(DemoSwitchHubSettingsGet request, string secret) => ComputeMac(Canonicalize(request), secret);
+        public static string ComputeAuth(DemoSwitchHubSettingsPage page, string secret) => ComputeMac(Canonicalize(page), secret);
+        public static string ComputeAuth(DemoSwitchHubSettingsCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
+        public static string ComputeAuth(DemoSwitchHubStartCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
+        public static bool Authenticate(DemoSwitchHubSettingsGet request, string secret) => ConstantTimeMacEquals(request.Auth, ComputeAuth(request, secret));
+        public static bool Authenticate(DemoSwitchHubSettingsCommand command, string secret) => ConstantTimeMacEquals(command.Auth, ComputeAuth(command, secret));
+        public static bool Authenticate(DemoSwitchHubStartCommand command, string secret) => ConstantTimeMacEquals(command.Auth, ComputeAuth(command, secret));
         public static string ComputeAuth(DemoSwitchPresetGet request, string secret) => ComputeMac(Canonicalize(request), secret);
         public static string ComputeAuth(DemoSwitchPresetPage page, string secret) => ComputeMac(Canonicalize(page), secret);
         public static string ComputeAuth(DemoSwitchPresetCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
@@ -1137,6 +1576,33 @@ namespace Hapbeat.DemoSwitch
             var preset = read(request.Preset);
             if (preset == null) return new DiscoveryHandleResult(null, "invalid_payload");
             return new DiscoveryHandleResult(DemoSwitchProtocol.SerializePreset(request, preset, sharedSecret), null);
+        }
+    }
+
+    /// <summary>HUB_SETTINGS_GET → HUB_SETTINGS: answered like PRESET_GET (same authentication policy, also while not foreground).</summary>
+    internal static class DemoSwitchHubSettingsGetHandler
+    {
+        /// <param name="read">The Hub-wide settings and installed demos; called only after authentication.</param>
+        public static DiscoveryHandleResult Handle(string json, Func<DemoSwitchHubSettings> read, string sharedSecret,
+            bool allowUnsignedOnIsolatedLan)
+        {
+            var parsed = DemoSwitchProtocol.ParseHubSettingsGet(json);
+            if (!parsed.Success) return new DiscoveryHandleResult(null, "invalid_payload");
+
+            var request = parsed.Request;
+            if (!string.IsNullOrEmpty(sharedSecret))
+            {
+                if (!DemoSwitchProtocol.Authenticate(request, sharedSecret))
+                    return new DiscoveryHandleResult(null, "invalid_auth");
+            }
+            else if (!allowUnsignedOnIsolatedLan)
+            {
+                return new DiscoveryHandleResult(null, "unsigned_disabled");
+            }
+
+            var settings = read();
+            if (settings == null) return new DiscoveryHandleResult(null, "invalid_payload");
+            return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeHubSettings(request, settings, sharedSecret), null);
         }
     }
 }

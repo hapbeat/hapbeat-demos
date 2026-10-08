@@ -27,10 +27,13 @@ namespace Hapbeat.DemoHub
         public DemoHandStyle HandStyle { get; set; } = DemoHandStyle.Ghost;
         /// <summary>Initial `recenter_ui` of every launch and the Hub's own 視線をリセット button (default hidden).</summary>
         public bool RecenterUi { get; set; }
+        /// <summary>Increased on every save of the settings (<see cref="HubPlanStore.SaveSettings"/>): manage screen, HUB_SETTINGS_SET, a preset's `visible`.</summary>
+        public long Revision { get; set; }
 
         public string ToJson() => new JObject
         {
             ["version"] = 1,
+            ["revision"] = Revision,
             ["visible_presets"] = new JArray(VisiblePresets.OrderBy(n => n).Cast<object>().ToArray()),
             ["visible_demos"] = new JArray(VisibleDemos.OrderBy(d => d, StringComparer.Ordinal).Cast<object>().ToArray()),
             ["haptics_ui"] = HapticsUi,
@@ -53,6 +56,10 @@ namespace Hapbeat.DemoHub
                     HandStyle = DemoHandStyles.TryParse(root.Value<string>("hand_style"), out var handStyle) ? handStyle : DemoHandStyle.Ghost,
                     RecenterUi = root.Value<bool?>("recenter_ui") ?? false
                 };
+                // Files from before the revision load as revision 0.
+                if (root["revision"] is JValue revision && revision.Type == JTokenType.Integer
+                    && long.TryParse(revision.ToString(Formatting.None), out var number) && number >= 0)
+                    result.Revision = number;
                 if (root["visible_presets"] is JArray presets)
                     foreach (var token in presets)
                         if (token.Type == JTokenType.Integer && token.Value<int>() >= 1 && token.Value<int>() <= HubPlanStore.PresetCount)
@@ -228,6 +235,14 @@ namespace Hapbeat.DemoHub
                 return false;
             }
         }
+
+        /// <summary>
+        /// The external plan of a Demo Switch HUB_START (steps already parsed and checked by the receiver), started like the
+        /// start extra `steps`.
+        /// </summary>
+        public static HubStartRequest FromSteps(IReadOnlyList<DemoSwitchPresetStep> steps) =>
+            new HubStartRequest(0, null, new Dictionary<string, string>(StringComparer.Ordinal), steps.Select(step => new HubPlanStep(step.DemoId,
+                step.Options.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), step.Retry)).ToList());
 
         /// <summary>One external plan step: only demo_id, options (optional) and retry (optional boolean, default true).</summary>
         private static bool TryParseStep(JToken token, out HubPlanStep step, out string error)

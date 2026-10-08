@@ -866,6 +866,149 @@ namespace Hapbeat.DemoHub.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        [Test]
+        public void RemoteReadsTheSettingsTilesAndScreen()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                controller.Settings.VisibleDemos.Add("boxing");
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.CurrentScreen, Is.EqualTo(DemoSwitchScreens.Main));
+
+                var read = controller.ReadSettings();
+                Assert.That(read.Revision, Is.EqualTo(controller.Settings.Revision));
+                Assert.That(read.Player, Is.EqualTo(DemoDeviceAddress.Unspecified), "No address file read: -1.");
+                Assert.That(read.Group, Is.EqualTo(DemoDeviceAddress.Unspecified));
+                Assert.That(read.Demos.Select(d => d.DemoId), Is.EqualTo(new[] { "volley", "boxing", "trex-encounter" }), "Catalog order.");
+                Assert.That(read.Demos.Select(d => d.Title), Is.EqualTo(new[] { "Volley", "Boxing", "T-Rex Encounter" }), "The display names.");
+                Assert.That(read.Demos.Select(d => d.Visible), Is.EqualTo(new[] { false, true, false }));
+
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Assert.That(controller.CurrentScreen, Is.EqualTo(DemoSwitchScreens.Manage));
+                controller.Show(DemoHubController.HubScreen.Finished);
+                Assert.That(controller.CurrentScreen, Is.EqualTo(DemoSwitchScreens.Completion));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void RemoteTitleIsTheDisplayNameOrTheDemoId()
+        {
+            var descriptor = _volley;
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", new string('長', 45))), Is.EqualTo(new string('長', 40)), "Cut to 40.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Bad\u0007Name")), Is.EqualTo("volley"), "Control character.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Volley")), Is.EqualTo("Volley"));
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a")), Is.EqualTo("バレーボール"), "No label: the descriptor title.");
+        }
+
+        [Test]
+        public void RemoteSettingsAreStoredAppliedAndKeepUninstalledTiles()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                DemoSession.SetRecenterUiVisible(false);
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                controller.Settings.VisibleDemos.UnionWith(new[] { "volley", "not-installed" });
+                controller.Show(DemoHubController.HubScreen.Top);
+                var revision = controller.Settings.Revision;
+
+                Assert.That(controller.CheckVisibleDemos(new[] { "boxing", "fps" }, out var offending), Is.EqualTo(DemoSwitchPresetCheck.NotInstalled));
+                Assert.That(offending, Is.EqualTo("fps"));
+                Assert.That(controller.CheckVisibleDemos(new[] { "boxing" }, out offending), Is.EqualTo(DemoSwitchPresetCheck.Ok));
+
+                Assert.That(controller.TryStoreSettings(true, true, DemoHandStyle.Skin, false, new[] { "boxing" }, out var error), Is.True, error);
+                Assert.That(controller.Settings.VisibleDemos, Is.EquivalentTo(new[] { "boxing", "not-installed" }), "Installed tiles as sent; others kept.");
+                Assert.That(controller.Settings.Revision, Is.EqualTo(revision + 1));
+                Assert.That(DemoSession.RecenterUiVisible, Is.True, "The Hub's own button follows at once.");
+                var saved = store.LoadSettings();
+                Assert.That(saved.HapticsUi && saved.RecenterUi, Is.True);
+                Assert.That(saved.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+                Assert.That(saved.Revision, Is.EqualTo(revision + 1));
+                Assert.That(Buttons(controller).Select(b => b.Label), Has.Member("Boxing"), "The top screen shows the new tile.");
+
+                Assert.That(controller.TryStoreSettings(false, false, DemoHandStyle.Ghost, true, new string[0], out error), Is.True, error);
+                Assert.That(Texts(controller), Has.Member(HubText.StaffWaitingNote), "The staff waiting screen is shown at once.");
+                Assert.That(controller.Settings.VisibleDemos, Is.EquivalentTo(new[] { "not-installed" }));
+
+                Assert.That(controller.TrySetHandStyle(DemoHandStyle.Skin, out error), Is.True, error);
+                Assert.That(store.LoadSettings().HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+                Assert.That(controller.ReadSettings().Revision, Is.EqualTo(revision + 3));
+
+                // The manage screen's own toggles and a preset's visible also increase it.
+                controller.Show(DemoHubController.HubScreen.Manage);
+                Press(Buttons(controller).Single(b => b.Label == HubText.HapticsUiOff));
+                Assert.That(store.LoadSettings().Revision, Is.EqualTo(revision + 4));
+                Assert.That(controller.TryStorePreset(1, "", true, new DemoSwitchPresetStep[0], out error), Is.True, error);
+                Assert.That(store.LoadSettings().Revision, Is.EqualTo(revision + 5));
+
+                controller.ShowTop();
+                Assert.That(controller.Screen, Is.EqualTo(DemoHubController.HubScreen.Top), "hub_top closes the manage screen.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                DemoSession.SetRecenterUiVisible(false);
+            }
+        }
+
+        [Test]
+        public void RemoteStartAndReplayUseTheTopScreenStartAndFailSafelyInTheEditor()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, new HubPlanStore(_directory));
+                controller.Show(DemoHubController.HubScreen.Top);
+                Assert.That(controller.TryReplay(null, out var error), Is.False, "No finished session.");
+
+                LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
+                LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
+                string failed = null;
+                var steps = new[] { new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, false) };
+                Assert.That(controller.TryStartSteps(steps, e => failed = e, out error), Is.False);
+                Assert.That(error, Is.Not.Empty);
+                Assert.That(failed, Is.Null, "A start that fails at once is returned, not reported later.");
+                Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.LaunchFailed)), Is.True);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void HubStartStepsBuildTheSameTicketAsTheStartExtra()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var settings = new HubSettings { HapticsUi = true, HandStyle = DemoHandStyle.Skin };
+            var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
+            var steps = new[] { new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, false), new DemoSwitchPresetStep("boxing", null, true) };
+            var fromSteps = HubStartRequest.FromSteps(steps).BuildTicket(presets, _catalog, finish, "0f3a9c2e7b1d4a56", settings, out var error);
+            Assert.That(fromSteps, Is.Not.Null, error);
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"},\"retry\":false},{\"demo_id\":\"boxing\"}]}",
+                out var request, out error), Is.True, error);
+            var fromExtra = request.BuildTicket(presets, _catalog, finish, "0f3a9c2e7b1d4a56", settings, out error);
+            Assert.That(fromSteps.ToJson(), Is.EqualTo(fromExtra.ToJson()));
+        }
+
+        [Test]
+        public void SettingsRevisionIsSavedAndLoaded()
+        {
+            var store = new HubPlanStore(_directory);
+            var settings = new HubSettings();
+            Assert.That(store.SaveSettings(settings), Is.True);
+            Assert.That(store.SaveSettings(settings), Is.True);
+            Assert.That(settings.Revision, Is.EqualTo(2));
+            Assert.That(store.LoadSettings().Revision, Is.EqualTo(2));
+            Assert.That(HubSettings.TryFromJson("{\"version\":1}", out var old), Is.True);
+            Assert.That(old.Revision, Is.Zero, "A file from before the revision.");
+        }
+
         static List<string> Texts(DemoHubController controller) =>
             controller.Panel.GetComponentsInChildren<UnityEngine.UI.Text>().Select(t => t.text).ToList();
     }

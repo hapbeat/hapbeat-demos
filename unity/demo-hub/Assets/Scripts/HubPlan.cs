@@ -298,7 +298,14 @@ namespace Hapbeat.DemoHub
         /// <summary>Preset 1..3; a missing or unreadable preset is an empty plan.</summary>
         public HubPlan LoadPreset(int number) => TryLoad(PresetSlot(number), out var plan) ? plan : new HubPlan();
 
-        public bool SaveSettings(HubSettings settings) => Write(SettingsSlot, settings.ToJson());
+        /// <summary>Saves the settings with their revision increased; a failed write keeps the old revision.</summary>
+        public bool SaveSettings(HubSettings settings)
+        {
+            settings.Revision++;
+            if (Write(SettingsSlot, settings.ToJson())) return true;
+            settings.Revision--;
+            return false;
+        }
 
         /// <summary>
         /// Saved settings, or defaults (nothing shown on the top screen). On the first run (no settings

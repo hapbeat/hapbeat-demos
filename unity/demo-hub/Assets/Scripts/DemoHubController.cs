@@ -73,10 +73,11 @@ namespace Hapbeat.DemoHub
     /// screen is the M5 waiting room instead. M5 SWITCH keeps working in every screen.
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
     /// then stays put; the package's 視線をリセット button (shown when the manage screen turns it on) and a
-    /// system recenter place it in front of the head again. A controller reads, overwrites and starts the presets over
-    /// Demo Switch (<see cref="IDemoSwitchPresetHost"/>), except while the manage screen is open.
+    /// system recenter place it in front of the head again. A controller reads and changes the presets and the Hub-wide settings,
+    /// starts sessions and leaves the manage or finish screen over Demo Switch (<see cref="IDemoSwitchHubHost"/>); only
+    /// `hub_top` is accepted while the manage screen is open.
     /// </summary>
-    public sealed class DemoHubController : MonoBehaviour, IDemoSwitchPresetHost
+    public sealed class DemoHubController : MonoBehaviour, IDemoSwitchHubHost
     {
         public enum HubScreen { Top, Manage, Finished }
 
@@ -171,7 +172,7 @@ namespace Hapbeat.DemoHub
             _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
             DemoRecenter.Recentered += Recenter;
-            DemoSwitchPresets.RegisterHost(this);
+            DemoSwitchHub.RegisterHost(this);
             // An external start goes straight to its first demo; the top screen only shows when it is rejected.
             if (!TakeExternalStart()) Show(InitialScreen(DemoSession.Ticket));
         }
@@ -826,8 +827,12 @@ namespace Hapbeat.DemoHub
 
         // ------------------------------------------------- Demo Switch presets
 
-        /// <summary>Staff are editing: PRESET_SET / PRESET_START are refused (the receiver also refuses during a launch).</summary>
+        /// <summary>Staff are editing: PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START are refused (the receiver also refuses during a launch).</summary>
         public bool IsBusy => Screen == HubScreen.Manage;
+
+        /// <summary>STATE `screen`: the top screen is `main`, the finish screen `completion`.</summary>
+        public string CurrentScreen => Screen == HubScreen.Manage ? DemoSwitchScreens.Manage
+            : Screen == HubScreen.Finished ? DemoSwitchScreens.Completion : DemoSwitchScreens.Main;
 
         public DemoSwitchPreset ReadPreset(int number)
         {
@@ -866,6 +871,80 @@ namespace Hapbeat.DemoHub
             TryLaunch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi),
                 onFailed, out error);
 
+        // ------------------------------------------ Demo Switch Hub settings
+
+        /// <summary>The manage screen's settings, this device's address as read at start, and every catalog entry with its tile choice.</summary>
+        public DemoSwitchHubSettings ReadSettings() => new DemoSwitchHubSettings(Settings.Revision, Settings.HapticsUi, Settings.RecenterUi,
+            Settings.HandStyle, Settings.StaffWaiting,
+            _deviceAddress == null ? DemoDeviceAddress.Unspecified : _deviceAddress.Player,
+            _deviceAddress == null ? DemoDeviceAddress.Unspecified : _deviceAddress.Group,
+            _catalog.Select(e => new DemoSwitchHubDemo(e.Descriptor.DemoId, RemoteTitle(e), Settings.VisibleDemos.Contains(e.Descriptor.DemoId))).ToList());
+
+        /// <summary>
+        /// HUB_SETTINGS `title`: the display name cut to 40 code points; the demo ID when that breaks the preset name rules
+        /// (empty, only spaces, control characters or U+2028 / U+2029).
+        /// </summary>
+        internal static string RemoteTitle(DemoSessionCatalogEntry entry)
+        {
+            var title = HubPlan.Truncate(entry.DisplayName ?? string.Empty, HubPlan.TitleMaxLength);
+            return DemoSwitchHub.IsValidTitle(title) ? title : entry.Descriptor.DemoId;
+        }
+
+        public DemoSwitchPresetCheck CheckVisibleDemos(IReadOnlyList<string> demoIds, out string demoId)
+        {
+            demoId = demoIds.FirstOrDefault(id => HubPlan.Find(_catalog, id) == null);
+            return demoId == null ? DemoSwitchPresetCheck.Ok : DemoSwitchPresetCheck.NotInstalled;
+        }
+
+        /// <summary>
+        /// HUB_SETTINGS_SET: the four values and the tiles of the installed demos (the choice of demos that are not installed
+        /// is kept), saved with the revision increased and applied at once: the Hub's own hands and 視線をリセット button, and the
+        /// shown screen (top or staff waiting).
+        /// </summary>
+        public bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos,
+            out string error)
+        {
+            Settings.HapticsUi = hapticsUi;
+            Settings.RecenterUi = recenterUi;
+            Settings.HandStyle = handStyle;
+            Settings.StaffWaiting = staffWaiting;
+            foreach (var entry in _catalog) Settings.VisibleDemos.Remove(entry.Descriptor.DemoId);
+            Settings.VisibleDemos.UnionWith(visibleDemos);
+            ApplyHandStyle();
+            ApplyRecenterUi();
+            error = _store.SaveSettings(Settings) ? null : "Could not save the Hub settings.";
+            if (_panel != null) Show(Screen);
+            return error == null;
+        }
+
+        /// <summary>CONTROL `hand_style_*`: the manage screen's hand toggle (Hub-wide, saved with the revision increased).</summary>
+        public bool TrySetHandStyle(DemoHandStyle style, out string error)
+        {
+            Settings.HandStyle = style;
+            ApplyHandStyle();
+            var saved = _store.SaveSettings(Settings);
+            error = saved ? null : "Could not save the Hub settings.";
+            if (_panel != null)
+            {
+                _status = saved ? string.Empty : HubText.SaveFailed;
+                Rebuild();
+            }
+            return saved;
+        }
+
+        /// <summary>HUB_START: the same ticket as the start extra `steps` (Hub-wide launch settings, finish = this Hub, nothing stored).</summary>
+        public bool TryStartSteps(IReadOnlyList<DemoSwitchPresetStep> steps, Action<string> onFailed, out string error)
+        {
+            var ticket = HubStartRequest.FromSteps(steps).BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, out error);
+            return ticket != null && TryLaunch(ticket, onFailed, out error);
+        }
+
+        /// <summary>CONTROL `hub_top`: 完了 on the manage screen (its changes are already saved) and トップへ on the finish screen.</summary>
+        public void ShowTop()
+        {
+            if (_panel == null || Screen != HubScreen.Top) Show(HubScreen.Top);
+        }
+
         // --------------------------------------------------------------- finish
 
         private void BuildFinished()
@@ -878,20 +957,34 @@ namespace Hapbeat.DemoHub
             _panel.AddText(new Vector2(0, -160), new Vector2(500, 24), _status, 15, Warning);
         }
 
-        /// <summary>Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI and hand settings.</summary>
+        /// <summary>The finish screen's 最初から（同じプラン）; without a finished ticket the top screen.</summary>
         internal void RestartFinishedSession()
         {
+            if (DemoSession.Ticket == null) { Show(HubScreen.Top); return; }
+            TryReplay(null, out _);
+        }
+
+        /// <summary>
+        /// Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI and hand settings
+        /// (also CONTROL `hub_replay`). A failure shows on the status line; <paramref name="onFailed"/> as in <see cref="TryLaunch"/>.
+        /// </summary>
+        public bool TryReplay(Action<string> onFailed, out string error)
+        {
             var finished = DemoSession.Ticket;
-            if (finished == null) { Show(HubScreen.Top); return; }
+            if (finished == null)
+            {
+                error = "No finished session.";
+                return false;
+            }
             var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle)
                 .WithRecenterUi(Settings.RecenterUi);
-            if (!DemoSession.LaunchTicket(ticket, out var error, LaunchFailed)) LaunchFailed(error);
+            return TryLaunch(ticket, onFailed, out error);
         }
 
         private void OnDestroy()
         {
             DemoRecenter.Recentered -= Recenter;
-            DemoSwitchPresets.UnregisterHost(this);
+            DemoSwitchHub.UnregisterHost(this);
             if (_panel == null) return;
             if (Application.isPlaying) Destroy(_panel.gameObject);
             else DestroyImmediate(_panel.gameObject);

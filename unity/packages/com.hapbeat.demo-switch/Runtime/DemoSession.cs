@@ -262,14 +262,25 @@ namespace Hapbeat.DemoSwitch
         public static bool LaunchNext(out string error, Action<string> onFailed = null)
         {
             if (!IsActive) { error = "Demo Session is not active."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible).WithRecenterUi(RecenterUiVisible), out error, onFailed);
+            return LaunchTicket(CarryOver(Ticket.WithIndex(Ticket.Index + 1, HapticsUiVisible)), out error, onFailed);
         }
 
         /// <summary>Launches the finish runtime with the all-complete ticket.</summary>
         public static bool LaunchFinish(out string error, Action<string> onFailed = null)
         {
             if (Ticket == null) { error = "No Demo Session ticket."; return false; }
-            return LaunchTicket(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible).WithRecenterUi(RecenterUiVisible), out error, onFailed);
+            return LaunchTicket(CarryOver(Ticket.WithIndex(Ticket.Steps.Count, HapticsUiVisible)), out error, onFailed);
+        }
+
+        /// <summary>
+        /// The in-run state the following steps inherit: the 視線をリセット button and, when this runtime draws the shared
+        /// hands (<see cref="DemoHands.Instance"/>), their current look (changed by CONTROL `hand_style_*`), like `haptics_ui`.
+        /// </summary>
+        private static DemoSessionTicket CarryOver(DemoSessionTicket ticket)
+        {
+            ticket = ticket.WithRecenterUi(RecenterUiVisible);
+            var hands = DemoHands.Instance;
+            return hands != null ? ticket.WithHandStyle(hands.Style) : ticket;
         }
 
         /// <summary>
