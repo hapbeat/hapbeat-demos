@@ -92,3 +92,6 @@ AGENTS.md
 
 # APKs gathered for installing on the Quest (tools/install-demos.ps1)
 quest-apks/
+
+# Voice audition samples (tools/tts/samples, regenerated locally; not distributed)
+tools/tts/samples/

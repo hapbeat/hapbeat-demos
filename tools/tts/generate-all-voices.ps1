@@ -1,15 +1,17 @@
 # Re-voice every demo after editing tools/tts/voice.json (or any voice-lines.json): generates the changed lines
 # for each demo, then imports them (Unreal: editor commandlet; Unity: the WAVs are already under Assets/ and are
 # imported on the next editor open or build). Requires the AivisSpeech engine on 127.0.0.1:10101 (see README.md).
+# Every line is normalized to -20 LUFS (ffmpeg); -NormalizeOnly re-normalizes the existing WAVs without the engine.
 # Close the Unreal editors of these projects first. Nothing is played.
-#   powershell -File tools/tts/generate-all-voices.ps1 [-Only trex,safetymill,handdemo] [-SkipImport]
-param([string[]]$Only = @(), [switch]$SkipImport, [string]$EngineRoot = $(if ($env:UE_ROOT) { $env:UE_ROOT } else { 'M:\GameEngine\UnrealEngine\UE_5.6' }))
+#   powershell -File tools/tts/generate-all-voices.ps1 [-Only trex,safetymill,handdemo,energyduel] [-SkipImport] [-NormalizeOnly]
+param([string[]]$Only = @(), [switch]$SkipImport, [switch]$NormalizeOnly, [string]$EngineRoot = $(if ($env:UE_ROOT) { $env:UE_ROOT } else { 'M:\GameEngine\UnrealEngine\UE_5.6' }))
 $ErrorActionPreference = 'Continue'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $demos = [ordered]@{
     trex       = @{ Dir = 'unreal/trex-encounter'; Out = 'Voice/wav'; Project = 'HapbeatTrexDemo.uproject'; Import = 'Scripts/import_voice.py' }
     safetymill = @{ Dir = 'unreal/safety-mill-vr'; Out = 'Voice/wav'; Project = 'SafetyMillVR.uproject'; Import = 'Scripts/import_voice.py' }
     handdemo   = @{ Dir = 'unity/handdemo';        Out = 'Assets/HandDemo/Resources/HandDemoVoice' }
+    energyduel = @{ Dir = 'unity/energy-duel';     Out = 'Assets/EnergyDuel/Audio/Narration/ja' }
 }
 $keys = if ($Only.Count) { $Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $demos.Keys }
 $env:PYTHONIOENCODING = 'utf-8'
@@ -19,7 +21,9 @@ foreach ($key in $keys) {
     if (-not $demo) { throw "Unknown demo '$key'. Known: $($demos.Keys -join ', ')" }
     $dir = Join-Path $root $demo.Dir
     Write-Host "== ${key}"
-    python (Join-Path $PSScriptRoot 'generate-voice.py') (Join-Path $dir 'Voice/voice-lines.json') (Join-Path $dir $demo.Out)
+    $extra = @()
+    if ($NormalizeOnly) { $extra += '--normalize-only' }
+    python (Join-Path $PSScriptRoot 'generate-voice.py') (Join-Path $dir 'Voice/voice-lines.json') (Join-Path $dir $demo.Out) @extra
     if ($LASTEXITCODE -ne 0) { $failed += $key; continue }
     if ($SkipImport -or -not $demo.Project) { continue }
     $cmd = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'

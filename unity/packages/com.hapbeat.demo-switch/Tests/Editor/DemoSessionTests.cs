@@ -1187,6 +1187,74 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
+        public void NarrationVolumeIsOptionalAndCarriedToTheNextStep()
+        {
+            Assert.That(DemoSessionTicket.TryParse(Ticket, out var plain, out var error), Is.True, error);
+            Assert.That(plain.NarrationVolume, Is.Null);
+            Assert.That(plain.ToJson(), Does.Not.Contain("narration_volume"), "Omitted when not chosen.");
+            var loud = Ticket.Replace(@"""haptics_ui"":false", @"""haptics_ui"":false,""narration_volume"":80");
+            Assert.That(DemoSessionTicket.TryParse(loud, out var ticket, out error), Is.True, error);
+            Assert.That(ticket.NarrationVolume, Is.EqualTo(80));
+            Assert.That(ticket.WithIndex(2, true).NarrationVolume, Is.EqualTo(80));
+            Assert.That(ticket.WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(DemoHandStyle.Skin).WithRecenterUi(true).NarrationVolume, Is.EqualTo(80));
+            Assert.That(DemoSessionTicket.TryParse(ticket.WithNarrationVolume(0).ToJson(), out var silent, out error), Is.True, error);
+            Assert.That(silent.NarrationVolume, Is.EqualTo(0));
+            Assert.That(ticket.WithNarrationVolume(null).ToJson(), Does.Not.Contain("narration_volume"));
+            foreach (var bad in new[] { "85", "110", "-10", "\"80\"", "80.5", "true" })
+            {
+                Assert.That(DemoSessionTicket.TryParse(loud.Replace("80", bad), out _, out error), Is.False, bad);
+                Assert.That(error, Does.Contain("narration_volume"));
+            }
+            Assert.That(DemoSessionTicket.TryParse(loud.Replace("80", "100"), out _, out error), Is.True, error);
+
+            Assert.That(DemoNarration.Volume, Is.EqualTo(DemoSwitchSettings.DefaultNarrationVolume), "No ticket: the default.");
+            var changes = 0;
+            DemoNarration.Changed += () => changes++;
+            Assert.That(DemoSession.TryBegin(loud.Replace(@"""index"":1", @"""index"":0"), "volley", Volley(), out error), Is.True, error);
+            Assert.That(DemoNarration.Volume, Is.EqualTo(80));
+            Assert.That(changes, Is.EqualTo(1));
+            Assert.That(DemoSession.LaunchNext(out error), Is.True, error);
+            Assert.That(DemoSessionTicket.TryParse(_platform.LaunchedTicket, out var sent, out error), Is.True, error);
+            Assert.That(sent.NarrationVolume, Is.EqualTo(80), "Carried to the next step.");
+
+            DemoSession.ResetForTests(_platform);
+            Assert.That(DemoSession.TryBegin(AtIndex(2).Replace(@"""haptics_ui"":false", @"""haptics_ui"":false,""narration_volume"":30"), DemoSwitchSettings.HubDemoId, null, out error), Is.True, error);
+            Assert.That(DemoNarration.Volume, Is.EqualTo(30), "The finish runtime too.");
+        }
+
+        [Test]
+        public void NarrationGainIsTheVolumeTimesTheEngineCalibration()
+        {
+            Assert.That(DemoNarration.EngineCalibration, Is.EqualTo(1f));
+            Assert.That(DemoNarration.Volume, Is.EqualTo(50));
+            Assert.That(DemoNarration.Gain, Is.EqualTo(0.5f * DemoNarration.EngineCalibration).Within(1e-6f));
+            var changes = 0;
+            DemoNarration.Changed += () => changes++;
+            DemoNarration.SetVolumeForTests(70);
+            Assert.That(changes, Is.EqualTo(1));
+            DemoNarration.SetVolumeForTests(70);
+            Assert.That(changes, Is.EqualTo(1), "Raised only on a change.");
+            Assert.That(DemoNarration.Gain, Is.EqualTo(0.7f * DemoNarration.EngineCalibration).Within(1e-6f));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => DemoNarration.SetVolumeForTests(75));
+
+            var go = new GameObject("narration");
+            try
+            {
+                var source = go.AddComponent<AudioSource>();
+                DemoNarration.SetVolumeForTests(0);
+                DemoNarration.Apply(source);
+                Assert.That(source.volume, Is.EqualTo(0f));
+                DemoNarration.SetVolumeForTests(100);
+                DemoNarration.Apply(source);
+                Assert.That(source.volume, Is.EqualTo(DemoNarration.EngineCalibration).Within(1e-6f));
+            }
+            finally { Object.DestroyImmediate(go); }
+            Assert.Throws<System.ArgumentNullException>(() => DemoNarration.Apply(null));
+            DemoNarration.SetVolumeForTests(null);
+            Assert.That(DemoNarration.Volume, Is.EqualTo(50));
+        }
+
+        [Test]
         public void RecenterUiIsOptionalAndCarriedToTheNextStep()
         {
             Assert.That(DemoSessionTicket.TryParse(Ticket, out var plain, out var error), Is.True, error);

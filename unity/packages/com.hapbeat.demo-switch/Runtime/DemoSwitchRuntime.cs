@@ -514,7 +514,8 @@ namespace Hapbeat.DemoSwitch
             { SendFailure(source, command.ControllerId, command.Sequence, command.DemoId, "replay", "seq was already accepted or is older."); return; }
 
             SendStatus(source, new DemoSwitchStatus("ACK", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
-            if (host.TryStoreSettings(command.HapticsUi, command.RecenterUi, command.HandStyle, command.StaffWaiting, command.VisibleDemos, out var error))
+            if (host.TryStoreSettings(command.HapticsUi, command.RecenterUi, command.HandStyle, command.NarrationVolume, command.StaffWaiting,
+                    command.VisibleDemos, out var error))
                 SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
             else SendFailure(source, command.ControllerId, command.Sequence, command.DemoId, "launch_failed", error);
         }

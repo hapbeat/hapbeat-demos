@@ -1590,8 +1590,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         checkHubFront(quest)?.let { return refused(it) }
         val seq = reserveSeq() ?: return "sequence を確保できなかったため送信を中止しました" to LogState.ERROR
         val payload = DemoSwitchProtocol.buildHubSettingsSet(
-            controllerId, seq, settings.hapticsUi, settings.recenterUi, settings.handStyle, settings.staffWaiting,
-            HubSettingsAccess.visibleDemos(settings.demos), config,
+            controllerId, seq, settings.hapticsUi, settings.recenterUi, settings.handStyle, settings.narrationVolume,
+            settings.staffWaiting, HubSettingsAccess.visibleDemos(settings.demos), config,
         )
         if (payload.toByteArray(Charsets.UTF_8).size > DemoSwitchProtocol.MAX_PAYLOAD_BYTES) return refused("大きすぎて送れません")
         val done = CompletableDeferred<Pair<String, LogState>>()

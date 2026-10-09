@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hapbeat.demoremote.ControlCatalog
@@ -31,10 +32,11 @@ import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.HubSettingsAccess
+import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
 
 /**
  * The selected HMD's Hub-wide settings (what the Hub's manage screen offers besides the presets): the in-view button
- * defaults, the hand look, staff waiting mode and the demo tiles of the top screen. Starts from the settings last read;
+ * defaults, the hand look, the narration volume, staff waiting mode and the demo tiles of the top screen. Starts from the settings last read;
  * 保存 sends all of them with HUB_SETTINGS_SET and reads them again. The device address is shown read only.
  */
 @Composable
@@ -44,10 +46,11 @@ fun HubSettingsScreen(vm: RemoteViewModel, onDone: () -> Unit) {
     var hapticsUi by remember(read) { mutableStateOf(read?.hapticsUi ?: false) }
     var recenterUi by remember(read) { mutableStateOf(read?.recenterUi ?: false) }
     var handStyle by remember(read) { mutableStateOf(read?.handStyle ?: "ghost") }
+    var narrationVolume by remember(read) { mutableStateOf(read?.narrationVolume ?: DemoSwitchProtocol.DEFAULT_NARRATION_VOLUME) }
     var staffWaiting by remember(read) { mutableStateOf(read?.staffWaiting ?: false) }
     var visible by remember(read) { mutableStateOf(read?.demos?.filter { it.visible }?.map { it.demoId }?.toSet() ?: emptySet()) }
     val draft = read?.copy(
-        hapticsUi = hapticsUi, recenterUi = recenterUi, handStyle = handStyle, staffWaiting = staffWaiting,
+        hapticsUi = hapticsUi, recenterUi = recenterUi, handStyle = handStyle, narrationVolume = narrationVolume, staffWaiting = staffWaiting,
         demos = read.demos.map { it.copy(visible = it.demoId in visible) },
     )
     // A change after a save makes its result stale.
@@ -104,6 +107,25 @@ fun HubSettingsScreen(vm: RemoteViewModel, onDone: () -> Unit) {
                 FilterChip(selected = handStyle == "ghost", enabled = canEdit, onClick = { handStyle = "ghost" }, label = { Text("ゴースト") })
                 FilterChip(selected = handStyle == "skin", enabled = canEdit, onClick = { handStyle = "skin" }, label = { Text("肌") })
             }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("ナレーション音量", Modifier.weight(1f))
+                TextButton(
+                    onClick = { narrationVolume -= DemoSwitchProtocol.NARRATION_VOLUME_STEP },
+                    enabled = canEdit && narrationVolume > DemoSwitchProtocol.NARRATION_VOLUMES.first,
+                ) { Text("−") }
+                // Fixed width so "0%" / "100%" do not move the buttons.
+                Text("$narrationVolume%", Modifier.width(56.dp), textAlign = TextAlign.Center)
+                TextButton(
+                    onClick = { narrationVolume += DemoSwitchProtocol.NARRATION_VOLUME_STEP },
+                    enabled = canEdit && narrationVolume < DemoSwitchProtocol.NARRATION_VOLUMES.last,
+                ) { Text("＋") }
+            }
+            // Fixed line, as on the Hub: a demo older than the narration volume rejects a ticket that carries it (sent unless 50).
+            Text(
+                if (narrationVolume != DemoSwitchProtocol.DEFAULT_NARRATION_VOLUME) "全デモがナレーション対応版になってから変えてください" else " ",
+                Modifier.fillMaxWidth().height(20.dp), style = MaterialTheme.typography.bodySmall, color = StatusRed,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
             SettingSwitch("スタッフ待機モード（トップ画面でスタッフを待つ）", staffWaiting, canEdit) { staffWaiting = it }
             Text(
                 "この HMD の宛先: " + (read?.let { HubSettingsAccess.addressText(it.player, it.group) } ?: "-") + "（adb で書き込みます）",

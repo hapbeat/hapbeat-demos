@@ -155,10 +155,11 @@ namespace Hapbeat.DemoHub
 
         /// <summary>
         /// Ticket at index 0 for the installed steps. Options contain exactly the active options
-        /// (contract). Returns null when no step is installed.
+        /// (contract). <paramref name="narrationVolume"/> null omits `narration_volume` (<see cref="HubSettings.TicketNarrationVolume"/>).
+        /// Returns null when no step is installed.
         /// </summary>
         public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi,
-            DemoHandStyle handStyle, bool recenterUi)
+            DemoHandStyle handStyle, bool recenterUi, int? narrationVolume)
         {
             var steps = new List<DemoSessionStep>();
             foreach (var step in Steps)
@@ -169,7 +170,7 @@ namespace Hapbeat.DemoHub
                     .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), null);
                 steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry), entry.PackageName, entry.ActivityName, options, step.Retry));
             }
-            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle, recenterUi);
+            return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle, recenterUi, narrationVolume);
         }
 
         /// <summary>

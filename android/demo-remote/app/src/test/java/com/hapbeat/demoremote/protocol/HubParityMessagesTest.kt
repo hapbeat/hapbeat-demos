@@ -27,10 +27,10 @@ class HubParityMessagesTest {
         """"action":"hand_style_skin","scene_id":""}"""
     private val settingsGet = """{"version":1,"type":"HUB_SETTINGS_GET","controller_id":"remote-pixel","nonce":"0123456789abcdef","from":0}"""
     private val settings = """{"version":1,"type":"HUB_SETTINGS","controller_id":"remote-pixel","nonce":"0123456789abcdef","revision":3,""" +
-        """"haptics_ui":false,"recenter_ui":true,"hand_style":"ghost","staff_waiting":false,"player":1,"group":-1,"demo_count":2,"from":0,""" +
+        """"haptics_ui":false,"recenter_ui":true,"hand_style":"ghost","narration_volume":50,"staff_waiting":false,"player":1,"group":-1,"demo_count":2,"from":0,""" +
         """"demos":[{"demo_id":"volley","title":"Volley","visible":true},{"demo_id":"fps","title":"FPS","visible":false}]}"""
     private val settingsSet = """{"version":1,"type":"HUB_SETTINGS_SET","controller_id":"remote-pixel","seq":46,"demo_id":"demo_hub",""" +
-        """"haptics_ui":false,"recenter_ui":true,"hand_style":"skin","staff_waiting":false,"visible_demos":["volley"]}"""
+        """"haptics_ui":false,"recenter_ui":true,"hand_style":"skin","narration_volume":60,"staff_waiting":false,"visible_demos":["volley"]}"""
     private val hubStart = """{"version":1,"type":"HUB_START","controller_id":"remote-pixel","seq":47,"demo_id":"demo_hub",""" +
         """"steps":[{"demo_id":"volley","options":{"scene":"match"}}]}"""
 
@@ -111,7 +111,7 @@ class HubParityMessagesTest {
         assertEquals(DemoSwitchMessage.HubSettingsGet("remote-pixel", "0123456789abcdef", 0, null), parse(settingsGet))
         assertEquals(settingsGet, DemoSwitchProtocol.buildHubSettingsGet("remote-pixel", "0123456789abcdef", 0, unsigned))
         assertEquals(
-            DemoSwitchMessage.HubSettings("remote-pixel", "0123456789abcdef", 3, false, true, "ghost", false, 1, -1, 2, 0, demos, null),
+            DemoSwitchMessage.HubSettings("remote-pixel", "0123456789abcdef", 3, false, true, "ghost", 50, false, 1, -1, 2, 0, demos, null),
             parse(settings),
         )
     }
@@ -121,7 +121,8 @@ class HubParityMessagesTest {
         assertEquals("de07246f7208dac8a116de59f8b2bf5f5e82135e5e276084a4b99664dc3d197a", hmac(parse(settingsGet)!!))
         assertEquals("volley;1;6:Volley|fps;0;3:FPS", DemoSwitchProtocol.canonicalHubDemos(demos))
         assertTrue(DemoSwitchProtocol.canonical(parse(settings)!!).endsWith("demos=29:volley;1;6:Volley|fps;0;3:FPS\n"))
-        assertEquals("33d8ca3fbb0e14efae9e8e505992d3f97446bcdcfed7774953b367485a4d1a49", hmac(parse(settings)!!))
+        assertTrue(DemoSwitchProtocol.canonical(parse(settings)!!).contains("hand_style=5:ghost\nnarration_volume=2:50\nstaff_waiting=5:false\n"))
+        assertEquals("591f3a09b9240691077766f700262badfb2feed1ebaf528698a75db508450179", hmac(parse(settings)!!))
         assertTrue(
             DemoSwitchProtocol.buildHubSettingsGet("remote-pixel", "0123456789abcdef", 0, signed)
                 .endsWith(withAuth("de07246f7208dac8a116de59f8b2bf5f5e82135e5e276084a4b99664dc3d197a")),
@@ -136,7 +137,7 @@ class HubParityMessagesTest {
         assertFalse(DemoSwitchProtocol.acceptHubSettings(page, "192.168.0.38", "remote-pixel", target, unsigned))
         assertFalse(DemoSwitchProtocol.acceptHubSettings(page, "192.168.0.37", "other", target, unsigned))
         assertFalse(DemoSwitchProtocol.acceptHubSettings(page, "192.168.0.37", "remote-pixel", target, signed))
-        val signedPage = parse(settings.dropLast(1) + withAuth("33d8ca3fbb0e14efae9e8e505992d3f97446bcdcfed7774953b367485a4d1a49")) as DemoSwitchMessage.HubSettings
+        val signedPage = parse(settings.dropLast(1) + withAuth("591f3a09b9240691077766f700262badfb2feed1ebaf528698a75db508450179")) as DemoSwitchMessage.HubSettings
         assertTrue(DemoSwitchProtocol.acceptHubSettings(signedPage, "192.168.0.37", "remote-pixel", target, signed))
         // A title change breaks the HMAC.
         val tampered = signedPage.copy(demos = listOf(HubDemo("volley", "Volley!", true), demos[1]))
@@ -154,6 +155,12 @@ class HubParityMessagesTest {
             settings.replace("\"group\":-1", "\"group\":100"),
             settings.replace("\"group\":-1", "\"group\":-2"),
             settings.replace("\"hand_style\":\"ghost\"", "\"hand_style\":\"Ghost\""),
+            settings.replace("\"narration_volume\":50", "\"narration_volume\":55"),
+            settings.replace("\"narration_volume\":50", "\"narration_volume\":110"),
+            settings.replace("\"narration_volume\":50", "\"narration_volume\":-10"),
+            settings.replace("\"narration_volume\":50", "\"narration_volume\":\"50\""),
+            settings.replace("\"narration_volume\":50", "\"narration_volume\":50.5"),
+            settings.replace(",\"narration_volume\":50", ""),
             settings.replace("\"revision\":3", "\"revision\":-1"),
             settings.replace("\"title\":\"FPS\"", "\"title\":\"\""),
             settings.replace("\"title\":\"FPS\"", "\"title\":\"   \""),                   // blank (preset name rules)
@@ -174,17 +181,17 @@ class HubParityMessagesTest {
     @Test
     fun hubSettingsSet() {
         assertEquals(
-            DemoSwitchMessage.HubSettingsSet("remote-pixel", 46, "demo_hub", false, true, "skin", false, listOf("volley"), null),
+            DemoSwitchMessage.HubSettingsSet("remote-pixel", 46, "demo_hub", false, true, "skin", 60, false, listOf("volley"), null),
             parse(settingsSet),
         )
-        assertEquals(settingsSet, DemoSwitchProtocol.buildHubSettingsSet("remote-pixel", 46, false, true, "skin", false, listOf("volley"), unsigned))
+        assertEquals(settingsSet, DemoSwitchProtocol.buildHubSettingsSet("remote-pixel", 46, false, true, "skin", 60, false, listOf("volley"), unsigned))
         assertTrue(
-            DemoSwitchProtocol.canonicalHubSettingsSet("remote-pixel", 46, false, true, "skin", false, listOf("volley"))
-                .endsWith("visible_demos=6:volley\n"),
+            DemoSwitchProtocol.canonicalHubSettingsSet("remote-pixel", 46, false, true, "skin", 60, false, listOf("volley"))
+                .endsWith("hand_style=4:skin\nnarration_volume=2:60\nstaff_waiting=5:false\nvisible_demos=6:volley\n"),
         )
-        assertEquals("dd5dc8984242f56413c51d6b17ddfee52dd40e3dc663bfbfbd13533f8155039b", hmac(parse(settingsSet)!!))
+        assertEquals("3160415e0f228ec3b690007d187b458d80faac6d5d498913bccafc3c17924533", hmac(parse(settingsSet)!!))
         // No tiles: an empty list, signed as an empty value.
-        val none = DemoSwitchProtocol.buildHubSettingsSet("remote-pixel", 47, true, false, "ghost", true, emptyList(), unsigned)
+        val none = DemoSwitchProtocol.buildHubSettingsSet("remote-pixel", 47, true, false, "ghost", 0, true, emptyList(), unsigned)
         assertTrue(none.endsWith("\"visible_demos\":[]}"))
         assertTrue(DemoSwitchProtocol.canonical(parse(none)!!).endsWith("visible_demos=0:\n"))
     }
@@ -201,6 +208,9 @@ class HubParityMessagesTest {
             settingsSet.replace("\"demo_id\":\"demo_hub\"", "\"demo_id\":\"volley\""),
             settingsSet.replace("\"hand_style\":\"skin\"", "\"hand_style\":\"\""),
             settingsSet.replace(",\"staff_waiting\":false", ""),
+            settingsSet.replace("\"narration_volume\":60", "\"narration_volume\":65"),
+            settingsSet.replace("\"narration_volume\":60", "\"narration_volume\":110"),
+            settingsSet.replace(",\"narration_volume\":60", ""),
             settingsSet.replace("}", ",\"player\":1}"),
         ).forEach { assertNull(it, parse(it)) }
     }

@@ -17,11 +17,11 @@ namespace Hapbeat.DemoSwitch.Tests
         private const string StatePartial = "{\"version\":1,\"type\":\"STATE\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"current_demo_id\":\"handdemo\",\"foreground\":true,\"haptics_on\":true,\"haptics_ui\":false,\"recenter_ui\":false,\"paused\":false,\"step_index\":1,\"step_count\":3,\"screen\":\"completion\"}";
         private const string ControlHandStyleSkin = "{\"version\":1,\"type\":\"CONTROL\",\"controller_id\":\"remote-pixel\",\"seq\":48,\"demo_id\":\"handdemo\",\"action\":\"hand_style_skin\",\"scene_id\":\"\"}";
         private const string HubSettingsGet = "{\"version\":1,\"type\":\"HUB_SETTINGS_GET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"from\":0}";
-        private const string HubSettings = "{\"version\":1,\"type\":\"HUB_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"revision\":3,\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"ghost\",\"staff_waiting\":false,\"player\":1,\"group\":-1,\"demo_count\":2,\"from\":0,\"demos\":[{\"demo_id\":\"volley\",\"title\":\"Volley\",\"visible\":true},{\"demo_id\":\"fps\",\"title\":\"FPS\",\"visible\":false}]}";
-        private const string HubSettingsSet = "{\"version\":1,\"type\":\"HUB_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":46,\"demo_id\":\"demo_hub\",\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"skin\",\"staff_waiting\":false,\"visible_demos\":[\"volley\"]}";
+        private const string HubSettings = "{\"version\":1,\"type\":\"HUB_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"revision\":3,\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"ghost\",\"narration_volume\":50,\"staff_waiting\":false,\"player\":1,\"group\":-1,\"demo_count\":2,\"from\":0,\"demos\":[{\"demo_id\":\"volley\",\"title\":\"Volley\",\"visible\":true},{\"demo_id\":\"fps\",\"title\":\"FPS\",\"visible\":false}]}";
+        private const string HubSettingsSet = "{\"version\":1,\"type\":\"HUB_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":46,\"demo_id\":\"demo_hub\",\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"skin\",\"narration_volume\":60,\"staff_waiting\":false,\"visible_demos\":[\"volley\"]}";
         private const string HubStart = "{\"version\":1,\"type\":\"HUB_START\",\"controller_id\":\"remote-pixel\",\"seq\":47,\"demo_id\":\"demo_hub\",\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"match\"}}]}";
 
-        internal static DemoSwitchHubSettings ExampleSettings() => new DemoSwitchHubSettings(3, false, true, DemoHandStyle.Ghost, false, 1, -1,
+        internal static DemoSwitchHubSettings ExampleSettings() => new DemoSwitchHubSettings(3, false, true, DemoHandStyle.Ghost, 50, false, 1, -1,
             new[] { new DemoSwitchHubDemo("volley", "Volley", true), new DemoSwitchHubDemo("fps", "FPS", false) });
 
         private static string WithAuth(string json, string auth) => json.Substring(0, json.Length - 1) + ",\"auth\":\"" + auth + "\"}";
@@ -123,7 +123,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchProtocol.SerializeHubSettings(request, ExampleSettings(), string.Empty), Is.EqualTo(HubSettings));
             Assert.That(DemoSwitchProtocol.CanonicalDemos(ExampleSettings().Demos), Is.EqualTo("volley;1;6:Volley|fps;0;3:FPS"));
             var signed = JObject.Parse(DemoSwitchProtocol.SerializeHubSettings(request, ExampleSettings(), Secret));
-            Assert.That(signed.Value<string>("auth"), Is.EqualTo("33d8ca3fbb0e14efae9e8e505992d3f97446bcdcfed7774953b367485a4d1a49"));
+            Assert.That(signed.Value<string>("auth"), Is.EqualTo("591f3a09b9240691077766f700262badfb2feed1ebaf528698a75db508450179"));
         }
 
         [Test]
@@ -133,9 +133,11 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(set.Success, Is.True, set.ErrorMessage);
             Assert.That(set.Command.RecenterUi, Is.True);
             Assert.That(set.Command.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(set.Command.NarrationVolume, Is.EqualTo(60));
+            Assert.That(DemoSwitchProtocol.Canonicalize(set.Command), Does.Contain("hand_style=4:skin\nnarration_volume=2:60\nstaff_waiting=5:false\n"));
             Assert.That(set.Command.VisibleDemos, Is.EqualTo(new[] { "volley" }));
             Assert.That(DemoSwitchProtocol.Canonicalize(set.Command), Does.EndWith("staff_waiting=5:false\nvisible_demos=6:volley\n"));
-            Assert.That(DemoSwitchProtocol.ComputeAuth(set.Command, Secret), Is.EqualTo("dd5dc8984242f56413c51d6b17ddfee52dd40e3dc663bfbfbd13533f8155039b"));
+            Assert.That(DemoSwitchProtocol.ComputeAuth(set.Command, Secret), Is.EqualTo("3160415e0f228ec3b690007d187b458d80faac6d5d498913bccafc3c17924533"));
             var none = DemoSwitchProtocol.ParseHubSettingsSet(HubSettingsSet.Replace("[\"volley\"]", "[]"));
             Assert.That(none.Success, Is.True, none.ErrorMessage);
             Assert.That(DemoSwitchProtocol.Canonicalize(none.Command), Does.EndWith("visible_demos=0:\n"));
@@ -172,6 +174,12 @@ namespace Hapbeat.DemoSwitch.Tests
         [TestCase("\"seq\":46", "\"seq\":0")]
         [TestCase("\"hand_style\":\"skin\"", "\"hand_style\":\"metal\"")]
         [TestCase("\"recenter_ui\":true", "\"recenter_ui\":1")]
+        [TestCase("\"narration_volume\":60", "\"narration_volume\":65")]
+        [TestCase("\"narration_volume\":60", "\"narration_volume\":110")]
+        [TestCase("\"narration_volume\":60", "\"narration_volume\":-10")]
+        [TestCase("\"narration_volume\":60", "\"narration_volume\":\"60\"")]
+        [TestCase("\"narration_volume\":60", "\"narration_volume\":60.5")]
+        [TestCase(",\"narration_volume\":60", "")]
         [TestCase(",\"staff_waiting\":false", "")]
         [TestCase("[\"volley\"]", "[\"volley\",\"volley\"]")]
         [TestCase("[\"volley\"]", "[\"Volley\"]")]
@@ -228,7 +236,7 @@ namespace Hapbeat.DemoSwitch.Tests
         {
             var demos = Enumerable.Range(0, DemoSwitchHub.MaxDemos)
                 .Select(i => new DemoSwitchHubDemo("demo-" + i.ToString("00") + new string('x', 20), "デモ " + i + new string('名', 30), i % 2 == 0)).ToList();
-            var settings = new DemoSwitchHubSettings(9, true, false, DemoHandStyle.Skin, true, 12, 99, demos);
+            var settings = new DemoSwitchHubSettings(9, true, false, DemoHandStyle.Skin, 100, true, 12, 99, demos);
             var received = new List<string>();
             var from = 0;
             var pages = 0;
@@ -253,7 +261,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(received, Is.EqualTo(demos.Select(d => d.DemoId)));
             Assert.That(pages, Is.GreaterThan(1));
             var past = JObject.Parse(DemoSwitchProtocol.SerializeHubSettings(new DemoSwitchHubSettingsGet("remote-pixel", "0123456789abcdef", 63, ""),
-                new DemoSwitchHubSettings(0, false, false, DemoHandStyle.Ghost, false, -1, -1, demos.Take(2).ToList()), secret));
+                new DemoSwitchHubSettings(0, false, false, DemoHandStyle.Ghost, 0, false, -1, -1, demos.Take(2).ToList()), secret));
             Assert.That(past["demos"], Is.Empty, "from past the last demo.");
         }
 
@@ -265,7 +273,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchHubSettingsGetHandler.Handle(HubSettingsGet, ExampleSettings, Secret, true).ErrorCode, Is.EqualTo("invalid_auth"));
             var signed = DemoSwitchHubSettingsGetHandler.Handle(WithAuth(HubSettingsGet, "de07246f7208dac8a116de59f8b2bf5f5e82135e5e276084a4b99664dc3d197a"),
                 ExampleSettings, Secret, false);
-            Assert.That(JObject.Parse(signed.ResponseJson).Value<string>("auth"), Is.EqualTo("33d8ca3fbb0e14efae9e8e505992d3f97446bcdcfed7774953b367485a4d1a49"));
+            Assert.That(JObject.Parse(signed.ResponseJson).Value<string>("auth"), Is.EqualTo("591f3a09b9240691077766f700262badfb2feed1ebaf528698a75db508450179"));
         }
     }
 }

@@ -16,6 +16,8 @@ data class HubSettingsSnapshot(
     val hapticsUi: Boolean,
     val recenterUi: Boolean,
     val handStyle: String,
+    /** 0..100 in steps of 10 (`narration_volume` of every launch). */
+    val narrationVolume: Int,
     val staffWaiting: Boolean,
     val player: Int,
     val group: Int,
@@ -64,7 +66,7 @@ object HubSettingsAccess {
             if (demos.size > page.demoCount) return HubSettingsRead.Inconsistent
             if (demos.size == page.demoCount) {
                 return HubSettingsRead.Read(HubSettingsSnapshot(
-                    page.revision, page.hapticsUi, page.recenterUi, page.handStyle, page.staffWaiting, page.player, page.group,
+                    page.revision, page.hapticsUi, page.recenterUi, page.handStyle, page.narrationVolume, page.staffWaiting, page.player, page.group,
                     demos.toList(),
                 ))
             }
@@ -74,17 +76,18 @@ object HubSettingsAccess {
     /** The demos shown as tiles, in the Hub's order: the `visible_demos` of HUB_SETTINGS_SET. */
     fun visibleDemos(demos: List<HubDemo>): List<String> = demos.filter { it.visible }.map { it.demoId }
 
-    /** Why [settings] cannot be written with HUB_SETTINGS_SET, or null: a known hand style and the 1024-byte limit. */
+    /** Why [settings] cannot be written with HUB_SETTINGS_SET, or null: a known hand style, a narration volume and the 1024-byte limit. */
     fun problem(controllerId: String, settings: HubSettingsSnapshot): String? {
         if (settings.handStyle !in DemoSwitchProtocol.HAND_STYLES) return "手の見た目が正しくありません"
+        if (settings.narrationVolume !in DemoSwitchProtocol.NARRATION_VOLUMES) return "ナレーション音量が正しくありません"
         if (worstCaseBytes(controllerId, settings) > DemoSwitchProtocol.MAX_PAYLOAD_BYTES) return "表示するデモが多すぎて送れません（Hub で変更してください）"
         return null
     }
 
     /** Bytes of the HUB_SETTINGS_SET for [settings] with the largest sequence and an `auth` field. */
     fun worstCaseBytes(controllerId: String, settings: HubSettingsSnapshot): Int = DemoSwitchProtocol.buildHubSettingsSet(
-        controllerId, DemoSwitchProtocol.MAX_SEQ, settings.hapticsUi, settings.recenterUi, settings.handStyle, settings.staffWaiting,
-        visibleDemos(settings.demos), WORST_CASE_AUTH,
+        controllerId, DemoSwitchProtocol.MAX_SEQ, settings.hapticsUi, settings.recenterUi, settings.handStyle,
+        settings.narrationVolume, settings.staffWaiting, visibleDemos(settings.demos), WORST_CASE_AUTH,
     ).toByteArray(Charsets.UTF_8).size
 
     /** "プレイヤー 1・グループ 指定なし" for the device address read by the Hub. */

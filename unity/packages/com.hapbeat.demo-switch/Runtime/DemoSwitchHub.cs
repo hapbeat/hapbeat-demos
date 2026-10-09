@@ -23,13 +23,14 @@ namespace Hapbeat.DemoSwitch
     /// <summary>The Hub-wide settings of the manage screen, this headset's device address and the installed demos.</summary>
     public sealed class DemoSwitchHubSettings
     {
-        public DemoSwitchHubSettings(long revision, bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, bool staffWaiting,
-            int player, int group, IReadOnlyList<DemoSwitchHubDemo> demos)
+        public DemoSwitchHubSettings(long revision, bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, int narrationVolume,
+            bool staffWaiting, int player, int group, IReadOnlyList<DemoSwitchHubDemo> demos)
         {
             Revision = revision;
             HapticsUi = hapticsUi;
             RecenterUi = recenterUi;
             HandStyle = handStyle;
+            NarrationVolume = narrationVolume;
             StaffWaiting = staffWaiting;
             Player = player;
             Group = group;
@@ -41,6 +42,8 @@ namespace Hapbeat.DemoSwitch
         public bool HapticsUi { get; }
         public bool RecenterUi { get; }
         public DemoHandStyle HandStyle { get; }
+        /// <summary>0..100 in steps of 10 (<see cref="DemoNarration.IsValidVolume"/>).</summary>
+        public int NarrationVolume { get; }
         public bool StaffWaiting { get; }
         /// <summary>1..99, or -1 when not specified (read only).</summary>
         public int Player { get; }
@@ -89,11 +92,11 @@ namespace Hapbeat.DemoSwitch
         DemoSwitchPresetCheck CheckVisibleDemos(IReadOnlyList<string> demoIds, out string demoId);
 
         /// <summary>
-        /// Stores the four values and the tiles (the listed installed demos shown, the other installed ones hidden, the choice of
+        /// Stores the five values and the tiles (the listed installed demos shown, the other installed ones hidden, the choice of
         /// demos that are not installed kept), increasing the revision, and applies them at once; false with the storage error.
         /// </summary>
-        bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos,
-            out string error);
+        bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, int narrationVolume, bool staffWaiting,
+            IReadOnlyList<string> visibleDemos, out string error);
 
         /// <summary>CONTROL `hand_style_*` on the Hub: changes, applies and stores the Hub-wide hand style; false with the storage error.</summary>
         bool TrySetHandStyle(DemoHandStyle style, out string error);

@@ -124,6 +124,7 @@ namespace Hapbeat.DemoSwitch
                 IsActive = false;
                 HapticsUiVisible = ticket.HapticsUi;
                 RecenterUiVisible = ticket.RecenterUi;
+                DemoNarration.NotifyIfChanged();
                 return true;
             }
             var step = ticket.Steps[ticket.Index];
@@ -147,6 +148,7 @@ namespace Hapbeat.DemoSwitch
             HapticsEnabled = true;
             HapticsUiVisible = ticket.HapticsUi;
             RecenterUiVisible = ticket.RecenterUi;
+            DemoNarration.NotifyIfChanged();
             Debug.Log("[Demo Session] Step " + (ticket.Index + 1) + " / " + ticket.Steps.Count + " (" + step.DemoId + ") session " + ticket.SessionId);
             return true;
         }
@@ -172,6 +174,7 @@ namespace Hapbeat.DemoSwitch
             HapticsUiVisibleChanged = null;
             RecenterUiVisibleChanged = null;
             DemoRecenter.ResetForTests();
+            DemoNarration.ResetForTests();
         }
 
         public static void RegisterHost(IDemoSessionHost host)
@@ -282,6 +285,7 @@ namespace Hapbeat.DemoSwitch
         /// <summary>
         /// The in-run state the following steps inherit: the 視線をリセット button and, when this runtime draws the shared
         /// hands (<see cref="DemoHands.Instance"/>), their current look (changed by CONTROL `hand_style_*`), like `haptics_ui`.
+        /// `narration_volume` is carried over unchanged by <see cref="DemoSessionTicket.WithIndex"/>.
         /// </summary>
         private static DemoSessionTicket CarryOver(DemoSessionTicket ticket)
         {

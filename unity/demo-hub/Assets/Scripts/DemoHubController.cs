@@ -49,6 +49,10 @@ namespace Hapbeat.DemoHub
         public const string HandStyleSkin = "手の見た目：肌";
         public const string RecenterUiOn = "視線リセットボタン：表示する";
         public const string RecenterUiOff = "視線リセットボタン：表示しない";
+        public const string NarrationVolume = "ナレーション音量：{0}%";
+        public const string NarrationDown = "−";
+        public const string NarrationUp = "＋";
+        public const string NarrationVolumeNote = "全デモがナレーション対応版になってから変えてください";
         public const string Done = "完了";
         public const string SaveFailed = "保存できませんでした";
         public const string FinishedMessage = "体験は以上です。\nヘッドセットを外してください";
@@ -458,7 +462,8 @@ namespace Hapbeat.DemoHub
 
         /// <summary>A demo tile is a one-step session: descriptor defaults, retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
-            Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi));
+            Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
+                Settings.TicketNarrationVolume));
 
         private static DemoSessionComponent Finish() =>
             DemoSessionCatalog.TryGetOwnComponent(out var finish) ? finish : new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
@@ -503,13 +508,14 @@ namespace Hapbeat.DemoHub
         /// <summary>
         /// Width: the catalog column(s), the plan column(s) and the selected step's column, or the footer
         /// when wider; the same on every tab. Height: as many rows as the tab's longest column needs
-        /// (catalog or plan, at most 16, or the step settings), so no empty rows above the footer.
+        /// (catalog or plan, at most 16, or the step settings), so no empty rows above the footer; below the
+        /// footer the narration volume row, its note line and the status line.
         /// </summary>
         internal Vector2 ManageSize => new Vector2(
             Mathf.Max(Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
                 Margin + 4f * (FooterButtonWidth + FooterGap) + HapticsTestWidth + FooterGap + DoneWidth + Margin,
                 Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + Margin),
-            Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + 4f + StatusHeight + Margin);
+            Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + FooterGap + BarHeight + 4f + StatusHeight + 4f + StatusHeight + Margin);
 
         /// <summary>Rows of the current tab: its longest column.</summary>
         internal int GridRows
@@ -564,8 +570,10 @@ namespace Hapbeat.DemoHub
                 BuildPresetTab(size);
             }
 
-            // Footer: settings shared by every launch, 触覚テスト, then done; the status line below never moves them.
-            var footerY = -size.y * 0.5f + Margin + StatusHeight + 4f + BarHeight * 0.5f;
+            // Footer: settings shared by every launch, 触覚テスト, then done; below it the narration volume with its fixed note
+            // line, then the status line. Neither line ever moves the buttons.
+            var narrationY = -size.y * 0.5f + Margin + StatusHeight + 4f + StatusHeight + 4f + BarHeight * 0.5f;
+            var footerY = narrationY + BarHeight + FooterGap;
             var x = left;
             DemoSessionButton Footer(float width, string label, int fontSize, System.Action press)
             {
@@ -591,7 +599,35 @@ namespace Hapbeat.DemoHub
             });
             Footer(HapticsTestWidth, HubText.HapticsTest, 18, () => TryPlayHapticsTest(out _)).Interactable = HasHapticsTest;
             Footer(DoneWidth, HubText.Done, 20, () => Show(HubScreen.Top));
+            BuildNarrationVolume(left, narrationY, size.x - 2f * Margin);
             _panel.AddText(new Vector2(0, -size.y * 0.5f + Margin + StatusHeight * 0.5f), new Vector2(size.x - 2f * Margin, StatusHeight), _status, 15, Warning);
+        }
+
+        /// <summary>
+        /// "ナレーション音量：n%" with − / ＋ (steps of 10, 0..100), and under it a fixed line that warns while the value is not
+        /// the default 50 (a demo older than the narration volume rejects a ticket that carries it).
+        /// </summary>
+        private void BuildNarrationVolume(float left, float y, float width)
+        {
+            var volume = Settings.NarrationVolume;
+            _panel.AddText(new Vector2(left + FooterButtonWidth * 0.5f, y), new Vector2(FooterButtonWidth, BarHeight),
+                string.Format(CultureInfo.InvariantCulture, HubText.NarrationVolume, volume), 18, Color.white, TextAnchor.MiddleLeft);
+            var x = left + FooterButtonWidth + FooterGap + MoveButtonWidth * 0.5f;
+            _panel.AddButton(new Vector2(x, y), new Vector2(MoveButtonWidth, BarHeight), HubText.NarrationDown, 20,
+                () => SetNarrationVolume(volume - DemoNarration.VolumeStep)).Interactable = volume > DemoNarration.MinVolume;
+            x += MoveButtonWidth + FooterGap;
+            _panel.AddButton(new Vector2(x, y), new Vector2(MoveButtonWidth, BarHeight), HubText.NarrationUp, 20,
+                () => SetNarrationVolume(volume + DemoNarration.VolumeStep)).Interactable = volume < DemoNarration.MaxVolume;
+            var note = volume == DemoSwitchSettings.DefaultNarrationVolume ? string.Empty : HubText.NarrationVolumeNote;
+            _panel.AddText(new Vector2(left + width * 0.5f, y - BarHeight * 0.5f - 4f - StatusHeight * 0.5f), new Vector2(width, StatusHeight),
+                note, 15, Warning, TextAnchor.MiddleLeft);
+        }
+
+        private void SetNarrationVolume(int volume)
+        {
+            if (!DemoNarration.IsValidVolume(volume)) return;
+            Settings.NarrationVolume = volume;
+            SettingsChanged();
         }
 
         internal void SelectTab(int tab)
@@ -878,14 +914,14 @@ namespace Hapbeat.DemoHub
 
         /// <summary>The top screen's preset start: the Hub-wide launch settings apply.</summary>
         public bool TryStartPreset(int number, Action<string> onFailed, out string error) =>
-            TryLaunch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi),
-                onFailed, out error);
+            TryLaunch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
+                Settings.TicketNarrationVolume), onFailed, out error);
 
         // ------------------------------------------ Demo Switch Hub settings
 
         /// <summary>The manage screen's settings, this device's address as read at start, and every catalog entry with its tile choice.</summary>
         public DemoSwitchHubSettings ReadSettings() => new DemoSwitchHubSettings(Settings.Revision, Settings.HapticsUi, Settings.RecenterUi,
-            Settings.HandStyle, Settings.StaffWaiting,
+            Settings.HandStyle, Settings.NarrationVolume, Settings.StaffWaiting,
             _deviceAddress == null ? DemoDeviceAddress.Unspecified : _deviceAddress.Player,
             _deviceAddress == null ? DemoDeviceAddress.Unspecified : _deviceAddress.Group,
             _catalog.Select(e => new DemoSwitchHubDemo(e.Descriptor.DemoId, RemoteTitle(e), Settings.VisibleDemos.Contains(e.Descriptor.DemoId))).ToList());
@@ -907,16 +943,17 @@ namespace Hapbeat.DemoHub
         }
 
         /// <summary>
-        /// HUB_SETTINGS_SET: the four values and the tiles of the installed demos (the choice of demos that are not installed
+        /// HUB_SETTINGS_SET: the five values and the tiles of the installed demos (the choice of demos that are not installed
         /// is kept), saved with the revision increased and applied at once: the Hub's own hands and 視線をリセット button, and the
         /// shown screen (top or staff waiting).
         /// </summary>
-        public bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos,
-            out string error)
+        public bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, int narrationVolume, bool staffWaiting,
+            IReadOnlyList<string> visibleDemos, out string error)
         {
             Settings.HapticsUi = hapticsUi;
             Settings.RecenterUi = recenterUi;
             Settings.HandStyle = handStyle;
+            Settings.NarrationVolume = narrationVolume;
             Settings.StaffWaiting = staffWaiting;
             foreach (var entry in _catalog) Settings.VisibleDemos.Remove(entry.Descriptor.DemoId);
             Settings.VisibleDemos.UnionWith(visibleDemos);
@@ -1004,7 +1041,7 @@ namespace Hapbeat.DemoHub
         }
 
         /// <summary>
-        /// Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI and hand settings
+        /// Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI, hand and narration settings
         /// (also CONTROL `hub_replay`). A failure shows on the status line; <paramref name="onFailed"/> as in <see cref="TryLaunch"/>.
         /// </summary>
         public bool TryReplay(Action<string> onFailed, out string error)
@@ -1016,7 +1053,7 @@ namespace Hapbeat.DemoHub
                 return false;
             }
             var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle)
-                .WithRecenterUi(Settings.RecenterUi);
+                .WithRecenterUi(Settings.RecenterUi).WithNarrationVolume(Settings.TicketNarrationVolume);
             return TryLaunch(ticket, onFailed, out error);
         }
 
