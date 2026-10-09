@@ -2,6 +2,8 @@
 
 Generates the demos' navigation voice WAVs with a local [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine) (free, runs offline after the first start, VOICEVOX-compatible HTTP API on port 10101). Re-run the script whenever a line changes; only changed lines are synthesized again.
 
+Every line is normalized to **-20 LUFS** integrated loudness (ITU-R BS.1770), true peak at most -1.5 dBTP, with [ffmpeg](https://ffmpeg.org/) (two passes: `ebur128` measures, `loudnorm` applies; `loudness.py`). This is the common narration level of every demo (hapbeat-contracts `specs/demo-session.md` "ナレーションの音量"); the demos play it at the Hub's `narration_volume` (Unity: `DemoNarration`, Unreal: `HapbeatDemoSession`) and keep no volume constant of their own. ffmpeg: `--ffmpeg <exe>`, else the `FFMPEG` environment variable, else `ffmpeg` on PATH.
+
 ```powershell
 # 1. Start the engine (keep it running while generating)
 & "$env:LOCALAPPDATA\Programs\AivisSpeech-Engine\run.exe" --host 127.0.0.1 --port 10101 --disable_sentry
@@ -9,9 +11,17 @@ Generates the demos' navigation voice WAVs with a local [AivisSpeech Engine](htt
 python tools/tts/generate-voice.py <demo>/.../voice-lines.json <demo>/.../Voice
 # Audition every installed voice style (writes one WAV per style, nothing is played)
 python tools/tts/generate-voice.py --samples <out-dir> --text "..."
+# Re-normalize the generated WAVs without the engine (ffmpeg only)
+python tools/tts/generate-voice.py <demo>/.../voice-lines.json <demo>/.../Voice --normalize-only
+# Ready-made narration (e.g. Boxing's Kenney voice OGGs): normalize in place / only measure
+python tools/tts/loudness.py <file>...
+python tools/tts/loudness.py --check <file>...
 ```
 
-**One voice for every demo:** edit `tools/tts/voice.json` (speaker / style / speed / volume) and run `powershell -File tools/tts/generate-all-voices.ps1` (generates the changed lines of every demo and runs the Unreal import commandlets; close those editors first). It overrides each file's own `voice` block; `--ignore-shared` uses the file's block only.
+- `--no-normalize` keeps the engine's level. The cache (`.voice-cache.json`) records per line the synthesis key and the normalization applied, so a changed target re-normalizes the existing WAVs without the engine, and `--no-normalize` synthesizes again.
+- When one gain would push the true peak over -1.5 dBTP, `loudnorm` limits the peaks (dynamic mode) and the script reports `peaks limited`. Each written file is measured again and pass 2 is re-aimed until it is within 0.1 LU of -20 LUFS (dynamic mode and the Vorbis round trip of a ~1 s clip otherwise miss by up to 0.6 LU).
+
+**One voice for every demo:** edit `tools/tts/voice.json` (speaker / style / speed / volume) and run `powershell -File tools/tts/generate-all-voices.ps1` (generates the changed lines of every demo: trex, safetymill, handdemo, energyduel; and runs the Unreal import commandlets; close those editors first). `-NormalizeOnly` re-normalizes the existing WAVs of every demo without the engine; `-SkipImport` skips the Unreal import. `voice.json` overrides each file's own `voice` block; `--ignore-shared` uses the file's block only.
 
 `voice-lines.json` holds the default voice and the lines (`id` = output file name):
 
