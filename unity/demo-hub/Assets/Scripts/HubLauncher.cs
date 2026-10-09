@@ -12,8 +12,9 @@ namespace Hapbeat.DemoHub
 {
     /// <summary>
     /// Operator settings from the manage screen: which presets and demos the top screen offers, the
-    /// initial `haptics_ui` of every launch, the M5 staff waiting mode and the shared hands' look
-    /// (`hand_style` of every launch and the Hub's own hands). Stored as hub-settings.json.
+    /// initial `haptics_ui` of every launch, the M5 staff waiting mode, the shared hands' look
+    /// (`hand_style` of every launch and the Hub's own hands) and the narration volume of every launch.
+    /// Stored as hub-settings.json.
     /// </summary>
     public sealed class HubSettings
     {
@@ -27,8 +28,16 @@ namespace Hapbeat.DemoHub
         public DemoHandStyle HandStyle { get; set; } = DemoHandStyle.Ghost;
         /// <summary>Initial `recenter_ui` of every launch and the Hub's own 視線をリセット button (default hidden).</summary>
         public bool RecenterUi { get; set; }
+        /// <summary>`narration_volume` of every launch: 0..100 in steps of 10 (default 50, <see cref="DemoNarration"/>).</summary>
+        public int NarrationVolume { get; set; } = DemoSwitchSettings.DefaultNarrationVolume;
         /// <summary>Increased on every save of the settings (<see cref="HubPlanStore.SaveSettings"/>): manage screen, HUB_SETTINGS_SET, a preset's `visible`.</summary>
         public long Revision { get; set; }
+
+        /// <summary>
+        /// The ticket's `narration_volume`: omitted at the default 50, because a demo built before the narration volume
+        /// (package before 0.1.0-d22) rejects a ticket with an unknown field; any other value is sent.
+        /// </summary>
+        public int? TicketNarrationVolume => NarrationVolume == DemoSwitchSettings.DefaultNarrationVolume ? (int?)null : NarrationVolume;
 
         public string ToJson() => new JObject
         {
@@ -39,7 +48,8 @@ namespace Hapbeat.DemoHub
             ["haptics_ui"] = HapticsUi,
             ["staff_waiting"] = StaffWaiting,
             ["hand_style"] = DemoHandStyles.ToValue(HandStyle),
-            ["recenter_ui"] = RecenterUi
+            ["recenter_ui"] = RecenterUi,
+            ["narration_volume"] = NarrationVolume
         }.ToString(Formatting.Indented);
 
         public static bool TryFromJson(string json, out HubSettings settings)
@@ -54,7 +64,10 @@ namespace Hapbeat.DemoHub
                     HapticsUi = root.Value<bool?>("haptics_ui") ?? false,
                     StaffWaiting = root.Value<bool?>("staff_waiting") ?? false,
                     HandStyle = DemoHandStyles.TryParse(root.Value<string>("hand_style"), out var handStyle) ? handStyle : DemoHandStyle.Ghost,
-                    RecenterUi = root.Value<bool?>("recenter_ui") ?? false
+                    RecenterUi = root.Value<bool?>("recenter_ui") ?? false,
+                    // Files from before the narration volume, or an invalid value: the default.
+                    NarrationVolume = root["narration_volume"] is JValue volume && volume.Type == JTokenType.Integer
+                        && DemoNarration.IsValidVolume(volume.Value<long>()) ? volume.Value<int>() : DemoSwitchSettings.DefaultNarrationVolume
                 };
                 // Files from before the revision load as revision 0.
                 if (root["revision"] is JValue revision && revision.Type == JTokenType.Integer
@@ -297,7 +310,7 @@ namespace Hapbeat.DemoHub
         /// The session's ticket, as the top screen would start it: a preset's installed steps, one step of
         /// <see cref="DemoId"/> with the given options and retry on, or the external plan's <see cref="Steps"/> with their
         /// options and retry (unknown options and values become the descriptor defaults, with a warning); finish = this Hub,
-        /// and the manage screen's haptics UI, 視線をリセット and hand style. Null with <paramref name="error"/> (shown on the
+        /// and the manage screen's haptics UI, 視線をリセット, hand style and narration volume. Null with <paramref name="error"/> (shown on the
         /// top screen) when nothing installed can start, or when any external plan step is not installed.
         /// </summary>
         public DemoSessionTicket BuildTicket(IReadOnlyList<HubPlan> presets, IReadOnlyList<DemoSessionCatalogEntry> catalog,
@@ -340,7 +353,8 @@ namespace Hapbeat.DemoHub
                 ApplyOptions(plan.Steps[0], entry.Descriptor, Options);
                 error = HubText.StartNotInstalled + DemoId;
             }
-            var ticket = plan.BuildTicket(catalog, finish, sessionId, settings.HapticsUi, settings.HandStyle, settings.RecenterUi);
+            var ticket = plan.BuildTicket(catalog, finish, sessionId, settings.HapticsUi, settings.HandStyle, settings.RecenterUi,
+                settings.TicketNarrationVolume);
             if (ticket != null) error = null;
             return ticket;
         }

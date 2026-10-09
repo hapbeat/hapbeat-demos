@@ -71,12 +71,12 @@ sealed interface DemoSwitchMessage {
     data class HubSettingsGet(override val controllerId: String, val nonce: String, val from: Int, override val auth: String?) : DemoSwitchMessage
 
     /**
-     * One page of the Hub-wide settings: the four launch settings, this headset's device address ([player] / [group],
+     * One page of the Hub-wide settings: the five launch settings ([narrationVolume] 0..100 in steps of 10), this headset's device address ([player] / [group],
      * -1 = not specified) and the installed [demos] from [from] that fit in one datagram ([demoCount] in all).
      */
     data class HubSettings(
         override val controllerId: String, val nonce: String, val revision: Long,
-        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val staffWaiting: Boolean,
+        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val narrationVolume: Int, val staffWaiting: Boolean,
         val player: Int, val group: Int, val demoCount: Int, val from: Int, val demos: List<HubDemo>,
         override val auth: String?,
     ) : DemoSwitchMessage
@@ -84,7 +84,7 @@ sealed interface DemoSwitchMessage {
     /** Overwrites the Hub-wide settings; [visibleDemos] are the installed demos shown as tiles. PRESET_SET rules. */
     data class HubSettingsSet(
         override val controllerId: String, val seq: Long, val demoId: String,
-        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val staffWaiting: Boolean,
+        val hapticsUi: Boolean, val recenterUi: Boolean, val handStyle: String, val narrationVolume: Int, val staffWaiting: Boolean,
         val visibleDemos: List<String>, override val auth: String?,
     ) : DemoSwitchMessage
 
@@ -119,6 +119,10 @@ object DemoSwitchProtocol {
     val HUB_SETTINGS_FROM = 0..63
     const val MAX_DEVICE_MODEL_CODE_POINTS = 64
     val HAND_STYLES = setOf("ghost", "skin")
+    /** `narration_volume` (demo-session.md「ナレーションの音量」): 0..100 in steps of 10, 50 by default. */
+    val NARRATION_VOLUMES = 0..100 step 10
+    const val NARRATION_VOLUME_STEP = 10
+    const val DEFAULT_NARRATION_VOLUME = 50
     /** STATE `screen`: the completion panel / the Hub's finish screen is `completion`, the Hub's manage screen `manage`. */
     val SCREENS = setOf("main", "completion", "manage")
 
@@ -232,20 +236,22 @@ object DemoSwitchProtocol {
         field(this, "version", "1"); field(this, "type", "HUB_SETTINGS"); field(this, "controller_id", m.controllerId)
         field(this, "nonce", m.nonce); field(this, "revision", m.revision.toString())
         field(this, "haptics_ui", m.hapticsUi.toString()); field(this, "recenter_ui", m.recenterUi.toString())
-        field(this, "hand_style", m.handStyle); field(this, "staff_waiting", m.staffWaiting.toString())
+        field(this, "hand_style", m.handStyle); field(this, "narration_volume", m.narrationVolume.toString())
+        field(this, "staff_waiting", m.staffWaiting.toString())
         field(this, "player", m.player.toString()); field(this, "group", m.group.toString())
         field(this, "demo_count", m.demoCount.toString()); field(this, "from", m.from.toString())
         field(this, "demos", canonicalHubDemos(m.demos))
     }.toString()
 
     fun canonicalHubSettingsSet(
-        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, staffWaiting: Boolean,
-        visibleDemos: List<String>,
+        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, narrationVolume: Int,
+        staffWaiting: Boolean, visibleDemos: List<String>,
     ): String = StringBuilder(HEADER + "COMMAND\n").apply {
         field(this, "version", "1"); field(this, "type", "HUB_SETTINGS_SET"); field(this, "controller_id", controllerId)
         field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID)
         field(this, "haptics_ui", hapticsUi.toString()); field(this, "recenter_ui", recenterUi.toString())
-        field(this, "hand_style", handStyle); field(this, "staff_waiting", staffWaiting.toString())
+        field(this, "hand_style", handStyle); field(this, "narration_volume", narrationVolume.toString())
+        field(this, "staff_waiting", staffWaiting.toString())
         field(this, "visible_demos", visibleDemos.joinToString("|"))
     }.toString()
 
@@ -289,8 +295,8 @@ object DemoSwitchProtocol {
         is DemoSwitchMessage.HubSettingsGet -> canonicalHubSettingsGet(message.controllerId, message.nonce, message.from)
         is DemoSwitchMessage.HubSettings -> canonicalHubSettings(message)
         is DemoSwitchMessage.HubSettingsSet -> canonicalHubSettingsSet(
-            message.controllerId, message.seq, message.hapticsUi, message.recenterUi, message.handStyle, message.staffWaiting,
-            message.visibleDemos,
+            message.controllerId, message.seq, message.hapticsUi, message.recenterUi, message.handStyle, message.narrationVolume,
+            message.staffWaiting, message.visibleDemos,
         )
         is DemoSwitchMessage.HubStart -> canonicalHubStart(message.controllerId, message.seq, message.steps)
     }
@@ -372,15 +378,15 @@ object DemoSwitchProtocol {
     )
 
     fun buildHubSettingsSet(
-        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, staffWaiting: Boolean,
-        visibleDemos: List<String>, config: AuthConfig,
+        controllerId: String, seq: Long, hapticsUi: Boolean, recenterUi: Boolean, handStyle: String, narrationVolume: Int,
+        staffWaiting: Boolean, visibleDemos: List<String>, config: AuthConfig,
     ): String = withAuth(
         linkedMapOf(
             "version" to 1, "type" to "HUB_SETTINGS_SET", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
-            "haptics_ui" to hapticsUi, "recenter_ui" to recenterUi, "hand_style" to handStyle, "staff_waiting" to staffWaiting,
-            "visible_demos" to visibleDemos,
+            "haptics_ui" to hapticsUi, "recenter_ui" to recenterUi, "hand_style" to handStyle, "narration_volume" to narrationVolume,
+            "staff_waiting" to staffWaiting, "visible_demos" to visibleDemos,
         ),
-        config, canonicalHubSettingsSet(controllerId, seq, hapticsUi, recenterUi, handStyle, staffWaiting, visibleDemos),
+        config, canonicalHubSettingsSet(controllerId, seq, hapticsUi, recenterUi, handStyle, narrationVolume, staffWaiting, visibleDemos),
     )
 
     /** HUB_START with [steps] as given (callers pass validated steps); `options` / `retry` are written as in PRESET_SET. */
@@ -539,6 +545,7 @@ object DemoSwitchProtocol {
                     hapticsUi = boolField(obj, "haptics_ui") ?: return null,
                     recenterUi = boolField(obj, "recenter_ui") ?: return null,
                     handStyle = handStyleField(obj) ?: return null,
+                    narrationVolume = narrationVolumeField(obj) ?: return null,
                     staffWaiting = boolField(obj, "staff_waiting") ?: return null,
                     player = deviceAxisField(obj, "player") ?: return null,
                     group = deviceAxisField(obj, "group") ?: return null,
@@ -561,6 +568,7 @@ object DemoSwitchProtocol {
                     hapticsUi = boolField(obj, "haptics_ui") ?: return null,
                     recenterUi = boolField(obj, "recenter_ui") ?: return null,
                     handStyle = handStyleField(obj) ?: return null,
+                    narrationVolume = narrationVolumeField(obj) ?: return null,
                     staffWaiting = boolField(obj, "staff_waiting") ?: return null,
                     visibleDemos = ids,
                     auth = auth,
@@ -593,6 +601,9 @@ object DemoSwitchProtocol {
         value.codePointCount(0, value.length) in 1..MAX_DEVICE_MODEL_CODE_POINTS && value.none { it in '\u0000'..'\u001f' || it in '\u007f'..'\u009f' }
 
     private fun handStyleField(obj: Map<String, JsonValue>): String? = stringField(obj, "hand_style")?.takeIf { it in HAND_STYLES }
+
+    private fun narrationVolumeField(obj: Map<String, JsonValue>): Int? =
+        intField(obj, "narration_volume")?.takeIf { it in 0L..100L && it.toInt() in NARRATION_VOLUMES }?.toInt()
 
     private fun hubFromField(obj: Map<String, JsonValue>): Int? =
         intField(obj, "from")?.takeIf { it in HUB_SETTINGS_FROM.first..HUB_SETTINGS_FROM.last }?.toInt()
@@ -658,9 +669,9 @@ object DemoSwitchProtocol {
     private val STATE_OPTIONAL_FIELDS = setOf("device_model", "editor", "screen", "hand_style")
     private val HUB_SETTINGS_GET_FIELDS = DISCOVER_FIELDS + "from"
     private val HUB_SETTINGS_FIELDS = HUB_SETTINGS_GET_FIELDS + setOf(
-        "revision", "haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "player", "group", "demo_count", "demos",
+        "revision", "haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "player", "group", "demo_count", "demos",
     )
-    private val HUB_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "visible_demos")
+    private val HUB_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "visible_demos")
     private val HUB_START_FIELDS = SWITCH_FIELDS + "steps"
 
     /** Required fields present and no field other than those, [optional] ones and auth. */

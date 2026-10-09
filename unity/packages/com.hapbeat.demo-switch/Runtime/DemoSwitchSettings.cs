@@ -28,6 +28,8 @@ namespace Hapbeat.DemoSwitch
     {
         public const string ResourceName = "HapbeatDemoSwitchSettings";
         public const string HubDemoId = "demo_hub";
+        /// <summary>`narration_volume` when the session ticket has none (contracts: omitted = 50, <see cref="DemoNarration"/>).</summary>
+        public const int DefaultNarrationVolume = 50;
 
         [Header("Shared hub")]
         [Tooltip("Common return destination. Updating this package adds hub return without changing game scenes.")]

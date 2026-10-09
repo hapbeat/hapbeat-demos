@@ -25,7 +25,7 @@ namespace Hapbeat.DemoSwitch.Tests
             "{\"version\":1,\"type\":\"PRESET_START\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"preset\":1}";
 
         static string HubSettingsSet(long seq, string visible = "\"volley\"") =>
-            "{\"version\":1,\"type\":\"HUB_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"haptics_ui\":true,\"recenter_ui\":false,\"hand_style\":\"skin\",\"staff_waiting\":true,\"visible_demos\":[" + visible + "]}";
+            "{\"version\":1,\"type\":\"HUB_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"haptics_ui\":true,\"recenter_ui\":false,\"hand_style\":\"skin\",\"narration_volume\":70,\"staff_waiting\":true,\"visible_demos\":[" + visible + "]}";
 
         static string HubStart(long seq, string demoId = "volley") =>
             "{\"version\":1,\"type\":\"HUB_START\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"steps\":[{\"demo_id\":\"" + demoId + "\"},{\"demo_id\":\"fps\"}]}";
@@ -41,6 +41,7 @@ namespace Hapbeat.DemoSwitch.Tests
             public string StoredName;
             public string Screen = DemoSwitchScreens.Main;
             public IReadOnlyList<string> StoredVisible;
+            public int StoredNarrationVolume = -1;
             public DemoHandStyle? HandStyleSet;
             public Action<string> OnFailed;
             public bool IsBusy => Busy;
@@ -51,10 +52,10 @@ namespace Hapbeat.DemoSwitch.Tests
                 demoId = demoIds.FirstOrDefault(id => id != "volley" && id != "fps");
                 return demoId == null ? DemoSwitchPresetCheck.Ok : DemoSwitchPresetCheck.NotInstalled;
             }
-            public bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos, out string error)
+            public bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, int narrationVolume, bool staffWaiting, IReadOnlyList<string> visibleDemos, out string error)
             {
                 error = Stores ? null : "disk full";
-                if (Stores) { SettingsStored++; StoredVisible = visibleDemos; }
+                if (Stores) { SettingsStored++; StoredVisible = visibleDemos; StoredNarrationVolume = narrationVolume; }
                 return Stores;
             }
             public bool TrySetHandStyle(DemoHandStyle style, out string error)
@@ -331,7 +332,7 @@ namespace Hapbeat.DemoSwitch.Tests
 
         const string HubSettingsGet = "{\"version\":1,\"type\":\"HUB_SETTINGS_GET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"from\":0}";
         // hapbeat-contracts fixtures unsigned_hub_settings (FakeHost.ReadSettings returns its values).
-        const string HubSettingsExample = "{\"version\":1,\"type\":\"HUB_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"revision\":3,\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"ghost\",\"staff_waiting\":false,\"player\":1,\"group\":-1,\"demo_count\":2,\"from\":0,\"demos\":[{\"demo_id\":\"volley\",\"title\":\"Volley\",\"visible\":true},{\"demo_id\":\"fps\",\"title\":\"FPS\",\"visible\":false}]}";
+        const string HubSettingsExample = "{\"version\":1,\"type\":\"HUB_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"revision\":3,\"haptics_ui\":false,\"recenter_ui\":true,\"hand_style\":\"ghost\",\"narration_volume\":50,\"staff_waiting\":false,\"player\":1,\"group\":-1,\"demo_count\":2,\"from\":0,\"demos\":[{\"demo_id\":\"volley\",\"title\":\"Volley\",\"visible\":true},{\"demo_id\":\"fps\",\"title\":\"FPS\",\"visible\":false}]}";
 
         // Two steps (volley, then trex-encounter), the first one with もう一度.
         const string SessionTicket = "{\"version\":1,\"session_id\":\"0f3a9c2e7b1d4a56\",\"index\":0,\"haptics_ui\":false,\"steps\":[" +
@@ -411,6 +412,7 @@ namespace Hapbeat.DemoSwitch.Tests
             ExpectStatus("ACK", "ok");
             ExpectStatus("READY", "ok");
             Assert.That(host.StoredVisible, Is.EqualTo(new[] { "fps", "volley" }));
+            Assert.That(host.StoredNarrationVolume, Is.EqualTo(70));
             Send(HubSettingsSet(3));
             ExpectStatus("FAILED", "replay");
             Assert.That(host.SettingsStored, Is.EqualTo(1));

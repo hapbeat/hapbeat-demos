@@ -16,7 +16,7 @@ class HubSettingsAccessTest {
     private fun demos(vararg ids: String) = ids.map { HubDemo(it, it.uppercase(), visible = true) }
 
     private fun page(from: Int, demos: List<HubDemo>, count: Int, revision: Long = 3) = DemoSwitchMessage.HubSettings(
-        "remote-pixel", "0123456789abcdef", revision, false, true, "ghost", false, 1, -1, count, from, demos, null,
+        "remote-pixel", "0123456789abcdef", revision, false, true, "ghost", 50, false, 1, -1, count, from, demos, null,
     )
 
     private fun read(answer: (Int) -> DemoSwitchMessage.HubSettings?): Pair<HubSettingsRead, List<Int>> {
@@ -31,7 +31,7 @@ class HubSettingsAccessTest {
     fun onePage() {
         val (result, asked) = read { page(0, demos("volley", "fps"), 2) }
         assertEquals(
-            HubSettingsRead.Read(HubSettingsSnapshot(3, false, true, "ghost", false, 1, -1, demos("volley", "fps"))),
+            HubSettingsRead.Read(HubSettingsSnapshot(3, false, true, "ghost", 50, false, 1, -1, demos("volley", "fps"))),
             result,
         )
         assertEquals(listOf(0), asked)
@@ -78,11 +78,15 @@ class HubSettingsAccessTest {
 
     @Test
     fun visibleDemosAndProblems() {
-        val settings = HubSettingsSnapshot(3, false, true, "skin", false, 1, -1,
+        val settings = HubSettingsSnapshot(3, false, true, "skin", 60, false, 1, -1,
             listOf(HubDemo("volley", "Volley", true), HubDemo("fps", "FPS", false), HubDemo("boxing", "Boxing", true)))
         assertEquals(listOf("volley", "boxing"), HubSettingsAccess.visibleDemos(settings.demos))
         assertNull(HubSettingsAccess.problem(id, settings))
         assertTrue(HubSettingsAccess.problem(id, settings.copy(handStyle = "robot"))!!.startsWith("手の見た目"))
+        assertTrue(HubSettingsAccess.problem(id, settings.copy(narrationVolume = 55))!!.startsWith("ナレーション音量"))
+        assertTrue(HubSettingsAccess.problem(id, settings.copy(narrationVolume = 110))!!.startsWith("ナレーション音量"))
+        assertNull(HubSettingsAccess.problem(id, settings.copy(narrationVolume = 0)))
+        assertNull(HubSettingsAccess.problem(id, settings.copy(narrationVolume = 100)))
         // 64 visible demos with long IDs do not fit in one datagram.
         val many = settings.copy(demos = (1..64).map { HubDemo("demo-${"x".repeat(50)}-$it", "D", true) })
         assertTrue(HubSettingsAccess.worstCaseBytes(id, many) > DemoSwitchProtocol.MAX_PAYLOAD_BYTES)

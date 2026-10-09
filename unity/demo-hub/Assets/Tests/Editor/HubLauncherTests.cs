@@ -59,7 +59,7 @@ namespace Hapbeat.DemoHub.Tests
         public void TileStartsAOneStepSessionWithDescriptorDefaults()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost, false);
+            var ticket = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost, false, null);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.True);
@@ -72,7 +72,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley ブロック 7点先取"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
             Assert.That(parsed.RecenterUi, Is.False);
-            var shown = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true);
+            var shown = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true, null);
             Assert.That(DemoSessionTicket.TryParse(shown.ToJson(), out parsed, out error), Is.True, error);
             Assert.That(parsed.RecenterUi, Is.True);
         }
@@ -81,11 +81,11 @@ namespace Hapbeat.DemoHub.Tests
         public void FinishedTileReturnsToTopAndFinishedPlanShowsFinishScreen()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var single = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false);
+            var single = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null);
             var plan = new HubPlan();
             plan.Add(_volley);
             plan.Add(_boxing);
-            var multi = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false);
+            var multi = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null);
             Assert.That(DemoHubController.InitialScreen(null), Is.EqualTo(DemoHubController.HubScreen.Top));
             Assert.That(DemoHubController.InitialScreen(single.WithIndex(1, false)), Is.EqualTo(DemoHubController.HubScreen.Top));
             Assert.That(DemoHubController.InitialScreen(multi.WithIndex(2, false)), Is.EqualTo(DemoHubController.HubScreen.Finished));
@@ -126,6 +126,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(store.Exists(HubPlanStore.LegacyLastSlot), Is.False);
             Assert.That(first.HapticsUi || first.StaffWaiting || first.RecenterUi || first.VisibleDemos.Count > 0, Is.False, "Defaults are off.");
             Assert.That(first.HandStyle, Is.EqualTo(DemoHandStyle.Ghost), "Ghost hands by default.");
+            Assert.That(first.NarrationVolume, Is.EqualTo(50), "Narration volume 50 by default.");
 
             first.VisiblePresets.Add(3);
             first.VisibleDemos.Add("volley");
@@ -133,6 +134,7 @@ namespace Hapbeat.DemoHub.Tests
             first.StaffWaiting = true;
             first.RecenterUi = true;
             first.HandStyle = DemoHandStyle.Skin;
+            first.NarrationVolume = 80;
             Assert.That(store.SaveSettings(first), Is.True);
             // A later legacy file is not migrated again.
             store.Save(new HubPlan(), HubPlanStore.LegacyLastSlot);
@@ -141,8 +143,15 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(loaded.VisibleDemos, Is.EquivalentTo(new[] { "volley" }));
             Assert.That(loaded.HapticsUi && loaded.StaffWaiting && loaded.RecenterUi, Is.True);
             Assert.That(loaded.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(loaded.NarrationVolume, Is.EqualTo(80));
             Assert.That(HubSettings.TryFromJson("{\"version\":1,\"hand_style\":\"glove\"}", out var unknown), Is.True);
             Assert.That(unknown.HandStyle, Is.EqualTo(DemoHandStyle.Ghost), "Unknown look: the default.");
+            Assert.That(unknown.NarrationVolume, Is.EqualTo(50), "A file from before the narration volume: 50.");
+            foreach (var bad in new[] { "55", "110", "-10", "\"60\"", "60.5" })
+            {
+                Assert.That(HubSettings.TryFromJson("{\"version\":1,\"narration_volume\":" + bad + "}", out var invalid), Is.True, bad);
+                Assert.That(invalid.NarrationVolume, Is.EqualTo(50), bad);
+            }
             Assert.That(store.LoadPreset(1).Steps.Count, Is.EqualTo(1));
 
             var fresh = new HubPlanStore(Path.Combine(_directory, "fresh"));
@@ -537,8 +546,62 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(store.LoadSettings().HandStyle, Is.EqualTo(DemoHandStyle.Skin), "Saved at once.");
 
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle, false);
+                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle, false, null);
                 Assert.That(ticket.ToJson(), Does.Contain("\"hand_style\":\"skin\""));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void NarrationVolumeIsSteppedSavedWarnedAndSentOnlyWhenNotTheDefault()
+        {
+            var go = new GameObject("hub test");
+            try
+            {
+                var store = new HubPlanStore(_directory);
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                controller.Show(DemoHubController.HubScreen.Manage);
+                var size = controller.Panel.Size;
+                Assert.That(Texts(controller), Has.Member("ナレーション音量：50%"));
+                Assert.That(Texts(controller), Has.No.Member(HubText.NarrationVolumeNote), "No note at the default.");
+                var hand = Buttons(controller).Single(b => b.Label == HubText.HandStyleGhost);
+                var up = Buttons(controller).Single(b => b.Label == HubText.NarrationUp);
+                Assert.That(up.Rect.anchoredPosition.y, Is.LessThan(hand.Rect.anchoredPosition.y), "Below the footer row.");
+                var upPosition = up.Rect.anchoredPosition;
+                AssertInsideWithoutOverlap(controller);
+
+                Press(up);
+                Assert.That(controller.Settings.NarrationVolume, Is.EqualTo(60));
+                Assert.That(store.LoadSettings().NarrationVolume, Is.EqualTo(60), "Saved at once.");
+                Assert.That(Texts(controller), Has.Member("ナレーション音量：60%"));
+                Assert.That(Texts(controller), Has.Member(HubText.NarrationVolumeNote), "Warned while not 50.");
+                Assert.That(controller.Panel.Size, Is.EqualTo(size), "The note line is reserved: no layout shift.");
+                Assert.That(Buttons(controller).Single(b => b.Label == HubText.NarrationUp).Rect.anchoredPosition, Is.EqualTo(upPosition));
+                AssertInsideWithoutOverlap(controller);
+
+                var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
+                    controller.Settings.TicketNarrationVolume);
+                Assert.That(ticket.ToJson(), Does.Contain("\"narration_volume\":60"));
+
+                for (var i = 0; i < 10; i++) Press(Buttons(controller).Single(b => b.Label == HubText.NarrationDown));
+                Assert.That(controller.Settings.NarrationVolume, Is.EqualTo(0), "Stops at 0.");
+                Assert.That(Buttons(controller).Single(b => b.Label == HubText.NarrationDown).Interactable, Is.False);
+                for (var i = 0; i < 12; i++) Press(Buttons(controller).Single(b => b.Label == HubText.NarrationUp));
+                Assert.That(controller.Settings.NarrationVolume, Is.EqualTo(100), "Stops at 100.");
+                Assert.That(Buttons(controller).Single(b => b.Label == HubText.NarrationUp).Interactable, Is.False);
+                for (var i = 0; i < 5; i++) Press(Buttons(controller).Single(b => b.Label == HubText.NarrationDown));
+                Assert.That(controller.Settings.NarrationVolume, Is.EqualTo(50));
+                Assert.That(Texts(controller), Has.No.Member(HubText.NarrationVolumeNote));
+                Assert.That(controller.Settings.TicketNarrationVolume, Is.Null, "50 is omitted: demos older than the narration volume accept the ticket.");
+                ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
+                    controller.Settings.TicketNarrationVolume);
+                Assert.That(ticket.ToJson(), Does.Not.Contain("narration_volume"));
+
+                controller.SelectTab(DemoHubController.TilesTab);
+                Assert.That(controller.Panel.Size.x, Is.EqualTo(size.x), "Same width on every tab.");
+                AssertInsideWithoutOverlap(controller);
             }
             finally { Object.DestroyImmediate(go); }
         }
@@ -780,7 +843,7 @@ namespace Hapbeat.DemoHub.Tests
         public void ExternalStartBuildsTheTicketWithManageSettings()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var settings = new HubSettings { HapticsUi = true, RecenterUi = true, HandStyle = DemoHandStyle.Skin };
+            var settings = new HubSettings { HapticsUi = true, RecenterUi = true, HandStyle = DemoHandStyle.Skin, NarrationVolume = 30 };
             var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
             presets[0].Add(_volley);
             presets[0].Add(_trex);
@@ -792,6 +855,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(ticket.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
             Assert.That(ticket.HapticsUi && ticket.RecenterUi, Is.True);
             Assert.That(ticket.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+            Assert.That(ticket.NarrationVolume, Is.EqualTo(30), "The manage screen's narration volume.");
 
             Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":2}", out request, out _), Is.True);
             Assert.That(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error), Is.Null);
@@ -985,17 +1049,19 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(offending, Is.EqualTo("fps"));
                 Assert.That(controller.CheckVisibleDemos(new[] { "boxing" }, out offending), Is.EqualTo(DemoSwitchPresetCheck.Ok));
 
-                Assert.That(controller.TryStoreSettings(true, true, DemoHandStyle.Skin, false, new[] { "boxing" }, out var error), Is.True, error);
+                Assert.That(controller.TryStoreSettings(true, true, DemoHandStyle.Skin, 70, false, new[] { "boxing" }, out var error), Is.True, error);
                 Assert.That(controller.Settings.VisibleDemos, Is.EquivalentTo(new[] { "boxing", "not-installed" }), "Installed tiles as sent; others kept.");
                 Assert.That(controller.Settings.Revision, Is.EqualTo(revision + 1));
                 Assert.That(DemoSession.RecenterUiVisible, Is.True, "The Hub's own button follows at once.");
                 var saved = store.LoadSettings();
                 Assert.That(saved.HapticsUi && saved.RecenterUi, Is.True);
                 Assert.That(saved.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
+                Assert.That(saved.NarrationVolume, Is.EqualTo(70));
+                Assert.That(controller.ReadSettings().NarrationVolume, Is.EqualTo(70));
                 Assert.That(saved.Revision, Is.EqualTo(revision + 1));
                 Assert.That(Buttons(controller).Select(b => b.Label), Has.Member("Boxing"), "The top screen shows the new tile.");
 
-                Assert.That(controller.TryStoreSettings(false, false, DemoHandStyle.Ghost, true, new string[0], out error), Is.True, error);
+                Assert.That(controller.TryStoreSettings(false, false, DemoHandStyle.Ghost, 50, true, new string[0], out error), Is.True, error);
                 Assert.That(Texts(controller), Has.Member(HubText.StaffWaitingNote), "The staff waiting screen is shown at once.");
                 Assert.That(controller.Settings.VisibleDemos, Is.EquivalentTo(new[] { "not-installed" }));
 

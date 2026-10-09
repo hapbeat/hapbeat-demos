@@ -256,17 +256,17 @@ namespace Hapbeat.DemoSwitch
 
         public string ControllerId { get; }
         public string Nonce { get; }
-        /// <summary>Revision, the four values and the device address; `demo_count` is its demo count.</summary>
+        /// <summary>Revision, the five values and the device address; `demo_count` is its demo count.</summary>
         public DemoSwitchHubSettings Settings { get; }
         public int From { get; }
         public IReadOnlyList<DemoSwitchHubDemo> Demos { get; }
     }
 
-    /// <summary>HUB_SETTINGS_SET: the four Hub-wide values and the installed demos shown as tiles; follows the CONTROL rules.</summary>
+    /// <summary>HUB_SETTINGS_SET: the five Hub-wide values and the installed demos shown as tiles; follows the CONTROL rules.</summary>
     internal sealed class DemoSwitchHubSettingsCommand
     {
         public DemoSwitchHubSettingsCommand(string controllerId, long sequence, string demoId, bool hapticsUi, bool recenterUi,
-            DemoHandStyle handStyle, bool staffWaiting, IReadOnlyList<string> visibleDemos, string auth)
+            DemoHandStyle handStyle, int narrationVolume, bool staffWaiting, IReadOnlyList<string> visibleDemos, string auth)
         {
             ControllerId = controllerId;
             Sequence = sequence;
@@ -274,6 +274,7 @@ namespace Hapbeat.DemoSwitch
             HapticsUi = hapticsUi;
             RecenterUi = recenterUi;
             HandStyle = handStyle;
+            NarrationVolume = narrationVolume;
             StaffWaiting = staffWaiting;
             VisibleDemos = visibleDemos;
             Auth = auth ?? string.Empty;
@@ -285,6 +286,8 @@ namespace Hapbeat.DemoSwitch
         public bool HapticsUi { get; }
         public bool RecenterUi { get; }
         public DemoHandStyle HandStyle { get; }
+        /// <summary>0..100 in steps of 10.</summary>
+        public int NarrationVolume { get; }
         public bool StaffWaiting { get; }
         /// <summary>Distinct demo IDs in the order sent.</summary>
         public IReadOnlyList<string> VisibleDemos { get; }
@@ -477,7 +480,7 @@ namespace Hapbeat.DemoSwitch
         private static readonly string[] HubSettingsGetFields = { "version", "type", "controller_id", "nonce", "from", "auth" };
         private static readonly string[] HubSettingsSetFields =
         {
-            "version", "type", "controller_id", "seq", "demo_id", "haptics_ui", "recenter_ui", "hand_style", "staff_waiting", "visible_demos", "auth"
+            "version", "type", "controller_id", "seq", "demo_id", "haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "visible_demos", "auth"
         };
         private static readonly string[] HubStartFields = { "version", "type", "controller_id", "seq", "demo_id", "steps", "auth" };
         private static readonly string[] PresetGetFields = { "version", "type", "controller_id", "nonce", "preset", "from", "auth" };
@@ -1048,6 +1051,7 @@ namespace Hapbeat.DemoSwitch
                     !TryString(value, "demo_id", out var demoId) || demoId != DemoSwitchSettings.HubDemoId ||
                     !TryBoolean(value, "haptics_ui", out var hapticsUi) || !TryBoolean(value, "recenter_ui", out var recenterUi) ||
                     !TryString(value, "hand_style", out var handStyleText) || !DemoHandStyles.TryParse(handStyleText, out var handStyle) ||
+                    !TryInteger(value, "narration_volume", out var narrationVolume) || !DemoNarration.IsValidVolume(narrationVolume) ||
                     !TryBoolean(value, "staff_waiting", out var staffWaiting) ||
                     !(value["visible_demos"] is JArray demoArray) || demoArray.Count > DemoSwitchHub.MaxDemos)
                     return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET is incomplete or invalid.");
@@ -1069,7 +1073,7 @@ namespace Hapbeat.DemoSwitch
                     if (!IsLowerHexMac(auth)) return new HubSettingsCommandParseResult(null, "HUB_SETTINGS_SET auth is invalid.");
                 }
                 return new HubSettingsCommandParseResult(new DemoSwitchHubSettingsCommand(controllerId, sequence, demoId, hapticsUi, recenterUi,
-                    handStyle, staffWaiting, visibleDemos, auth), null);
+                    handStyle, (int)narrationVolume, staffWaiting, visibleDemos, auth), null);
             }
             catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
             {
@@ -1128,6 +1132,7 @@ namespace Hapbeat.DemoSwitch
         {
             if (request == null || settings == null || !IsIdentifier(request.ControllerId) || !IsNonce(request.Nonce) ||
                 request.From < 0 || request.From >= DemoSwitchHub.MaxDemos || settings.Revision < 0 || settings.Revision > MaxSequence ||
+                !DemoNarration.IsValidVolume(settings.NarrationVolume) ||
                 !IsAddressAxis(settings.Player) || !IsAddressAxis(settings.Group) || settings.Demos.Count > DemoSwitchHub.MaxDemos ||
                 !settings.Demos.All(d => d != null && IsIdentifier(d.DemoId) && DemoSwitchHub.IsValidTitle(d.Title)))
                 throw new ArgumentException("HUB_SETTINGS fields do not satisfy the Demo Switch contract.", nameof(settings));
@@ -1163,6 +1168,7 @@ namespace Hapbeat.DemoSwitch
                 ["haptics_ui"] = settings.HapticsUi,
                 ["recenter_ui"] = settings.RecenterUi,
                 ["hand_style"] = DemoHandStyles.ToValue(settings.HandStyle),
+                ["narration_volume"] = settings.NarrationVolume,
                 ["staff_waiting"] = settings.StaffWaiting,
                 ["player"] = settings.Player,
                 ["group"] = settings.Group,
@@ -1290,7 +1296,9 @@ namespace Hapbeat.DemoSwitch
                 Field("version", "1") + Field("type", "HUB_SETTINGS") + Field("controller_id", page.ControllerId) +
                 Field("nonce", page.Nonce) + Field("revision", settings.Revision.ToString(CultureInfo.InvariantCulture)) +
                 Field("haptics_ui", BooleanText(settings.HapticsUi)) + Field("recenter_ui", BooleanText(settings.RecenterUi)) +
-                Field("hand_style", DemoHandStyles.ToValue(settings.HandStyle)) + Field("staff_waiting", BooleanText(settings.StaffWaiting)) +
+                Field("hand_style", DemoHandStyles.ToValue(settings.HandStyle)) +
+                Field("narration_volume", settings.NarrationVolume.ToString(CultureInfo.InvariantCulture)) +
+                Field("staff_waiting", BooleanText(settings.StaffWaiting)) +
                 Field("player", settings.Player.ToString(CultureInfo.InvariantCulture)) +
                 Field("group", settings.Group.ToString(CultureInfo.InvariantCulture)) +
                 Field("demo_count", settings.Demos.Count.ToString(CultureInfo.InvariantCulture)) +
@@ -1303,7 +1311,9 @@ namespace Hapbeat.DemoSwitch
             Field("version", "1") + Field("type", "HUB_SETTINGS_SET") + Field("controller_id", command.ControllerId) +
             Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", command.DemoId) +
             Field("haptics_ui", BooleanText(command.HapticsUi)) + Field("recenter_ui", BooleanText(command.RecenterUi)) +
-            Field("hand_style", DemoHandStyles.ToValue(command.HandStyle)) + Field("staff_waiting", BooleanText(command.StaffWaiting)) +
+            Field("hand_style", DemoHandStyles.ToValue(command.HandStyle)) +
+            Field("narration_volume", command.NarrationVolume.ToString(CultureInfo.InvariantCulture)) +
+            Field("staff_waiting", BooleanText(command.StaffWaiting)) +
             Field("visible_demos", string.Join("|", command.VisibleDemos));
 
         public static string Canonicalize(DemoSwitchHubStartCommand command) =>
