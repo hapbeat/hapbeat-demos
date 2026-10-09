@@ -25,7 +25,7 @@ Unsigned switching is enabled to match the existing exhibition setup. Use an iso
 
 ## Demo Session (self-paced plan)
 
-The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared package's `DemoSession` API. Version 0.1.0-d14 (versionCode 14; 触覚テスト and CONTROL `haptics_test`; needs package 0.1.0-d20 and the Hapbeat SDK).
+The hub follows `hapbeat-contracts/specs/demo-session.md` using the shared package's `DemoSession` API. Version 0.1.0-d15 (versionCode 15; the receiver retries the UDP 7710 bind while in front instead of giving up after 5 s, package 0.1.0-d21; 0.1.0-d14 added 触覚テスト and CONTROL `haptics_test`; needs the Hapbeat SDK).
 
 - **Catalog**: PackageManager launcher activities (`MAIN`/`LAUNCHER`; the build adds the matching `<queries>` element) whose APK assets contain a valid `hapbeat-demo-session.json`. Package and activity come from PackageManager, never from the descriptor. In the Editor a dummy catalog (Volley, Boxing, T-Rex Encounter) is used; tests and tools can set `HubCatalog.Override`.
 - **Names**: every list, tile and step title uses the application's PackageManager label (the name in Quest's library, e.g. Volley, T-Rex Encounter; the descriptor's Japanese title only when the label is missing). A step title adds the active option values ("Volley ブロック 3点先取", at most 40 characters). The descriptor's optional `minutes` is not shown anywhere (no measured basis).

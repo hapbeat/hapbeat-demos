@@ -175,6 +175,13 @@ object DemoCatalog {
     fun launchCommand(app: DemoApp): String =
         "c=\$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER " +
             "${app.packageName} | tail -n 1) && am start -n \"\$c\""
+
+    /**
+     * Shell command that force-stops [app] (and the other running demos) and starts it again: for a receiver that gave
+     * up its UDP 7710 bind retry (before the retry continued in the foreground) and stays silent in front.
+     */
+    fun restartCommand(app: DemoApp): String =
+        "am force-stop ${app.packageName}; " + stopOtherDemosCommand(app.packageName) + launchCommand(app)
 }
 
 /** One CONTROL button: action + scene_id (empty except for scene). [demoId]: only for that foreground demo. */

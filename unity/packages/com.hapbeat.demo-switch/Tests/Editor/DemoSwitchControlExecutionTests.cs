@@ -123,22 +123,56 @@ namespace Hapbeat.DemoSwitch.Tests
                     catch(Exception exception){return exception.Message;}
                 }
                 Assert.That(Bind(),Is.Not.Null,"The port is still held by the previous socket.");
-                var retry=DemoSwitchRuntime.RetryBind(Bind,(error,count)=>{result=error;retries=count;});
+                var waiting=0;
+                var retry=DemoSwitchRuntime.RetryBind(Bind,()=>true,_=>waiting++,(error,count)=>{result=error;retries=count;});
                 while(retry.MoveNext())Assert.That(retry.Current,Is.InstanceOf<WaitForSecondsRealtime>());
                 Assert.That(result,Is.Null);
                 Assert.That(retries,Is.EqualTo(2));
+                Assert.That(waiting,Is.Zero);
                 Assert.That(transport.IsRunning,Is.True);
-
-                var failures=0;
-                var giveUp=DemoSwitchRuntime.RetryBind(()=>{failures++;return "in use";},(error,count)=>{result=error;retries=count;});
-                var waits=0;
-                while(giveUp.MoveNext())waits++;
-                Assert.That(failures,Is.EqualTo(DemoSwitchRuntime.BindRetryAttempts));
-                Assert.That(waits*DemoSwitchRuntime.BindRetryIntervalSeconds,Is.EqualTo(5f).Within(0.001f));
-                Assert.That(result,Is.EqualTo("in use"));
-                Assert.That(retries,Is.EqualTo(DemoSwitchRuntime.BindRetryAttempts));
             }
             finally{blocker.Dispose();}
+        }
+
+        [Test]
+        public void BindRetryDoesNotGiveUpInTheForegroundAndWarnsOnceAfterFiveSeconds()
+        {
+            var failures=0;var waiting=new System.Collections.Generic.List<string>();var finished=false;
+            var retry=DemoSwitchRuntime.RetryBind(()=>{failures++;return "in use";},()=>true,waiting.Add,(error,count)=>finished=true);
+            var waits=0;
+            // 60 s: far past the old 5 s limit.
+            while(waits<60)
+            {
+                Assert.That(retry.MoveNext(),Is.True,"The retry must keep running while in the foreground.");
+                Assert.That(retry.Current,Is.InstanceOf<WaitForSecondsRealtime>());
+                waits++;
+                var expectedWarnings=(waits-1)*DemoSwitchRuntime.BindRetryIntervalSeconds>=DemoSwitchRuntime.BindWaitingWarningSeconds?1:0;
+                Assert.That(waiting.Count,Is.EqualTo(expectedWarnings),"after "+waits+" waits");
+            }
+            Assert.That(failures,Is.EqualTo(59));
+            Assert.That(waiting,Is.EqualTo(new[]{"in use"}));
+            Assert.That(finished,Is.False);
+        }
+
+        [Test]
+        public void BindRetryStopsOutOfTheForeground()
+        {
+            var foreground=true;var failures=0;var waiting=0;string result="unset";var retries=-1;
+            var retry=DemoSwitchRuntime.RetryBind(()=>{failures++;return "in use";},()=>foreground,_=>waiting++,(error,count)=>{result=error;retries=count;});
+            Assert.That(retry.MoveNext(),Is.True);
+            Assert.That(retry.MoveNext(),Is.True);
+            Assert.That(failures,Is.EqualTo(1));
+            foreground=false;
+            Assert.That(retry.MoveNext(),Is.False,"Out of the foreground the retry ends without another bind.");
+            Assert.That(failures,Is.EqualTo(1));
+            Assert.That(result,Is.EqualTo("in use"));
+            Assert.That(retries,Is.EqualTo(1));
+            Assert.That(waiting,Is.Zero);
+
+            var notStarted=DemoSwitchRuntime.RetryBind(()=>{failures++;return "in use";},()=>false,_=>waiting++,(error,count)=>{result=error;retries=count;});
+            Assert.That(notStarted.MoveNext(),Is.False);
+            Assert.That(failures,Is.EqualTo(1));
+            Assert.That(retries,Is.Zero);
         }
     }
 }

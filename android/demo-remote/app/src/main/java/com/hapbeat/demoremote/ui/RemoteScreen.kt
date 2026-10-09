@@ -67,6 +67,7 @@ import com.hapbeat.demoremote.ControlCatalog
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
+import com.hapbeat.demoremote.PortAction
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.HubDemo
@@ -276,6 +277,35 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                     fontWeight = if (usbFix) FontWeight.Bold else null,
                     maxLines = 1,
                 )
+            }
+        }
+        // Why the known demo in front does not answer Demo Switch (adb diagnosis) and its fix: fixed two-line area.
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            val (text, error) = vm.portStatus
+            Text(
+                text.ifEmpty { " " },
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // Fixed width whether or not a button is offered, so the text does not move.
+            Box(Modifier.width(128.dp)) {
+                if (vm.portAction != PortAction.NONE) {
+                    TextButton(
+                        onClick = { if (vm.portAction == PortAction.STOP_BACKGROUND) vm.stopBackgroundDemos() else vm.restartFrontApp() },
+                        enabled = !vm.portActionRunning && quest.adb == AdbState.CONNECTED,
+                        modifier = Modifier.width(128.dp),
+                    ) {
+                        Text(
+                            if (vm.portAction == PortAction.STOP_BACKGROUND) "裏のデモを止める" else "前面のアプリを再起動",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                        )
+                    }
+                }
             }
         }
     }

@@ -111,6 +111,9 @@ data class QuestState(
 
 enum class LogState { SENT, ACK, READY, FAILED, NO_RESPONSE, INFO, ERROR }
 
+/** Button of the selected HMD's Demo Switch diagnosis area ([RemoteViewModel.portStatus]). */
+enum class PortAction { NONE, STOP_BACKGROUND, RESTART_FRONT }
+
 data class LogEntry(
     val id: Long,
     val time: String,
@@ -233,6 +236,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var sessionStarting by mutableStateOf(false); private set
     /** A user-started Wi-Fi adb connect to this IP gets no answer: the "Quest may be asleep" dialog is up. */
     var sleepHintIp by mutableStateOf<String?>(null); private set
+    /**
+     * Fixed area under the selected HMD's status: why its known demo in front (adb) does not answer Demo Switch, or the
+     * progress of [stopBackgroundDemos] / [restartFrontApp] (text, isError); "" when there is nothing to say.
+     */
+    var portStatus by mutableStateOf("" to false); private set
+    /** The button offered beside [portStatus]. */
+    var portAction by mutableStateOf(PortAction.NONE); private set
+    var portActionRunning by mutableStateOf(false); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -307,6 +318,13 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var autoAdbFailedIp: String? = null
     /** HMD #n given to each serial in this run, so a headset that leaves and comes back keeps its number. */
     private val serialLabels = mutableMapOf<String, String>()
+    /**
+     * The selected HMD already diagnosed in its current period without a Demo Switch answer ([maybeDiagnosePort]): once
+     * per period. A new period starts when it answers, on "再探索", a new selection, an adb connect or an adb start.
+     */
+    private var portDiagnosedIp: String? = null
+    /** The known demo in front found by the last diagnosis (the target of the diagnosis area's buttons). */
+    private var portFront: DemoApp? = null
 
     // ---- lifecycle ----------------------------------------------------------------------
 
@@ -442,6 +460,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         hubPresetStatus = ""
         hubSettingsStatus = ""
         hubFrontIp = null
+        resetPortDiagnosis(force = true)
         followHubFront()
     }
 
@@ -541,6 +560,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rediscover() {
         followTriedHosts.clear()
+        resetPortDiagnosis()
         viewModelScope.launch { runDiscoveryRound() }
         scanAdbHosts()
     }
@@ -643,6 +663,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             pruneUnseen()
             selectRememberedIfSeen()
             followHubFront()
+            // No answer in two rounds in a row from the selected HMD: find out why when a known demo is in front (adb).
+            selectedQuest?.takeIf { it.respondedLastRound == false && it.respondedPrevRound == false }?.let { maybeDiagnosePort(it.ip) }
         } finally {
             activeNonces.remove(broadcastNonce)
             activeNonces.remove(unicastNonce)
@@ -673,6 +695,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             quests.add(QuestState(source, unconfirmedLabel(source), addedAtMs = SystemClock.elapsedRealtime()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
+        if (source == selectedIp) onSelectedAnswered()
         // Once per responder: its STATE tells the device model and whether it is an editor (the selected one is asked anyway).
         if (describedIps.add(source)) queryState(source)
     }
@@ -730,6 +753,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                         deviceModel = message.deviceModel ?: q.deviceModel, editor = message.editor ?: q.editor,
                     )
                 }
+                if (source == selectedIp) onSelectedAnswered()
                 followHubFront()
                 stateWaiters.remove(message.nonce)?.complete(message)
             }
@@ -853,6 +877,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             if (current != null) break
         }
         fileLog("Hub の確認: ${quest.ip} から STATE なし、HERE ${current ?: "なし"}")
+        if (current == null) maybeDiagnosePort(quest.ip)
         return HubPresets.hubFrontProblem(null, current ?: "", hubSettings[quest.ip]?.demos)
     }
 
@@ -887,6 +912,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             val current = probeForegroundDemo(quest.ip, config)
             if (current == null) {
                 refused("応答なし（デモが起動していない／スリープ／届いていない）")
+                maybeDiagnosePort(quest.ip)
                 return@launch
             }
             // A demo answers DISCOVER even when it is not in the foreground, but then refuses CONTROL.
@@ -1164,6 +1190,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         when (result) {
             AdbConnectResult.Connected -> {
                 if (autoAdbFailedIp == ip) autoAdbFailedIp = null
+                if (ip == selectedIp) resetPortDiagnosis()
                 updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
                 setAdbMessage("")
                 refreshAdbInfo(ip)
@@ -1796,6 +1823,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun startThroughHub(title: String, command: String) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
+        resetPortDiagnosis()
         viewModelScope.launch {
             val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
             val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(DemoCatalog.HUB_PACKAGE) + command)
@@ -1819,6 +1847,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun launchApp(app: DemoApp) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
+        resetPortDiagnosis()
         viewModelScope.launch {
             val logId = addLog(quest.label, "起動 ${app.label}（adb）", null, LogState.SENT)
             val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(app.packageName) + DemoCatalog.launchCommand(app))
@@ -1836,6 +1865,137 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 runDiscoveryRound()
             }
         }
+    }
+
+    // ---- Demo Switch does not answer: adb diagnosis (demo-switch-control.md「Transport and lifecycle」) ----
+
+    /**
+     * Diagnoses the selected [ip] once per period without a Demo Switch answer ([portDiagnosedIp]), when adb is
+     * connected. Only reads (dumpsys / pidof / logcat); nothing is stopped without the user's button.
+     */
+    private fun maybeDiagnosePort(ip: String) {
+        if (!foreground || ip != selectedIp || portDiagnosedIp == ip || portActionRunning) return
+        if (selectedQuest?.adb != AdbState.CONNECTED) return
+        portDiagnosedIp = ip
+        viewModelScope.launch { diagnosePort(ip) }
+    }
+
+    /**
+     * The front app (topResumedActivity) is a known demo (Hub included) that does not answer: lists the other known demos
+     * still running and reads the front app's last Demo Switch log lines, then shows the cause ([PortDiagnosis.classify]).
+     */
+    private suspend fun diagnosePort(ip: String) {
+        val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+        val top = adbShell(ip, PortDiagnosis.TOP_ACTIVITY_COMMAND)?.output ?: return
+        val front = PortDiagnosis.frontDemo(top)
+        if (front == null) {
+            fileLog("$label $ip Demo Switch 応答なし: 前面は既知のデモではありません（${top.trim().take(160)}）")
+            return
+        }
+        if (portDiagnosedIp != ip) return
+        portStatus = "${front.label} が Demo Switch に応答しません。原因を調べています…" to false
+        val running = adbShell(ip, PortDiagnosis.runningOthersCommand(front.packageName))?.output
+            ?.let { PortDiagnosis.parseRunning(it, front.packageName) }
+        val log = adbShell(ip, PortDiagnosis.logCommand(front.packageName))?.output
+        // It answered, or another HMD was selected, in the meantime: nothing to show.
+        if (portDiagnosedIp != ip || ip != selectedIp) return
+        if (running == null || log == null) {
+            portStatus = "" to false
+            return
+        }
+        val lines = PortDiagnosis.relevantLines(log)
+        val cause = PortDiagnosis.classify(lines, running)
+        portFront = front
+        portStatus = "${front.label} が応答しません: ${PortDiagnosis.text(cause)}" to true
+        portAction = if (cause is PortCause.BackgroundDemo) PortAction.STOP_BACKGROUND else PortAction.NONE
+        fileLog("$label $ip Demo Switch 診断: 前面 ${front.packageName}、裏 ${running.joinToString(" ") { it.packageName }.ifEmpty { "なし" }}" +
+            "、ログ ${lines.takeLast(PortDiagnosis.TAIL_LINES).joinToString(" | ").ifEmpty { "なし" }}")
+    }
+
+    /** The selected HMD answered Demo Switch: the diagnosis no longer applies (a running button keeps its own text). */
+    private fun onSelectedAnswered() {
+        if (portDiagnosedIp != null || portStatus.first.isNotEmpty()) resetPortDiagnosis()
+    }
+
+    /** Starts a new diagnosis period; [force] also while a button runs (another HMD selected). */
+    private fun resetPortDiagnosis(force: Boolean = false) {
+        if (portActionRunning && !force) return
+        portDiagnosedIp = null
+        portFront = null
+        portStatus = "" to false
+        portAction = PortAction.NONE
+    }
+
+    /**
+     * 「裏のデモを止める」: force-stops every known demo except the one in front, then waits a few seconds for Demo Switch.
+     * The receiver retries its bind while in front, so no restart is needed; when no answer comes (a receiver that gave
+     * up its retry), 「前面のアプリを再起動」 is offered.
+     */
+    fun stopBackgroundDemos() {
+        val front = portFront ?: return
+        runPortAction("裏のデモを止める", DemoCatalog.stopOtherDemosCommand(front.packageName), front,
+            "裏のデモを止めました。${front.label} の応答を待っています…", PORT_STOP_WAIT_MS,
+            "${front.label} の応答が戻りません（受信側の版が古く、ポートの再試行を止めている可能性）。前面のアプリを再起動してください")
+    }
+
+    /** 「前面のアプリを再起動」: force-stops the demo in front (and the other demos) and starts it again (the Hub: the Hub). */
+    fun restartFrontApp() {
+        val front = portFront ?: return
+        runPortAction("${front.label} を再起動", DemoCatalog.restartCommand(front), front,
+            "${front.label} を再起動しました。応答を待っています…", PORT_RESTART_WAIT_MS,
+            "再起動しても ${front.label} が応答しません")
+    }
+
+    private fun runPortAction(content: String, command: String, front: DemoApp, waiting: String, waitMs: Long, noAnswer: String) {
+        val quest = selectedQuest ?: return
+        if (portActionRunning || quest.adb != AdbState.CONNECTED) return
+        val ip = quest.ip
+        portActionRunning = true
+        portStatus = "$content…" to false
+        viewModelScope.launch {
+            try {
+                val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
+                val response = adbShell(ip, command)
+                if (response == null) {
+                    updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
+                    if (ip == selectedIp) portStatus = "adb 接続が切れました" to true
+                    return@launch
+                }
+                val summary = response.allOutput.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.lastOrNull()?.take(120) ?: ""
+                val ok = response.exitCode == 0
+                updateLog(logId) {
+                    it.copy(state = if (ok) LogState.READY else LogState.FAILED, detail = "exit ${response.exitCode}${if (summary.isEmpty()) "" else " / $summary"}")
+                }
+                if (ip == selectedIp) portStatus = waiting to false
+                val answered = waitForDemoSwitch(ip, waitMs)
+                if (ip != selectedIp) return@launch
+                if (answered != null) {
+                    portDiagnosedIp = null
+                    portFront = null
+                    portAction = PortAction.NONE
+                    portStatus = "${DemoCatalog.labelFor(answered)} が応答しました" to false
+                    addLog(quest.label, "Demo Switch の応答が戻りました（${DemoCatalog.labelFor(answered)}）", null, LogState.INFO)
+                } else {
+                    portStatus = noAnswer to true
+                    portAction = PortAction.RESTART_FRONT
+                    addLog(quest.label, "$content の後", null, LogState.NO_RESPONSE, "${front.label} が Demo Switch に応答しません")
+                }
+            } finally {
+                portActionRunning = false
+            }
+        }
+    }
+
+    /** A unicast DISCOVER to [ip] every [PORT_POLL_MS] for at most [waitMs]; the demo ID that answered, or null. */
+    private suspend fun waitForDemoSwitch(ip: String, waitMs: Long): String? {
+        val deadline = SystemClock.elapsedRealtime() + waitMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val config = authConfig
+            if (!config.canSend) return null
+            probeForegroundDemo(ip, config)?.let { return it }
+            delay(PORT_POLL_MS)
+        }
+        return null
     }
 
     // ---- Wi-Fi adb over USB -------------------------------------------------------------------------
@@ -2213,6 +2373,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val HUB_FRONT_WAIT_MS = 10_000L
         const val HUB_FRONT_POLL_MS = 1_000L
         const val ADB_RESCAN_INTERVAL_MS = 30_000L
+        /** After 「裏のデモを止める」 (the receiver retries its bind every second) / 「前面のアプリを再起動」 (app start). */
+        const val PORT_STOP_WAIT_MS = 6_000L
+        const val PORT_RESTART_WAIT_MS = 20_000L
+        const val PORT_POLL_MS = 1_000L
         const val USB_PERMISSION_WAIT_MS = 60_000L
         /** tcpip restarts adbd, which re-enumerates on USB and sends ATTACHED again. */
         const val USB_REATTACH_IGNORE_MS = 20_000L

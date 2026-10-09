@@ -13,9 +13,12 @@ namespace Hapbeat.DemoSwitch
     /// </summary>
     internal sealed class DemoSwitchRuntime : MonoBehaviour
     {
-        /// <summary>A failed bind (e.g. the previous application's socket still open) is retried every 0.25 s for 5 s.</summary>
-        internal const float BindRetryIntervalSeconds = 0.25f;
-        internal const int BindRetryAttempts = 20;
+        /// <summary>
+        /// A failed bind (e.g. the previous application's socket, or a demo left running in the background) is retried every
+        /// 1 s while in the foreground, without a limit; after 5 s unbound it logs a warning once.
+        /// </summary>
+        internal const float BindRetryIntervalSeconds = 1f;
+        internal const float BindWaitingWarningSeconds = 5f;
         internal const string NotForegroundMessage = "not in foreground";
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private DemoSwitchSettings _settings;
@@ -601,8 +604,9 @@ namespace Hapbeat.DemoSwitch
 
         /// <summary>
         /// Reads a launch context (at start, and a new Intent each time this application comes to the front) and binds
-        /// 7710 unless it is bound. A failed bind is retried (<see cref="RetryBind"/>); READY or FAILED/listener_failed
-        /// for a launch context follows the final result. Nothing starts again after a hand-over.
+        /// 7710 unless it is bound. A failed bind is retried while in the foreground (<see cref="RetryBind"/>): a launch
+        /// context gets FAILED/listener_failed once 5 s have passed unbound, and READY when the bind succeeds later.
+        /// Nothing starts again after a hand-over.
         /// </summary>
         private void StartReceiver()
         {
@@ -618,37 +622,64 @@ namespace Hapbeat.DemoSwitch
             error = TryBind();
             if (error == null) { OnListenerStarted(); return; }
             Debug.LogWarning("[Demo Switch] Could not bind UDP " + _settings.Port + " (" + error + "); retrying every " +
-                BindRetryIntervalSeconds + " s, " + BindRetryAttempts + " times.");
-            _bindRetry = StartCoroutine(RetryBind(TryBind, OnBindRetryFinished));
+                BindRetryIntervalSeconds + " s while in the foreground.");
+            _bindRetry = StartCoroutine(RetryBind(TryBind, () => _foreground, OnBindWaiting, OnBindRetryFinished));
         }
 
         /// <summary>
-        /// Calls <paramref name="bind"/> (null = bound, otherwise the error) every <see cref="BindRetryIntervalSeconds"/>,
-        /// at most <see cref="BindRetryAttempts"/> times, and reports the result with the number of retries made.
+        /// Calls <paramref name="bind"/> (null = bound, otherwise the error) every <see cref="BindRetryIntervalSeconds"/>
+        /// while <paramref name="foreground"/> is true, without a limit. <paramref name="onWaiting"/> gets the error once,
+        /// when <see cref="BindWaitingWarningSeconds"/> have passed unbound. <paramref name="onFinished"/> gets null and the
+        /// number of retries when bound, or the last error when it stopped because the application left the foreground.
         /// </summary>
-        internal static IEnumerator RetryBind(Func<string> bind, Action<string, int> onFinished)
+        internal static IEnumerator RetryBind(Func<string> bind, Func<bool> foreground, Action<string> onWaiting,
+            Action<string, int> onFinished)
         {
             string error = null;
-            for (var attempt = 1; attempt <= BindRetryAttempts; attempt++)
+            var retries = 0;
+            var waited = 0f;
+            var warned = false;
+            while (foreground())
             {
                 yield return new WaitForSecondsRealtime(BindRetryIntervalSeconds);
+                if (!foreground()) break;
+                retries++;
                 error = bind();
-                if (error == null) { onFinished(null, attempt); yield break; }
+                if (error == null) { onFinished(null, retries); yield break; }
+                waited += BindRetryIntervalSeconds;
+                if (!warned && waited >= BindWaitingWarningSeconds)
+                {
+                    warned = true;
+                    onWaiting(error);
+                }
             }
-            onFinished(error, BindRetryAttempts);
+            onFinished(error ?? "Application left foreground.", retries);
         }
 
-        private void OnBindRetryFinished(string error, int attempts)
+        private void OnBindWaiting(string error)
+        {
+            Debug.LogWarning("[Demo Switch] Waiting for UDP " + _settings.Port + ": still not bound after " +
+                BindWaitingWarningSeconds + " s (" + error + "). Another application may hold the port; retrying while in the foreground.");
+            ReportListenerFailure(error);
+        }
+
+        private void OnBindRetryFinished(string error, int retries)
         {
             _bindRetry = null;
             if (error == null)
             {
-                Debug.Log("[Demo Switch] Bound UDP " + _settings.Port + " after " + attempts + " retries.");
+                Debug.Log("[Demo Switch] Bound UDP " + _settings.Port + " after " + retries + " retries.");
                 OnListenerStarted();
                 return;
             }
-            Debug.LogError("[Demo Switch] Could not bind UDP " + _settings.Port + " after " + attempts + " retries: " + error);
-            ReportListenerFailure(error);
+            Debug.Log("[Demo Switch] Bind retry paused out of the foreground after " + retries + " retries; it resumes in the foreground.");
+        }
+
+        private void StopBindRetry()
+        {
+            if (_bindRetry == null) return;
+            StopCoroutine(_bindRetry);
+            _bindRetry = null;
         }
 
         private void OnListenerStarted()
@@ -727,18 +758,20 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Hand-over or teardown: stops a bind retry, releases 7710 and the multicast lock.</summary>
         private void StopListener()
         {
-            if (_bindRetry != null) { StopCoroutine(_bindRetry); _bindRetry = null; }
+            StopBindRetry();
             _multicastLock.Release();
             if (!_listenerStarted) return;
             _transport.Stop();
             _listenerStarted = false;
         }
 
-        // Focus and pause only set the foreground state; the listener keeps running (DISCOVER / QUERY are answered).
+        // Focus and pause set the foreground state; a bound listener keeps running (DISCOVER / QUERY are answered),
+        // an unbound one stops retrying out of the foreground and starts again in front.
         private void OnApplicationFocus(bool hasFocus)
         {
             _foreground = hasFocus;
             if (hasFocus) StartReceiver();
+            else StopBindRetry();
         }
 
         private void OnApplicationPause(bool paused)
@@ -746,6 +779,7 @@ namespace Hapbeat.DemoSwitch
             _foreground = !paused;
             if (paused)
             {
+                StopBindRetry();
                 if (_control != null) StopCoroutine(_control);
                 _control = null;
                 _controlBusy = false;
