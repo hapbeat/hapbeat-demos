@@ -17,10 +17,17 @@
 #include "Serialization/JsonSerializer.h"
 #include "Framework/Application/SlateApplication.h"
 
+bool FHapbeatBindRetry::Failed(double Now)
+{
+    bFailed=true;NextAt=Now+IntervalSeconds;
+    if(FailedAt<0) FailedAt=Now;
+    if(bWarned||Now-FailedAt<WaitingSeconds) return false;
+    bWarned=true;return true;
+}
 bool FHapbeatDemoSwitchReceiver::Configure(const FString& InDemoId)
 {
     Stop();bEnabled=false;Sequences.Reset();Secret.Empty();DemoId=InDemoId;
-    bBindFailed=false;BindFailedAt=NextBindAt=0;bForeground=true;
+    BindRetry=FHapbeatBindRetry();bForeground=true;
     if(!HapbeatDemoSwitchProtocol::IsIdentifier(DemoId)) {UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_DISABLED no valid demo_id"));return false;}
 #if UE_BUILD_SHIPPING
     bTest=false;
@@ -119,9 +126,10 @@ void FHapbeatDemoSwitchReceiver::Tick()
     if(Foreground!=bForeground) {bForeground=Foreground;UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_FOREGROUND %d"),Foreground);}
     auto* Sockets=ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
     const double Now=FPlatformTime::Seconds();
-    if(!Socket&&!bBindFailed&&Now>=NextBindAt) {
-        // The previous application's socket can still hold the port for a moment after a hand-over.
-        constexpr double RetryInterval=0.5,RetryWindow=5.0;
+    BindRetry.SetForeground(Foreground);
+    if(!Socket&&BindRetry.ShouldTry(Foreground,Now)) {
+        // Another application's socket can hold the port: the previous one for a moment after a hand-over, or a demo
+        // left running in the background until it ends. Keep retrying while in front.
         Socket=Sockets->CreateSocket(NAME_DGram,TEXT("Hapbeat Demo Switch"),false);
         auto Address=Sockets->CreateInternetAddr();
         if(bTest) {bool Valid=false;Address->SetIp(TEXT("127.0.0.1"),Valid);}
@@ -129,12 +137,12 @@ void FHapbeatDemoSwitchReceiver::Tick()
         Address->SetPort(bTest?17710:7710);
         if(!Socket || !Socket->SetReuseAddr(false) || !Socket->SetNonBlocking(true) || !Socket->Bind(*Address)) {
             Close();
-            if(BindFailedAt==0) BindFailedAt=Now;
-            if(Now-BindFailedAt>=RetryWindow) {bBindFailed=true;UE_LOG(LogHapbeatDemoSession,Error,TEXT("DEMO_SWITCH_LISTENER_FAILED port is unavailable"));}
-            else {NextBindAt=Now+RetryInterval;UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SWITCH_BIND_RETRY port is unavailable, retrying"));}
+            if(!BindRetry.HasFailed()) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_BIND_RETRY port is unavailable, retrying every %.0f s while in front"),FHapbeatBindRetry::IntervalSeconds);
+            if(BindRetry.Failed(Now)) UE_LOG(LogHapbeatDemoSession,Warning,TEXT("DEMO_SWITCH_BIND_WAITING port %d is still in use by another application after %.0f s (a demo left running in the background?); still retrying"),
+                bTest?17710:7710,FHapbeatBindRetry::WaitingSeconds);
             return;
         }
-        BindFailedAt=NextBindAt=0;
+        BindRetry.Bound();
         if(!bTest) bMulticastLock=HapbeatDemoSessionPlatform::SetMulticastLock(true);
         UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SWITCH_LISTENING port=%d demo=%s multicast_lock=%d"),bTest?17710:7710,*DemoId,bMulticastLock);
     }

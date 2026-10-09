@@ -5,6 +5,31 @@
 class FSocket;
 class FInternetAddr;
 
+/**
+ * When to (re)try binding 7710 (specs/demo-switch-control.md, Transport and lifecycle). The first attempt is made at
+ * once. After a failure (another application's socket holds the port: the previous one for a moment after a
+ * hand-over, or a demo left running in the background for good) it retries about once a second while this runtime is
+ * in front, without giving up, and pauses while it is not. Once the port has stayed unavailable for WaitingSeconds in
+ * front, Failed reports it once (log DEMO_SWITCH_BIND_WAITING).
+ */
+struct HAPBEATDEMOSESSION_API FHapbeatBindRetry
+{
+    static constexpr double IntervalSeconds=1.0;
+    static constexpr double WaitingSeconds=5.0;
+    /** Whether to try a bind now. */
+    bool ShouldTry(bool bForeground,double Now) const {return Now>=NextAt&&(!bFailed||bForeground);}
+    /** Every frame: out of front the waiting time restarts (it counts time in front only). */
+    void SetForeground(bool bForeground) {if(!bForeground) FailedAt=-1;}
+    /** A failed attempt. True once, when the port has stayed unavailable for WaitingSeconds in front. */
+    bool Failed(double Now);
+    /** Bound: back to the start. */
+    void Bound() {*this=FHapbeatBindRetry();}
+    bool HasFailed() const {return bFailed;}
+private:
+    double FailedAt=-1, NextAt=0;
+    bool bFailed=false, bWarned=false;
+};
+
 /** How an accepted CONTROL action ended in FHapbeatDemoSwitchReceiver::Execute. */
 enum class EHapbeatControlResult : uint8
 {
@@ -21,7 +46,7 @@ enum class EHapbeatControlResult : uint8
  * READY, or for a launch READY naming the started demo once this runtime has left the foreground). One operation at
  * a time: CONTROL is answered FAILED/not_allowed while a launch is pending. SWITCH is answered FAILED/not_allowed. The socket stays bound while the process runs, also while the
  * runtime is not foreground (no VR focus: boundary setup, system menu); then STATE carries foreground=false and
- * CONTROL is answered FAILED/not_allowed "not in foreground". A failed bind is retried for a few seconds. On
+ * CONTROL is answered FAILED/not_allowed "not in foreground". A failed bind is retried while in front (FHapbeatBindRetry). On
  * Android a Wi-Fi MulticastLock is held while bound, so a broadcast DISCOVER is not filtered.
  *
  * Settings: Saved/Config/HapbeatDemoSession.json ({"enabled", "shared_secret", "allow_unsigned",
@@ -43,7 +68,7 @@ public:
     ~FHapbeatDemoSwitchReceiver() {Stop();}
     /** Reads the settings and replay state. False when the receiver stays off. */
     bool Configure(const FString& InDemoId);
-    /** Binds (retrying a failed bind for a few seconds) and polls the socket. */
+    /** Binds (retrying a failed bind while in front, FHapbeatBindRetry) and polls the socket. */
     void Tick();
     /** Closes the socket and stays off (before handing the device to the next runtime). A pending operation is dropped. */
     void Stop();
@@ -66,7 +91,6 @@ private:
     TSharedPtr<FInternetAddr> PendingSource;
     FString DemoId,Secret,StateFile;
     TMap<FString,int64> Sequences;
-    /** First failed bind attempt and the next retry (FPlatformTime::Seconds), 0 before any failure. */
-    double BindFailedAt=0,NextBindAt=0;
-    bool bEnabled=false,bUnsigned=false,bTest=false,bBindFailed=false,bForeground=true,bMulticastLock=false;
+    FHapbeatBindRetry BindRetry;
+    bool bEnabled=false,bUnsigned=false,bTest=false,bForeground=true,bMulticastLock=false;
 };

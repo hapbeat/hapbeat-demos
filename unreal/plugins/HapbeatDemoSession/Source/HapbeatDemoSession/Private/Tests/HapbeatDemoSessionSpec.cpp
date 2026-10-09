@@ -7,6 +7,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "HapbeatDemoSessionTicket.h"
 #include "HapbeatDemoSwitchProtocol.h"
+#include "HapbeatDemoSwitchReceiver.h"
 #include "HapbeatDemoSessionUi.h"
 #include "Components/WidgetComponent.h"
 #include "HapbeatDemoSessionPanelAnchor.h"
@@ -398,6 +399,35 @@ void FHapbeatDemoSessionSpec::Define()
             // U+1F600 is one code point (a UTF-16 surrogate pair): 63 + 1 = 64, the pair is not split.
             const FString Pair=FString::ChrN(1,TCHAR(0xD83D))+FString::ChrN(1,TCHAR(0xDE00));
             TestEqual(TEXT("surrogate pair"),NormalizeDeviceModel(FString::ChrN(63,TEXT('a'))+Pair+TEXT("b")),FString::ChrN(63,TEXT('a'))+Pair);
+        });
+    });
+    Describe(TEXT("BindRetry"),[this]()
+    {
+        It(TEXT("keeps retrying about once a second in front and warns once after 5 s"),[this]()
+        {
+            FHapbeatBindRetry R;
+            TestTrue(TEXT("first attempt at once"),R.ShouldTry(true,0));
+            int32 Warnings=0,Tries=0;
+            for(double T=0;T<=30;T+=0.25) if(R.ShouldTry(true,T)) {++Tries;if(R.Failed(T)) {++Warnings;TestEqual(TEXT("warned at 5 s"),T,5.0);}}
+            TestEqual(TEXT("one try a second for 30 s, never giving up"),Tries,31);
+            TestEqual(TEXT("one warning"),Warnings,1);
+            TestFalse(TEXT("not before the interval"),R.ShouldTry(true,30.5));
+            R.Bound();
+            TestFalse(TEXT("bound: fresh"),R.HasFailed());
+        });
+        It(TEXT("pauses out of front and restarts the waiting time when back"),[this]()
+        {
+            FHapbeatBindRetry R;
+            TestTrue(TEXT("the first attempt also out of front"),R.ShouldTry(false,0));
+            TestFalse(TEXT("failed at 0"),R.Failed(0));
+            TestFalse(TEXT("no retry out of front"),R.ShouldTry(false,3));
+            R.SetForeground(false);
+            R.SetForeground(true);
+            TestTrue(TEXT("retry in front again"),R.ShouldTry(true,10));
+            TestFalse(TEXT("10 s since the first failure, but only time in front counts"),R.Failed(10));
+            TestFalse(TEXT("14 s"),R.Failed(14));
+            TestTrue(TEXT("5 s in front"),R.Failed(15));
+            TestFalse(TEXT("once"),R.Failed(30));
         });
     });
     Describe(TEXT("ControlRoute"),[this]()
