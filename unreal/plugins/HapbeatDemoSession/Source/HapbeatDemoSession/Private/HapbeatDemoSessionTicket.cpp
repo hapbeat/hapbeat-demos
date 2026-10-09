@@ -164,7 +164,7 @@ bool FHapbeatDemoSessionTicket::Parse(const FString& Json,FHapbeatDemoSessionTic
     if(!WithinBytes(Json)) return Fail(Error,TEXT("ticket exceeds 16384 bytes"));
     FObject O;
     if(!ParseObject(Json,O)) return Fail(Error,TEXT("ticket is not a JSON object"));
-    if(!OnlyKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish"),TEXT("hand_style"),TEXT("recenter_ui")})
+    if(!OnlyKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish"),TEXT("hand_style"),TEXT("recenter_ui"),TEXT("narration_volume")})
         ||!HasKeys(O,{TEXT("version"),TEXT("session_id"),TEXT("index"),TEXT("haptics_ui"),TEXT("steps"),TEXT("finish")})) return Fail(Error,TEXT("ticket fields"));
     FHapbeatDemoSessionTicket T;double Version=0,Index=-1;
     if(!GetNumber(O,TEXT("version"),Version)||Version!=1) return Fail(Error,TEXT("ticket version"));
@@ -176,6 +176,12 @@ bool FHapbeatDemoSessionTicket::Parse(const FString& Json,FHapbeatDemoSessionTic
     if(O->Values.Contains(TEXT("recenter_ui"))&&!GetBool(O,TEXT("recenter_ui"),T.bRecenterUi)) return Fail(Error,TEXT("ticket recenter_ui"));
     if(O->Values.Contains(TEXT("hand_style"))
         &&(!GetString(O,TEXT("hand_style"),T.HandStyle)||(T.HandStyle!=TEXT("ghost")&&T.HandStyle!=TEXT("skin")))) return Fail(Error,TEXT("ticket hand_style"));
+    if(O->Values.Contains(TEXT("narration_volume"))) {
+        double Volume=-1;
+        if(!GetNumber(O,TEXT("narration_volume"),Volume)||Volume<0||Volume>100||FMath::FloorToDouble(Volume)!=Volume||FMath::Fmod(Volume,10.0)!=0)
+            return Fail(Error,TEXT("ticket narration_volume"));
+        T.NarrationVolume=static_cast<int32>(Volume);
+    }
     FObject Finish;
     if(!GetObject(O,TEXT("finish"),Finish)||!ParseComponent(Finish,T.Finish)) return Fail(Error,TEXT("ticket finish"));
     const TArray<TSharedPtr<FJsonValue>>* Steps=nullptr;
@@ -227,9 +233,11 @@ FString FHapbeatDemoSessionTicket::ToJson() const
     }
     W->WriteArrayEnd();
     W->WriteObjectStart(TEXT("finish"));Component(Finish);W->WriteObjectEnd();
-    // Optional fields, written like the Unity runtimes: hand_style when present, recenter_ui only when true.
+    // Optional fields, written like the Unity runtimes: hand_style when present, recenter_ui only when true,
+    // narration_volume only when not the default (as the Hub does, so a runtime without it still accepts the ticket).
     if(!HandStyle.IsEmpty()) W->WriteValue(TEXT("hand_style"),HandStyle);
     if(bRecenterUi) W->WriteValue(TEXT("recenter_ui"),true);
+    if(NarrationVolume!=DefaultNarrationVolume) W->WriteValue(TEXT("narration_volume"),NarrationVolume);
     W->WriteObjectEnd();W->Close();
     return Json;
 }

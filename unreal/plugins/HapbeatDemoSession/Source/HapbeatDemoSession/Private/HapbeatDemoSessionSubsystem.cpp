@@ -75,8 +75,8 @@ void UHapbeatDemoSessionSubsystem::Load(const FString& DescriptorJson,bool bDesc
     bHapticsEnabled=true;
     bHapticsUiVisible=bSessionActive&&Ticket.bHapticsUi;
     bRecenterUiVisible=bSessionActive&&Ticket.bRecenterUi;
-    if(bSessionActive) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_ACTIVE demo=%s session=%s step=%d/%d haptics_ui=%d recenter_ui=%d"),
-        *Descriptor.DemoId,*Ticket.SessionId,Ticket.Index+1,Ticket.Steps.Num(),bHapticsUiVisible,bRecenterUiVisible);
+    if(bSessionActive) UE_LOG(LogHapbeatDemoSession,Display,TEXT("DEMO_SESSION_ACTIVE demo=%s session=%s step=%d/%d haptics_ui=%d recenter_ui=%d narration_volume=%d"),
+        *Descriptor.DemoId,*Ticket.SessionId,Ticket.Index+1,Ticket.Steps.Num(),bHapticsUiVisible,bRecenterUiVisible,Ticket.NarrationVolume);
     if(bHasDescriptor) {
         Receiver.IsAllowed=[this](const FString& Action){return IsControlAllowed(Action);};
         Receiver.Execute=[this](const FString& Action){return ExecuteControl(Action);};

@@ -109,6 +109,24 @@ void FHapbeatDemoSessionSpec::Define()
             TestFalse(TEXT("recenter_ui must be a boolean"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"recenter_ui\":1,")),T,Error));
             TestFalse(TEXT("hand_style ghost or skin"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"hand_style\":\"robot\",")),T,Error));
         });
+        It(TEXT("reads narration_volume, hands it on and writes it only when not the default"),[this]()
+        {
+            FHapbeatDemoSessionTicket T;FString Error;
+            TestTrue(TEXT("without it"),FHapbeatDemoSessionTicket::Parse(Ticket,T,Error));
+            TestEqual(TEXT("default 50"),T.NarrationVolume,50);
+            TestFalse(TEXT("the default is not written"),T.MakeNext(false,false).ToJson().Contains(TEXT("narration_volume")));
+            TestTrue(TEXT("with 80"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"narration_volume\":80,")),T,Error));
+            TestEqual(TEXT("80"),T.NarrationVolume,80);
+            FHapbeatDemoSessionTicket Next;
+            TestTrue(TEXT("next parses"),FHapbeatDemoSessionTicket::Parse(T.MakeNext(false,false).ToJson(),Next,Error));
+            TestEqual(TEXT("carried over"),Next.NarrationVolume,80);
+            TestTrue(TEXT("0 is silence, still valid"),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),TEXT("\"haptics_ui\":false,\"narration_volume\":0,")),T,Error)&&T.NarrationVolume==0);
+            for(const TCHAR* Bad:{TEXT("55"),TEXT("110"),TEXT("-10"),TEXT("50.0001"),TEXT("\"50\""),TEXT("true")})
+                TestFalse(FString::Printf(TEXT("narration_volume %s"),Bad),FHapbeatDemoSessionTicket::Parse(With(TEXT("\"haptics_ui\":false,"),FString::Printf(TEXT("\"haptics_ui\":false,\"narration_volume\":%s,"),Bad)),T,Error));
+            TestEqual(TEXT("gain 50"),UHapbeatDemoSessionSubsystem::NarrationGain(50),.5f*UHapbeatDemoSessionSubsystem::NarrationCalibration);
+            TestEqual(TEXT("gain 100"),UHapbeatDemoSessionSubsystem::NarrationGain(100),UHapbeatDemoSessionSubsystem::NarrationCalibration);
+            TestEqual(TEXT("gain 0"),UHapbeatDemoSessionSubsystem::NarrationGain(0),0.f);
+        });
         It(TEXT("rejects tickets that break the schema"),[this]()
         {
             const TArray<FString> Bad={

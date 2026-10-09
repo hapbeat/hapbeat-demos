@@ -50,6 +50,9 @@ struct HAPBEATDEMOSESSION_API FHapbeatDemoSessionTicket
     bool bRecenterUi=false;
     /** Optional `hand_style` ("ghost" / "skin"), empty when omitted. This runtime draws its own hands and only passes it on. */
     FString HandStyle;
+    /** Optional `narration_volume` (0-100 in steps of 10; omitted = DefaultNarrationVolume). Carried over the session. */
+    int32 NarrationVolume=50;
+    static constexpr int32 DefaultNarrationVolume=50;
     TArray<FHapbeatDemoSessionStep> Steps;
     FHapbeatDemoSessionComponent Finish;
     /** Schema validation only (does not check the demo_id of steps[index]). */

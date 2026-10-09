@@ -134,6 +134,21 @@ public:
     void SetRecenterUiVisible(bool bVisible);
 
     /**
+     * Playback gain of the demo's narration (specs/demo-session.md, ナレーションの音量): the ticket's narration_volume
+     * (50 outside a session) / 100 x NarrationCalibration, for narration lines normalized to -20 LUFS. Demos keep no
+     * narration volume of their own.
+     */
+    UFUNCTION(BlueprintPure,Category="Hapbeat Demo Session")
+    float GetNarrationGain() const {return NarrationGain(bSessionActive?Ticket.NarrationVolume:FHapbeatDemoSessionTicket::DefaultNarrationVolume);}
+    /** NarrationVolume (0-100) / 100 x NarrationCalibration. */
+    static float NarrationGain(int32 NarrationVolume) {return FMath::Clamp(NarrationVolume,0,100)/100.f*NarrationCalibration;}
+    /**
+     * Engine calibration: makes the same -20 LUFS line at the same narration_volume as loud on a Quest as in the Unity
+     * demos (com.hapbeat.demo-switch has its own). 1.0 until measured on a device.
+     */
+    static constexpr float NarrationCalibration=1.f;
+
+    /**
      * The demo's own start alignment for 視線をリセット (one per demo; the last one set wins). FacingYaw is the world yaw
      * the user faces: the head's for CONTROL recenter, the in-view buttons' heading for the button (the head is then
      * glancing down-left at it). The handler puts the head at the demo's start position facing its start direction,
