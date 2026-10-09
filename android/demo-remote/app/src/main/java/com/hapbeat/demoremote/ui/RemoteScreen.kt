@@ -67,9 +67,11 @@ import com.hapbeat.demoremote.ControlCatalog
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
+import com.hapbeat.demoremote.PortAction
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.HubDemo
+import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -275,6 +277,35 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                     fontWeight = if (usbFix) FontWeight.Bold else null,
                     maxLines = 1,
                 )
+            }
+        }
+        // Why the known demo in front does not answer Demo Switch (adb diagnosis) and its fix: fixed two-line area.
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            val (text, error) = vm.portStatus
+            Text(
+                text.ifEmpty { " " },
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // Fixed width whether or not a button is offered, so the text does not move.
+            Box(Modifier.width(128.dp)) {
+                if (vm.portAction != PortAction.NONE) {
+                    TextButton(
+                        onClick = { if (vm.portAction == PortAction.STOP_BACKGROUND) vm.stopBackgroundDemos() else vm.restartFrontApp() },
+                        enabled = !vm.portActionRunning && quest.adb == AdbState.CONNECTED,
+                        modifier = Modifier.width(128.dp),
+                    ) {
+                        Text(
+                            if (vm.portAction == PortAction.STOP_BACKGROUND) "裏のデモを止める" else "前面のアプリを再起動",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                        )
+                    }
+                }
             }
         }
     }
@@ -497,6 +528,81 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
     )
     ActionButton("このデモで始める", enabled = reason == null, modifier = Modifier.fillMaxWidth()) {
         vm.startSession(demoId = chosen, options = options)
+    }
+    // At the end of the tab: rows added or removed here never move anything above.
+    UnwrittenPresetSection(vm, block, hubDemos)
+}
+
+/**
+ * Presets imported from a QR / link and kept on the phone (the Hub was not in front): 確認 (content and slot), 削除 and
+ * Hub に書き込む (PRESET_SET, only while the Hub is in front). The heading and the status line are always there.
+ */
+@Composable
+private fun UnwrittenPresetSection(vm: RemoteViewModel, block: String?, hubDemos: List<HubDemo>?) {
+    Text("未書き込みのプリセット（${vm.unwrittenPresets.size} 件）", style = MaterialTheme.typography.titleSmall)
+    Text(
+        vm.unwrittenStatus.first.ifEmpty {
+            if (vm.unwrittenPresets.isEmpty()) "QR から取り込んで Hub に書けなかったものが、ここに残ります"
+            else block?.let { "Hub に書き込めません: $it" } ?: " "
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = if (vm.unwrittenStatus.second) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    var shown by remember { mutableStateOf<Long?>(null) }
+    var deleting by remember { mutableStateOf<Long?>(null) }
+    vm.unwrittenPresets.forEach { item ->
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                Text(item.preset.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("→ プリセット ${item.slot}・${stepsSummary(item.preset.steps, hubDemos)}", style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = { shown = item.id }, modifier = Modifier.width(56.dp)) { Text("確認") }
+            TextButton(onClick = { deleting = item.id }, enabled = vm.unwrittenWriting != item.id, modifier = Modifier.width(56.dp)) { Text("削除") }
+            ActionButton(
+                if (vm.unwrittenWriting == item.id) "書込中" else "Hub に書き込む",
+                enabled = block == null && vm.unwrittenWriting == null && !vm.importRunning,
+                modifier = Modifier.width(112.dp),
+            ) { vm.writeUnwritten(item.id) }
+        }
+    }
+    vm.unwrittenPresets.firstOrNull { it.id == shown }?.let { item ->
+        val slots = vm.selectedHubPresets
+        AlertDialog(
+            onDismissRequest = { shown = null },
+            title = { Text(item.preset.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    item.preset.steps.forEachIndexed { n, step -> Text("${n + 1}. ${stepSummary(step, hubDemos)}", style = MaterialTheme.typography.bodySmall) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("書き込む枠", style = MaterialTheme.typography.bodySmall)
+                        HubPresets.NUMBERS.forEach { number ->
+                            FilterChip(selected = item.slot == number, enabled = vm.unwrittenWriting != item.id,
+                                onClick = { vm.setUnwrittenSlot(item.id, number) }, label = { Text("$number") })
+                        }
+                    }
+                    // Fixed line: what is in the chosen slot now.
+                    val (text, overwrite) = slotNote(item.slot, slots.getOrNull(item.slot - 1))
+                    Text(text, style = MaterialTheme.typography.bodySmall, color = if (overwrite) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            },
+            confirmButton = { TextButton(onClick = { shown = null }) { Text("閉じる") } },
+        )
+    }
+    vm.unwrittenPresets.firstOrNull { it.id == deleting }?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("未書き込みのプリセットを削除しますか？") },
+            text = { Text("「${item.preset.name}」をスマホから消します（Hub のプリセットは変わりません）") },
+            confirmButton = { TextButton(onClick = { deleting = null; vm.deleteUnwritten(item.id) }) { Text("削除") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("やめる") } },
+        )
     }
 }
 

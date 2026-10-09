@@ -55,7 +55,7 @@ object DemoCatalog {
     )
 
     val apps: List<DemoApp> = listOf(
-        DemoApp(HUB_ID, "Demo Hub", "jp.hapbeat.demohub"),
+        DemoApp(HUB_ID, "Demo Hub", HUB_PACKAGE),
         DemoApp(VOLLEY_ID, "Volley", "jp.hapbeat.volley", VOLLEY_OPTIONS, thumbnail = "thumbs/volley.webp"),
         DemoApp("boxing", "Boxing", "com.hapbeat.boxing", BOXING_OPTIONS, thumbnail = "thumbs/boxing.webp"),
         DemoApp("handdemo", "Hand Demo", "com.Hapbeat.HapticHandDemo_G2", thumbnail = "thumbs/handdemo.webp"),
@@ -137,7 +137,8 @@ object DemoCatalog {
         options.forEach { (key, value) -> require(table.any { o -> o.id == key && o.values.any { it.value == value } }) }
     }
 
-    private const val HUB_COMPONENT = "jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity"
+    const val HUB_PACKAGE = "jp.hapbeat.demohub"
+    private const val HUB_COMPONENT = "$HUB_PACKAGE/com.unity3d.player.UnityPlayerGameActivity"
     private const val HUB_START_EXTRA = "com.hapbeat.demo_hub.start"
 
     /**
@@ -159,10 +160,28 @@ object DemoCatalog {
      */
     fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
+    /**
+     * Shell command (ending in "; ") that force-stops every running demo of [apps] except [targetPackage]. A start
+     * through adb bypasses the hand-over, so the previous demo would stay alive in the background holding UDP 7710
+     * (demo-switch-control.md: bound while the process lives) and the next demo could not bind it.
+     */
+    fun stopOtherDemosCommand(targetPackage: String): String {
+        val others = apps.map { it.packageName }.filter { it.isNotEmpty() && it != targetPackage }.distinct()
+        if (others.isEmpty()) return ""
+        return "for p in ${others.joinToString(" ")}; do pidof \$p >/dev/null && am force-stop \$p; done; "
+    }
+
     /** Shell command that resolves the launcher activity of [app] and starts it. */
     fun launchCommand(app: DemoApp): String =
         "c=\$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER " +
             "${app.packageName} | tail -n 1) && am start -n \"\$c\""
+
+    /**
+     * Shell command that force-stops [app] (and the other running demos) and starts it again: for a receiver that gave
+     * up its UDP 7710 bind retry (before the retry continued in the foreground) and stays silent in front.
+     */
+    fun restartCommand(app: DemoApp): String =
+        "am force-stop ${app.packageName}; " + stopOtherDemosCommand(app.packageName) + launchCommand(app)
 }
 
 /** One CONTROL button: action + scene_id (empty except for scene). [demoId]: only for that foreground demo. */
@@ -177,13 +196,17 @@ data class ControlGroup(val title: String, val actions: List<ControlAction>, val
 object ControlCatalog {
     val menuOpen = ControlAction("メニューを開く", "menu_open")
 
+    /** CONTROL `haptics_test`: the Hub plays 100 Hz for 1 s to the HMD's Hapbeat address (any Hub screen). */
+    val hubHapticsTest = ControlAction("触覚テスト（100 Hz・1 秒）", "haptics_test", demoId = DemoCatalog.HUB_ID)
+
     val groups: List<ControlGroup> = listOf(
         ControlGroup("進行", listOf(
             ControlAction("チュートリアル開始", "tutorial_start"),
             ControlAction("最初から", "restart"),
             menuOpen,
             ControlAction("メニューを閉じる", "menu_close"),
-        )),
+            ControlAction("次へ", "session_next"),
+        ), stateful = true),
         ControlGroup("視線・触覚", listOf(
             ControlAction("視線リセット", "recenter"),
             ControlAction("触覚 ON", "haptics_on"),
@@ -199,13 +222,10 @@ object ControlCatalog {
             ControlAction("ゴースト", "hand_style_ghost"),
             ControlAction("肌", "hand_style_skin"),
         ), stateful = true),
-        ControlGroup("セッション", listOf(
-            ControlAction("次へ", "session_next"),
-            ControlAction("もう一度", "session_retry"),
-        ), stateful = true),
         ControlGroup("Hub", listOf(
             ControlAction("トップへ", "hub_top", demoId = DemoCatalog.HUB_ID),
             ControlAction("最初から（同じプラン）", "hub_replay", demoId = DemoCatalog.HUB_ID),
+            hubHapticsTest,
         ), stateful = true),
         ControlGroup("Volley", listOf(
             // Same IDs as the Volley descriptor's scenes (block is its default).
@@ -224,7 +244,7 @@ object ControlCatalog {
     val hubTop = ControlAction("管理画面を閉じる", "hub_top", demoId = DemoCatalog.HUB_ID)
 
     /** Actions that leave the current scene or demo: READY comes after a launch, so they wait as long as SWITCH. */
-    val LAUNCHING_ACTIONS = setOf("session_next", "session_retry", "hub_replay")
+    val LAUNCHING_ACTIONS = setOf("session_next", "hub_replay")
 
     /**
      * Why [control] cannot be sent to the demo [state] describes (the last STATE, null = none), or null. Only the
@@ -241,11 +261,6 @@ object ControlCatalog {
             state.stepIndex < 0 -> "セッション中（Hub から始めたデモ）だけ使えます"
             else -> null
         }
-        "session_retry" -> when {
-            state == null -> STATE_UNKNOWN
-            state.currentDemoId == DemoCatalog.HUB_ID || state.screen != "completion" -> "デモの完了画面が出ているときだけ使えます"
-            else -> null
-        }
         "hub_top" -> when {
             state == null -> STATE_UNKNOWN
             state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
@@ -257,6 +272,11 @@ object ControlCatalog {
             state == null -> STATE_UNKNOWN
             state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
             state.screen != "completion" -> "Hub の終了画面が出ているときだけ使えます"
+            else -> null
+        }
+        "haptics_test" -> when {
+            state == null -> STATE_UNKNOWN
+            state.currentDemoId != DemoCatalog.HUB_ID -> "Hub が前面のときだけ使えます"
             else -> null
         }
         else -> null

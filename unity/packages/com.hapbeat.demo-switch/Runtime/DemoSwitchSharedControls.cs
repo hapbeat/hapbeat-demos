@@ -69,4 +69,29 @@ namespace Hapbeat.DemoSwitch
             yield break;
         }
     }
+
+    /// <summary>
+    /// CONTROL `haptics_test`: the Hub's 触覚テスト (100 Hz, 1 s to this headset's device address); accepted on every Hub screen,
+    /// including the manage screen. Refused without a host and by a Hub built without the Hapbeat SDK
+    /// (<see cref="IDemoSwitchHubHost.HasHapticsTest"/>); READY once the tone is handed to the SDK.
+    /// </summary>
+    internal sealed class DemoHubHapticsTestControls : IDemoAppControls
+    {
+        private readonly IDemoSwitchHubHost _hub;
+
+        public DemoHubHapticsTestControls(IDemoSwitchHubHost hub)
+        {
+            _hub = hub;
+        }
+
+        public bool CanExecuteControl(string action, string sceneId) =>
+            action == "haptics_test" && sceneId == string.Empty && _hub != null && _hub.HasHapticsTest;
+
+        public IEnumerator ExecuteControl(string action, string sceneId)
+        {
+            if (!CanExecuteControl(action, sceneId)) throw new InvalidOperationException("Only a Hub with the Hapbeat SDK plays the haptics test.");
+            if (!_hub.TryPlayHapticsTest(out var error)) throw new InvalidOperationException(error);
+            yield break;
+        }
+    }
 }

@@ -47,6 +47,8 @@ import com.hapbeat.demoremote.data.PresetTransfer
 import com.hapbeat.demoremote.data.RemoteLogFile
 import com.hapbeat.demoremote.data.SettingsStore
 import com.hapbeat.demoremote.data.TransferResult
+import com.hapbeat.demoremote.data.UnwrittenPreset
+import com.hapbeat.demoremote.data.UnwrittenPresets
 import com.hapbeat.demoremote.mirror.MirrorSession
 import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
@@ -108,6 +110,9 @@ data class QuestState(
 )
 
 enum class LogState { SENT, ACK, READY, FAILED, NO_RESPONSE, INFO, ERROR }
+
+/** Button of the selected HMD's Demo Switch diagnosis area ([RemoteViewModel.portStatus]). */
+enum class PortAction { NONE, STOP_BACKGROUND, RESTART_FRONT }
 
 data class LogEntry(
     val id: Long,
@@ -171,6 +176,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Fixed line of the import dialog: write progress / failure (text, isError). */
     var importStatus by mutableStateOf("" to false); private set
     var importRunning by mutableStateOf(false); private set
+    /**
+     * Presets imported from a QR / link and not written to a Hub yet, with their chosen slot. Kept in the settings, so
+     * they survive closing the app; removed once written or deleted.
+     */
+    val unwrittenPresets = mutableStateListOf<UnwrittenPreset>()
+    /** Fixed line of the unwritten presets: write progress / result (text, isError). */
+    var unwrittenStatus by mutableStateOf("" to false); private set
+    /** Id of the unwritten preset being written, or null. */
+    var unwrittenWriting by mutableStateOf<Long?>(null); private set
     /** Fixed-area notice (text, isError). */
     var notice by mutableStateOf("" to false); private set
     var adbMessage by mutableStateOf(""); private set
@@ -216,10 +230,20 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Progress / result of the Hub settings screen's HUB_SETTINGS_SET (text, state); null before saving. */
     var hubSettingsSaveStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     var hubSettingsSaving by mutableStateOf(false); private set
+    /** Progress / result of the Hub settings screen's 触覚テスト (text, state); null before sending. */
+    var hubHapticsTestStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     /** A one-demo start is running (it may switch to the Hub and wait for it first). */
     var sessionStarting by mutableStateOf(false); private set
     /** A user-started Wi-Fi adb connect to this IP gets no answer: the "Quest may be asleep" dialog is up. */
     var sleepHintIp by mutableStateOf<String?>(null); private set
+    /**
+     * Fixed area under the selected HMD's status: why its known demo in front (adb) does not answer Demo Switch, or the
+     * progress of [stopBackgroundDemos] / [restartFrontApp] (text, isError); "" when there is nothing to say.
+     */
+    var portStatus by mutableStateOf("" to false); private set
+    /** The button offered beside [portStatus]. */
+    var portAction by mutableStateOf(PortAction.NONE); private set
+    var portActionRunning by mutableStateOf(false); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -242,13 +266,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     val hubPresetBlockReason: String?
         get() {
             demoSwitchBlockReason?.let { return it }
-            val state = selectedQuest?.remoteState
-            return when {
-                state?.currentDemoId != DemoCatalog.HUB_ID -> HubPresets.HUB_NOT_RUNNING
-                !state.foreground -> HubPresets.HUB_NOT_FOREGROUND
-                state.screen == "manage" -> HubPresets.HUB_MANAGE_OPEN
-                else -> null
-            }
+            val quest = selectedQuest ?: return null
+            return HubPresets.hubFrontProblem(quest.remoteState, quest.lastDemoId, selectedHubDemos)
         }
 
     // ---- internal state (main thread only) ----
@@ -258,6 +277,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val activeNonces = mutableMapOf<String, (String, DemoSwitchMessage.Here) -> Unit>()
     /** QUERY nonce -> Quest IP it was sent to. */
     private val queryNonces = mutableMapOf<String, String>()
+    /** QUERY nonce -> reader waiting for that STATE ([fetchState]). */
+    private val stateWaiters = mutableMapOf<String, CompletableDeferred<DemoSwitchMessage.State>>()
     /** PRESET_GET nonce -> (Quest IP it was sent to, waiting reader). */
     private val presetRequests = mutableMapOf<String, Pair<String, CompletableDeferred<DemoSwitchMessage.Preset>>>()
     /** HUB_SETTINGS_GET nonce -> (Quest IP it was sent to, waiting reader). */
@@ -297,11 +318,19 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var autoAdbFailedIp: String? = null
     /** HMD #n given to each serial in this run, so a headset that leaves and comes back keeps its number. */
     private val serialLabels = mutableMapOf<String, String>()
+    /**
+     * The selected HMD already diagnosed in its current period without a Demo Switch answer ([maybeDiagnosePort]): once
+     * per period. A new period starts when it answers, on "再探索", a new selection, an adb connect or an adb start.
+     */
+    private var portDiagnosedIp: String? = null
+    /** The known demo in front found by the last diagnosis (the target of the diagnosis area's buttons). */
+    private var portFront: DemoApp? = null
 
     // ---- lifecycle ----------------------------------------------------------------------
 
     init {
         wifi.start()
+        unwrittenPresets.addAll(UnwrittenPresets.decode(settings.unwrittenPresets))
     }
 
     private fun reopenSocket() {
@@ -431,6 +460,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         hubPresetStatus = ""
         hubSettingsStatus = ""
         hubFrontIp = null
+        resetPortDiagnosis(force = true)
         followHubFront()
     }
 
@@ -530,6 +560,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rediscover() {
         followTriedHosts.clear()
+        resetPortDiagnosis()
         viewModelScope.launch { runDiscoveryRound() }
         scanAdbHosts()
     }
@@ -620,13 +651,20 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             updateDiscoveryDiag()
             quests.indices.forEach {
                 val q = quests[it]
-                // No answer: whatever was in front before is no longer known (home screen, asleep, other app).
-                quests[it] = if (q.ip in responders) q.copy(respondedLastRound = true)
-                else q.copy(respondedLastRound = false, lastDemoId = "", remoteState = null)
+                // No answer in two rounds in a row: whatever was in front before is no longer known (home screen, asleep,
+                // other app). One missed round (a HERE later than the window, or lost) keeps it: forgetting it there made
+                // the Hub read as "not running" for a whole round although it was in front.
+                quests[it] = when {
+                    q.ip in responders -> q.copy(respondedLastRound = true)
+                    q.respondedPrevRound == false -> q.copy(respondedLastRound = false, lastDemoId = "", remoteState = null)
+                    else -> q.copy(respondedLastRound = false)
+                }
             }
             pruneUnseen()
             selectRememberedIfSeen()
             followHubFront()
+            // No answer in two rounds in a row from the selected HMD: find out why when a known demo is in front (adb).
+            selectedQuest?.takeIf { it.respondedLastRound == false && it.respondedPrevRound == false }?.let { maybeDiagnosePort(it.ip) }
         } finally {
             activeNonces.remove(broadcastNonce)
             activeNonces.remove(unicastNonce)
@@ -657,6 +695,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             quests.add(QuestState(source, unconfirmedLabel(source), addedAtMs = SystemClock.elapsedRealtime()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
+        if (source == selectedIp) onSelectedAnswered()
         // Once per responder: its STATE tells the device model and whether it is an editor (the selected one is asked anyway).
         if (describedIps.add(source)) queryState(source)
     }
@@ -714,7 +753,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                         deviceModel = message.deviceModel ?: q.deviceModel, editor = message.editor ?: q.editor,
                     )
                 }
+                if (source == selectedIp) onSelectedAnswered()
                 followHubFront()
+                stateWaiters.remove(message.nonce)?.complete(message)
             }
             is DemoSwitchMessage.Preset -> {
                 if (!DemoSwitchProtocol.acceptPreset(message, source, controllerId, { presetRequests[it]?.first }, config)) return
@@ -791,6 +832,55 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Asks the selected HMD for a fresh STATE now (opening the Hub settings or an import), so its reasons are current. */
+    fun refreshHubState() {
+        val ip = selectedIp ?: return
+        if (!foreground) return
+        viewModelScope.launch { fetchState(ip) }
+    }
+
+    /**
+     * QUERY to [ip], up to [STATE_ATTEMPTS] times, waiting [STATE_WAIT_MS] each; the STATE is applied to the list like
+     * any other. Null when none came.
+     */
+    private suspend fun fetchState(ip: String): DemoSwitchMessage.State? {
+        repeat(STATE_ATTEMPTS) {
+            val config = authConfig
+            if (!config.canSend || !socket.isOpen) return null
+            val nonce = DemoSwitchProtocol.newNonce()
+            val result = CompletableDeferred<DemoSwitchMessage.State>()
+            queryNonces[nonce] = ip
+            stateWaiters[nonce] = result
+            try {
+                if (!socket.send(ip, DemoSwitchProtocol.buildQuery(controllerId, nonce, config))) return null
+                withTimeoutOrNull(STATE_WAIT_MS) { result.await() }?.let { return it }
+            } finally {
+                queryNonces.remove(nonce)
+                stateWaiters.remove(nonce)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Right before a Hub write or start: a fresh STATE of [quest] (not the one cached from the last discovery round),
+     * and without one a DISCOVER, each tried several times. Null when the Hub is in front and takes it; otherwise the
+     * reason (the Hub does not answer / another demo is in front / the Hub answers DISCOVER but not QUERY / not in
+     * front / manage screen open).
+     */
+    private suspend fun checkHubFront(quest: QuestState): String? {
+        val state = fetchState(quest.ip)
+        if (state != null) return HubPresets.hubFrontProblem(state, state.currentDemoId, hubSettings[quest.ip]?.demos)
+        var current: String? = null
+        for (attempt in 1..PROBE_ATTEMPTS) {
+            current = probeForegroundDemo(quest.ip, authConfig)
+            if (current != null) break
+        }
+        fileLog("Hub の確認: ${quest.ip} から STATE なし、HERE ${current ?: "なし"}")
+        if (current == null) maybeDiagnosePort(quest.ip)
+        return HubPresets.hubFrontProblem(null, current ?: "", hubSettings[quest.ip]?.demos)
+    }
+
     // ---- send ----------------------------------------------------------------------------------
 
     fun sendSwitch(demoId: String) {
@@ -806,29 +896,63 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Confirms the foreground demo with a unicast DISCOVER first (spec), then sends CONTROL to it. */
-    fun sendControl(control: ControlAction) {
+    /**
+     * Confirms the foreground demo with a unicast DISCOVER first (spec), then sends CONTROL to it. [listener] receives
+     * the result as the log shows it, also when the CONTROL is not sent.
+     */
+    fun sendControl(control: ControlAction, listener: ((LogState, String) -> Unit)? = null) {
         val quest = selectedQuest ?: return
         val config = authConfig
         if (!config.canSend) return
         viewModelScope.launch {
+            val refused = { reason: String ->
+                addLog(quest.label, control.label, null, LogState.ERROR, reason)
+                listener?.invoke(LogState.ERROR, reason)
+            }
             val current = probeForegroundDemo(quest.ip, config)
             if (current == null) {
-                addLog(quest.label, control.label, null, LogState.ERROR,
-                    "応答なし（デモが起動していない／スリープ／届いていない）")
+                refused("応答なし（デモが起動していない／スリープ／届いていない）")
+                maybeDiagnosePort(quest.ip)
                 return@launch
             }
             // A demo answers DISCOVER even when it is not in the foreground, but then refuses CONTROL.
-            if (refusedNotForeground(quest.ip, quest.label, control.label)) return@launch
-            if (control.demoId != null && current != control.demoId) {
-                addLog(quest.label, control.label, null, LogState.ERROR,
-                    "前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
+            if (refusedNotForeground(quest.ip, quest.label, control.label)) {
+                listener?.invoke(LogState.ERROR, NOT_FOREGROUND_TEXT)
                 return@launch
             }
-            val seq = reserveSeq() ?: return@launch
+            if (control.demoId != null && current != control.demoId) {
+                refused("前面アプリが ${DemoCatalog.labelFor(control.demoId)} ではありません（${DemoCatalog.labelFor(current)}）")
+                return@launch
+            }
+            val seq = reserveSeq()
+            if (seq == null) {
+                listener?.invoke(LogState.ERROR, "sequence を確保できなかったため送信を中止しました")
+                return@launch
+            }
             val payload = DemoSwitchProtocol.buildControl(controllerId, seq, current, control.action, control.sceneId, config)
             val timeout = if (control.action in ControlCatalog.LAUNCHING_ACTIONS) SWITCH_TIMEOUT_MS else CONTROL_TIMEOUT_MS
-            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, timeout, control.action)
+            send(quest, seq, current, "${control.label}（${DemoCatalog.labelFor(current)}）", payload, timeout, control.action, listener)
+        }
+    }
+
+    /** Clears the Hub settings screen's last 触覚テスト result (opening the screen). */
+    fun clearHubHapticsTestStatus() {
+        hubHapticsTestStatus = null
+    }
+
+    /**
+     * The Hub settings screen's 触覚テスト: CONTROL `haptics_test` to the selected HMD's Hub (it plays 100 Hz for 1 s to its
+     * Hapbeat address). The result shows on that screen and in the log; no confirmation (a staff operation).
+     */
+    fun sendHubHapticsTest() {
+        if (selectedQuest == null || !authConfig.canSend) return
+        hubHapticsTestStatus = "送信中…" to LogState.SENT
+        sendControl(ControlCatalog.hubHapticsTest) { state, detail ->
+            hubHapticsTestStatus = when (state) {
+                LogState.ACK -> "Hub が受け付けました…" to state
+                LogState.READY -> "Hub が触覚を送りました（100 Hz・1 秒、この HMD の宛先へ）" to state
+                else -> detail to state
+            }
         }
     }
 
@@ -1066,6 +1190,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         when (result) {
             AdbConnectResult.Connected -> {
                 if (autoAdbFailedIp == ip) autoAdbFailedIp = null
+                if (ip == selectedIp) resetPortDiagnosis()
                 updateQuest(ip) { it.copy(adb = AdbState.CONNECTED) }
                 setAdbMessage("")
                 refreshAdbInfo(ip)
@@ -1343,7 +1468,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                             hubPresets[ip] = slots
                         }
                         PresetRead.NoResponse -> {
-                            hubPresetStatus = "Hub が起動していません（プリセットの読み込みに応答なし）"
+                            hubPresetStatus = "Hub がプリセットの読み込みに応答しません（「再読込」を押してください）"
                             fileLog("プリセット $number の読み込み: 応答なし ($ip)")
                             return@launch
                         }
@@ -1462,13 +1587,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val refused = { reason: String -> addLog(quest.label, content, null, LogState.ERROR, reason); reason to LogState.ERROR }
         if (!config.canSend) return refused("認証が未設定です")
         HubSettingsAccess.problem(controllerId, settings)?.let { return refused(it) }
-        if (probeForegroundDemo(quest.ip, config) != DemoCatalog.HUB_ID) return refused(HubPresets.HUB_NOT_RUNNING)
-        val state = quests.firstOrNull { it.ip == quest.ip }?.remoteState
-        if (state?.foreground == false) {
-            queryState(quest.ip)
-            return refused(HubPresets.HUB_NOT_FOREGROUND)
-        }
-        if (state?.screen == "manage") return refused(HubPresets.HUB_MANAGE_OPEN)
+        checkHubFront(quest)?.let { return refused(it) }
         val seq = reserveSeq() ?: return "sequence を確保できなかったため送信を中止しました" to LogState.ERROR
         val payload = DemoSwitchProtocol.buildHubSettingsSet(
             controllerId, seq, settings.hapticsUi, settings.recenterUi, settings.handStyle, settings.staffWaiting,
@@ -1510,8 +1629,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Writes [preset] into slot [number] of [quest]'s Hub (PRESET_SET) and waits for READY / FAILED / no answer.
-     * Checked first (allow list, option tables, count, name, 1024 bytes); the foreground demo is confirmed with a
-     * DISCOVER as for CONTROL. Returns the result text and state for the caller's own display.
+     * Checked first (allow list, option tables, count, name, 1024 bytes); then the Hub in front is confirmed with a
+     * fresh STATE ([checkHubFront]). Returns the result text and state for the caller's own display.
      */
     private suspend fun writeHubPreset(quest: QuestState, number: Int, preset: HubPreset, onAck: () -> Unit): Pair<String, LogState> {
         val config = authConfig
@@ -1519,12 +1638,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val refused = { reason: String -> addLog(quest.label, content, null, LogState.ERROR, reason); reason to LogState.ERROR }
         if (!config.canSend) return refused("認証が未設定です")
         HubPresets.problem(controllerId, number, preset, hubSettings[quest.ip]?.demos)?.let { return refused(it) }
-        if (probeForegroundDemo(quest.ip, config) != DemoCatalog.HUB_ID) return refused(HubPresets.HUB_NOT_RUNNING)
-        if (quests.firstOrNull { it.ip == quest.ip }?.remoteState?.foreground == false) {
-            queryState(quest.ip)
-            return refused(HubPresets.HUB_NOT_FOREGROUND)
-        }
-        if (quests.firstOrNull { it.ip == quest.ip }?.remoteState?.screen == "manage") return refused(HubPresets.HUB_MANAGE_OPEN)
+        checkHubFront(quest)?.let { return refused(it) }
         val seq = reserveSeq() ?: return "sequence を確保できなかったため送信を中止しました" to LogState.ERROR
         val payload = DemoSwitchProtocol.buildPresetSet(
             controllerId, seq, number, preset.name, preset.visible, HubPresets.normalize(preset.steps), config,
@@ -1549,17 +1663,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!config.canSend) return
         val content = "Hub のプリセット $number を開始"
         viewModelScope.launch {
-            if (probeForegroundDemo(quest.ip, config) != DemoCatalog.HUB_ID) {
-                addLog(quest.label, content, null, LogState.ERROR, HubPresets.HUB_NOT_RUNNING)
-                return@launch
-            }
-            if (quests.firstOrNull { it.ip == quest.ip }?.remoteState?.foreground == false) {
-                addLog(quest.label, content, null, LogState.ERROR, HubPresets.HUB_NOT_FOREGROUND)
-                queryState(quest.ip)
-                return@launch
-            }
-            if (quests.firstOrNull { it.ip == quest.ip }?.remoteState?.screen == "manage") {
-                addLog(quest.label, content, null, LogState.ERROR, HubPresets.HUB_MANAGE_OPEN)
+            checkHubFront(quest)?.let {
+                addLog(quest.label, content, null, LogState.ERROR, it)
                 return@launch
             }
             val seq = reserveSeq() ?: return@launch
@@ -1577,6 +1682,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         logImport("QR")
     }
 
+    /** Indices of the pending import already written to the Hub (not kept again by [keepImportForLater]). */
+    private val importWritten = mutableSetOf<Int>()
+
     /** `hapbeat-remote://preset?d=...` opened from the browser. Other URIs are ignored. */
     fun importFromLink(uri: String) {
         val token = PresetTransfer.tokenFromLink(uri) ?: return
@@ -1590,20 +1698,20 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * The user approved: writes imported preset i into Hub slot [targets][i] with PRESET_SET, one after another
-     * (the Hub takes one operation at a time). Nothing is started. While the Hub is not in front the import waits
-     * (the dialog stays open); a failure keeps the dialog open with the reason.
+     * (the Hub takes one operation at a time). Nothing is started. Each write checks the Hub with a fresh STATE first;
+     * a failure keeps the dialog open with the reason, where the rest can be kept for later ([keepImportForLater]).
      */
     fun confirmImport(targets: List<Int>) {
         val imported = (pendingImport as? TransferResult.Accepted)?.presets ?: return
         if (importRunning) return
         if (targets.size != imported.size || targets.toSet().size != targets.size || targets.any { it !in HubPresets.NUMBERS }) return
-        // Not writable now: the dialog stays open and says why (「Hub を開いてから取り込んでください」).
         val quest = selectedQuest ?: return
-        if (hubPresetBlockReason != null) return
+        if (demoSwitchBlockReason != null) return
         importRunning = true
         viewModelScope.launch {
             try {
                 imported.forEachIndexed { i, preset ->
+                    if (i in importWritten) return@forEachIndexed
                     val number = targets[i]
                     importStatus = "プリセット $number に書き込み中…（${i + 1}/${imported.size}）" to false
                     // Shown on the Hub's top screen: the transfer format has no visibility of its own.
@@ -1613,8 +1721,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                         if (selectedIp == quest.ip) readHubPresets(targets.take(i + 1))
                         return@launch
                     }
+                    importWritten += i
                 }
                 pendingImport = null
+                importWritten.clear()
                 importStatus = "" to false
                 setNotice("Hub のプリセットに ${imported.size} 件書き込みました", false)
                 if (selectedIp == quest.ip) readHubPresets(targets)
@@ -1627,11 +1737,82 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissImport() {
         if (importRunning) return
         pendingImport = null
+        importWritten.clear()
         importStatus = "" to false
     }
 
-    private fun logImport(source: String) {
+    /**
+     * The Hub is not in front or does not answer: keeps the imported presets not written yet on the phone as unwritten,
+     * each with its chosen slot (written later from the session tab). Closes the dialog.
+     */
+    fun keepImportForLater(targets: List<Int>) {
+        val imported = (pendingImport as? TransferResult.Accepted)?.presets ?: return
+        if (importRunning) return
+        if (targets.size != imported.size || targets.toSet().size != targets.size || targets.any { it !in HubPresets.NUMBERS }) return
+        val keep = imported.indices.filter { it !in importWritten }
+        val updated = UnwrittenPresets.add(unwrittenPresets, keep.map { imported[it] }, keep.map { targets[it] })
+        unwrittenPresets.clear()
+        unwrittenPresets.addAll(updated)
+        saveUnwritten()
+        pendingImport = null
+        importWritten.clear()
         importStatus = "" to false
+        setNotice("未書き込みのプリセットとしてスマホに ${keep.size} 件保存しました（デモ開始タブから Hub に書き込めます）", false)
+        fileLog("取り込み: ${keep.size} 件を未書き込みとして保存")
+    }
+
+    private fun saveUnwritten() {
+        settings.unwrittenPresets = UnwrittenPresets.encode(unwrittenPresets)
+    }
+
+    /** Changes the Hub slot an unwritten preset goes into. */
+    fun setUnwrittenSlot(id: Long, slot: Int) {
+        if (slot !in HubPresets.NUMBERS || unwrittenWriting == id) return
+        val i = unwrittenPresets.indexOfFirst { it.id == id }
+        if (i < 0) return
+        unwrittenPresets[i] = unwrittenPresets[i].copy(slot = slot)
+        saveUnwritten()
+    }
+
+    fun deleteUnwritten(id: Long) {
+        if (unwrittenWriting == id) return
+        if (unwrittenPresets.removeAll { it.id == id }) {
+            saveUnwritten()
+            unwrittenStatus = "" to false
+        }
+    }
+
+    /**
+     * 「Hub に書き込む」: PRESET_SET of the unwritten preset [id] into its slot of the selected HMD's Hub (`visible` true,
+     * like an import). Removed from the phone once written; kept with the reason otherwise.
+     */
+    fun writeUnwritten(id: Long) {
+        val item = unwrittenPresets.firstOrNull { it.id == id } ?: return
+        val quest = selectedQuest ?: return
+        if (unwrittenWriting != null || importRunning || demoSwitchBlockReason != null) return
+        unwrittenWriting = id
+        unwrittenStatus = "「${item.preset.name}」をプリセット ${item.slot} に書き込み中…" to false
+        viewModelScope.launch {
+            try {
+                val (text, state) = writeHubPreset(quest, item.slot, HubPreset(item.preset.name, visible = true, item.preset.steps)) {}
+                if (state == LogState.READY) {
+                    unwrittenPresets.removeAll { it.id == id }
+                    saveUnwritten()
+                    unwrittenStatus = "「${item.preset.name}」をプリセット ${item.slot} に書き込みました" to false
+                    if (selectedIp == quest.ip) readHubPresets(listOf(item.slot))
+                } else {
+                    unwrittenStatus = "プリセット ${item.slot} に書き込めませんでした: $text" to true
+                }
+            } finally {
+                unwrittenWriting = null
+            }
+        }
+    }
+
+    private fun logImport(source: String) {
+        importWritten.clear()
+        importStatus = "" to false
+        refreshHubState()
         when (val result = pendingImport) {
             is TransferResult.Accepted -> fileLog("取り込み（$source）: ${result.presets.size} 件を確認待ち")
             is TransferResult.Rejected -> fileLog("取り込み（$source）: 拒否 ${result.message}")
@@ -1642,9 +1823,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun startThroughHub(title: String, command: String) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
+        resetPortDiagnosis()
         viewModelScope.launch {
             val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
-            val response = adbShell(quest.ip, command)
+            val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(DemoCatalog.HUB_PACKAGE) + command)
             if (response == null) {
                 updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
                 return@launch
@@ -1665,9 +1847,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun launchApp(app: DemoApp) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
+        resetPortDiagnosis()
         viewModelScope.launch {
             val logId = addLog(quest.label, "起動 ${app.label}（adb）", null, LogState.SENT)
-            val response = adbShell(quest.ip, DemoCatalog.launchCommand(app))
+            val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(app.packageName) + DemoCatalog.launchCommand(app))
             if (response == null) {
                 updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
                 return@launch
@@ -1682,6 +1865,137 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 runDiscoveryRound()
             }
         }
+    }
+
+    // ---- Demo Switch does not answer: adb diagnosis (demo-switch-control.md「Transport and lifecycle」) ----
+
+    /**
+     * Diagnoses the selected [ip] once per period without a Demo Switch answer ([portDiagnosedIp]), when adb is
+     * connected. Only reads (dumpsys / pidof / logcat); nothing is stopped without the user's button.
+     */
+    private fun maybeDiagnosePort(ip: String) {
+        if (!foreground || ip != selectedIp || portDiagnosedIp == ip || portActionRunning) return
+        if (selectedQuest?.adb != AdbState.CONNECTED) return
+        portDiagnosedIp = ip
+        viewModelScope.launch { diagnosePort(ip) }
+    }
+
+    /**
+     * The front app (topResumedActivity) is a known demo (Hub included) that does not answer: lists the other known demos
+     * still running and reads the front app's last Demo Switch log lines, then shows the cause ([PortDiagnosis.classify]).
+     */
+    private suspend fun diagnosePort(ip: String) {
+        val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+        val top = adbShell(ip, PortDiagnosis.TOP_ACTIVITY_COMMAND)?.output ?: return
+        val front = PortDiagnosis.frontDemo(top)
+        if (front == null) {
+            fileLog("$label $ip Demo Switch 応答なし: 前面は既知のデモではありません（${top.trim().take(160)}）")
+            return
+        }
+        if (portDiagnosedIp != ip) return
+        portStatus = "${front.label} が Demo Switch に応答しません。原因を調べています…" to false
+        val running = adbShell(ip, PortDiagnosis.runningOthersCommand(front.packageName))?.output
+            ?.let { PortDiagnosis.parseRunning(it, front.packageName) }
+        val log = adbShell(ip, PortDiagnosis.logCommand(front.packageName))?.output
+        // It answered, or another HMD was selected, in the meantime: nothing to show.
+        if (portDiagnosedIp != ip || ip != selectedIp) return
+        if (running == null || log == null) {
+            portStatus = "" to false
+            return
+        }
+        val lines = PortDiagnosis.relevantLines(log)
+        val cause = PortDiagnosis.classify(lines, running)
+        portFront = front
+        portStatus = "${front.label} が応答しません: ${PortDiagnosis.text(cause)}" to true
+        portAction = if (cause is PortCause.BackgroundDemo) PortAction.STOP_BACKGROUND else PortAction.NONE
+        fileLog("$label $ip Demo Switch 診断: 前面 ${front.packageName}、裏 ${running.joinToString(" ") { it.packageName }.ifEmpty { "なし" }}" +
+            "、ログ ${lines.takeLast(PortDiagnosis.TAIL_LINES).joinToString(" | ").ifEmpty { "なし" }}")
+    }
+
+    /** The selected HMD answered Demo Switch: the diagnosis no longer applies (a running button keeps its own text). */
+    private fun onSelectedAnswered() {
+        if (portDiagnosedIp != null || portStatus.first.isNotEmpty()) resetPortDiagnosis()
+    }
+
+    /** Starts a new diagnosis period; [force] also while a button runs (another HMD selected). */
+    private fun resetPortDiagnosis(force: Boolean = false) {
+        if (portActionRunning && !force) return
+        portDiagnosedIp = null
+        portFront = null
+        portStatus = "" to false
+        portAction = PortAction.NONE
+    }
+
+    /**
+     * 「裏のデモを止める」: force-stops every known demo except the one in front, then waits a few seconds for Demo Switch.
+     * The receiver retries its bind while in front, so no restart is needed; when no answer comes (a receiver that gave
+     * up its retry), 「前面のアプリを再起動」 is offered.
+     */
+    fun stopBackgroundDemos() {
+        val front = portFront ?: return
+        runPortAction("裏のデモを止める", DemoCatalog.stopOtherDemosCommand(front.packageName), front,
+            "裏のデモを止めました。${front.label} の応答を待っています…", PORT_STOP_WAIT_MS,
+            "${front.label} の応答が戻りません（受信側の版が古く、ポートの再試行を止めている可能性）。前面のアプリを再起動してください")
+    }
+
+    /** 「前面のアプリを再起動」: force-stops the demo in front (and the other demos) and starts it again (the Hub: the Hub). */
+    fun restartFrontApp() {
+        val front = portFront ?: return
+        runPortAction("${front.label} を再起動", DemoCatalog.restartCommand(front), front,
+            "${front.label} を再起動しました。応答を待っています…", PORT_RESTART_WAIT_MS,
+            "再起動しても ${front.label} が応答しません")
+    }
+
+    private fun runPortAction(content: String, command: String, front: DemoApp, waiting: String, waitMs: Long, noAnswer: String) {
+        val quest = selectedQuest ?: return
+        if (portActionRunning || quest.adb != AdbState.CONNECTED) return
+        val ip = quest.ip
+        portActionRunning = true
+        portStatus = "$content…" to false
+        viewModelScope.launch {
+            try {
+                val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
+                val response = adbShell(ip, command)
+                if (response == null) {
+                    updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
+                    if (ip == selectedIp) portStatus = "adb 接続が切れました" to true
+                    return@launch
+                }
+                val summary = response.allOutput.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.lastOrNull()?.take(120) ?: ""
+                val ok = response.exitCode == 0
+                updateLog(logId) {
+                    it.copy(state = if (ok) LogState.READY else LogState.FAILED, detail = "exit ${response.exitCode}${if (summary.isEmpty()) "" else " / $summary"}")
+                }
+                if (ip == selectedIp) portStatus = waiting to false
+                val answered = waitForDemoSwitch(ip, waitMs)
+                if (ip != selectedIp) return@launch
+                if (answered != null) {
+                    portDiagnosedIp = null
+                    portFront = null
+                    portAction = PortAction.NONE
+                    portStatus = "${DemoCatalog.labelFor(answered)} が応答しました" to false
+                    addLog(quest.label, "Demo Switch の応答が戻りました（${DemoCatalog.labelFor(answered)}）", null, LogState.INFO)
+                } else {
+                    portStatus = noAnswer to true
+                    portAction = PortAction.RESTART_FRONT
+                    addLog(quest.label, "$content の後", null, LogState.NO_RESPONSE, "${front.label} が Demo Switch に応答しません")
+                }
+            } finally {
+                portActionRunning = false
+            }
+        }
+    }
+
+    /** A unicast DISCOVER to [ip] every [PORT_POLL_MS] for at most [waitMs]; the demo ID that answered, or null. */
+    private suspend fun waitForDemoSwitch(ip: String, waitMs: Long): String? {
+        val deadline = SystemClock.elapsedRealtime() + waitMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val config = authConfig
+            if (!config.canSend) return null
+            probeForegroundDemo(ip, config)?.let { return it }
+            delay(PORT_POLL_MS)
+        }
+        return null
     }
 
     // ---- Wi-Fi adb over USB -------------------------------------------------------------------------
@@ -2042,8 +2356,13 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_LOGS = 20
         const val FOLLOW_AUTH_WAIT_MS = 3_000L
         const val QUERY_TIMEOUT_MS = 1_500L
-        const val PRESET_GET_TIMEOUT_MS = 1_000L
-        const val PRESET_GET_ATTEMPTS = 2
+        /** A fresh STATE before a Hub write ([fetchState]): wait per QUERY, and how many QUERYs. */
+        const val STATE_WAIT_MS = 1_200L
+        const val STATE_ATTEMPTS = 3
+        /** DISCOVERs when no STATE came ([checkHubFront]). */
+        const val PROBE_ATTEMPTS = 3
+        const val PRESET_GET_TIMEOUT_MS = 1_500L
+        const val PRESET_GET_ATTEMPTS = 3
         const val ACTION_PRESET_SET = "preset_set"
         const val ACTION_PRESET_START = "preset_start"
         const val ACTION_HUB_SETTINGS_SET = "hub_settings_set"
@@ -2054,6 +2373,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val HUB_FRONT_WAIT_MS = 10_000L
         const val HUB_FRONT_POLL_MS = 1_000L
         const val ADB_RESCAN_INTERVAL_MS = 30_000L
+        /** After 「裏のデモを止める」 (the receiver retries its bind every second) / 「前面のアプリを再起動」 (app start). */
+        const val PORT_STOP_WAIT_MS = 6_000L
+        const val PORT_RESTART_WAIT_MS = 20_000L
+        const val PORT_POLL_MS = 1_000L
         const val USB_PERMISSION_WAIT_MS = 60_000L
         /** tcpip restarts adbd, which re-enumerates on USB and sends ATTACHED again. */
         const val USB_REATTACH_IGNORE_MS = 20_000L

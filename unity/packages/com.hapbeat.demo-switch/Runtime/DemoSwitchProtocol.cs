@@ -1188,7 +1188,8 @@ namespace Hapbeat.DemoSwitch
 
         public static bool IsControlAction(string action) => action == "menu_open" || action == "menu_close"
             || action == "restart" || action == "scene" || action == "tutorial_start" || IsHapticsAction(action) || IsRecenterAction(action)
-            || IsHandStyleAction(action) || action == "session_next" || action == "session_retry" || action == "hub_top" || action == "hub_replay";
+            || IsHandStyleAction(action) || action == "session_next" || action == "session_retry" || action == "hub_top" || action == "hub_replay"
+            || action == "haptics_test";
 
         /// <summary>`hand_style_ghost` / `hand_style_skin`: the look of the shared hands.</summary>
         public static bool IsHandStyleAction(string action) => action == "hand_style_ghost" || action == "hand_style_skin";

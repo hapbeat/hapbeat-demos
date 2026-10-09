@@ -114,6 +114,15 @@ class StateQueryTest {
     }
 
     @Test
+    fun stopOtherDemosLeavesTheTargetRunning() {
+        val command = DemoCatalog.stopOtherDemosCommand(DemoCatalog.HUB_PACKAGE)
+        assertTrue(command.startsWith("for p in ") && command.endsWith("done; "))
+        assertFalse(command.contains(DemoCatalog.HUB_PACKAGE))
+        assertTrue(command.contains("jp.hapbeat.energyduel"))
+        assertTrue(DemoCatalog.stopOtherDemosCommand("jp.hapbeat.energyduel").contains(DemoCatalog.HUB_PACKAGE))
+    }
+
+    @Test
     fun shellQuoteEscapesSingleQuotes() {
         assertEquals("""'a'\''b'""", DemoCatalog.shellQuote("a'b"))
         assertEquals("'{}'", DemoCatalog.shellQuote("{}"))

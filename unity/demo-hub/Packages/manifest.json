@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "com.hapbeat.demo-switch": "file:../../packages/com.hapbeat.demo-switch",
+    "com.hapbeat.sdk": "file:../../../../repos-sdk/hapbeat-unity-sdk",
     "com.unity.inputsystem": "1.14.2",
     "com.unity.ugui": "2.0.0",
     "com.unity.test-framework": "1.6.0",
@@ -8,10 +9,12 @@
     "com.unity.xr.hands": "1.7.3",
     "com.unity.xr.openxr": "1.15.1",
     "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.animation": "1.0.0",
     "com.unity.modules.audio": "1.0.0",
     "com.unity.modules.imgui": "1.0.0",
     "com.unity.modules.jsonserialize": "1.0.0",
     "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.physics2d": "1.0.0",
     "com.unity.modules.ui": "1.0.0",
     "com.unity.modules.uielements": "1.0.0",
     "com.unity.modules.xr": "1.0.0"

@@ -32,7 +32,8 @@ import com.hapbeat.demoremote.data.TransferResult
 /**
  * Confirmation before presets from a QR / link are written to the selected HMD's Hub: name and demo order (with
  * options) of each one, and the slot (1..3) it goes into, saying when that slot is overwritten. Writing never starts
- * a session. While the Hub is not in front the dialog stays open and waits. A refused payload shows only the reason.
+ * a session. While the Hub is not in front (or a write failed) 後で書き込む keeps them on the phone as unwritten, with
+ * the chosen slots. A refused payload shows only the reason.
  */
 @Composable
 fun PresetImportDialog(vm: RemoteViewModel) {
@@ -79,11 +80,11 @@ fun PresetImportDialog(vm: RemoteViewModel) {
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        // Fixed line: progress / failure, else why writing waits.
+                        // Fixed line: progress / failure, else why writing may not work now.
                         val (status, error) = when {
                             vm.importStatus.first.isNotEmpty() -> vm.importStatus
                             duplicate -> "同じ枠を 2 回選んでいます" to true
-                            block != null -> "Hub を開いてから取り込んでください（$block）" to true
+                            block != null -> "$block。「後で書き込む」でスマホに保存できます" to true
                             else -> " " to false
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall, color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -91,14 +92,22 @@ fun PresetImportDialog(vm: RemoteViewModel) {
                     }
                 },
                 confirmButton = {
+                    // The Hub is checked with a fresh STATE when pressed, so a stale "not in front" does not block it.
                     TextButton(
                         onClick = { vm.confirmImport(targets.toList()) },
-                        enabled = !duplicate && block == null && !vm.importRunning,
+                        enabled = !duplicate && vm.demoSwitchBlockReason == null && !vm.importRunning,
                         modifier = Modifier.width(112.dp),
                     ) { Text("書き込む") }
                 },
                 dismissButton = {
-                    TextButton(onClick = vm::dismissImport, enabled = !vm.importRunning) { Text("やめる") }
+                    Row {
+                        // Only when the Hub cannot take it now (not in front / no answer / a write failed).
+                        TextButton(
+                            onClick = { vm.keepImportForLater(targets.toList()) },
+                            enabled = !duplicate && !vm.importRunning && (block != null || vm.importStatus.second),
+                        ) { Text("後で書き込む（スマホに保存）") }
+                        TextButton(onClick = vm::dismissImport, enabled = !vm.importRunning) { Text("やめる") }
+                    }
                 },
             )
         }
@@ -106,7 +115,7 @@ fun PresetImportDialog(vm: RemoteViewModel) {
 }
 
 /** What writing into slot [number] replaces: (text, true when existing content is overwritten). */
-private fun slotNote(number: Int, slot: HubPresetSlot?): Pair<String, Boolean> = when {
+internal fun slotNote(number: Int, slot: HubPresetSlot?): Pair<String, Boolean> = when {
     slot == null -> "プリセット $number の中身は未確認です（あれば上書き）" to true
     slot.stepCount == 0 && slot.preset.name.isEmpty() -> "プリセット $number は空きです" to false
     else -> "上書き: プリセット $number「${slot.preset.name.ifEmpty { "名前なし" }}」（${slot.stepCount} 本）" to true

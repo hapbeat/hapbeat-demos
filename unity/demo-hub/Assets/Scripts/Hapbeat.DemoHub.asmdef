@@ -3,9 +3,17 @@
   "rootNamespace": "Hapbeat.DemoHub",
   "references": [
     "Hapbeat.DemoSwitch",
+    "Hapbeat.Runtime",
     "Unity.Newtonsoft.Json",
     "UnityEngine.UI"
   ],
   "autoReferenced": true,
+  "versionDefines": [
+    {
+      "name": "com.hapbeat.sdk",
+      "expression": "0.0.0",
+      "define": "HAPBEAT_DEMO_HUB_HAS_SDK"
+    }
+  ],
   "noEngineReferences": false
 }

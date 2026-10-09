@@ -96,6 +96,7 @@ namespace Hapbeat.DemoSwitch.Tests
         [TestCase("session_retry")]
         [TestCase("hub_top")]
         [TestCase("hub_replay")]
+        [TestCase("haptics_test")]
         public void NewActionsAreControlActionsWithAnEmptyScene(string action)
         {
             string json = "{\"version\":1,\"type\":\"CONTROL\",\"controller_id\":\"remote-pixel\",\"seq\":48,\"demo_id\":\"handdemo\",\"action\":\"" + action + "\",\"scene_id\":\"\"}";

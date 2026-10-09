@@ -52,8 +52,8 @@ namespace Hapbeat.DemoSwitch
 
     /// <summary>
     /// The Hub's side of the Hub presets, Hub settings, Hub start and the Hub's CONTROL actions (`hub_top`, `hub_replay`,
-    /// `hand_style_*`). Only the Hub registers one (<see cref="DemoSwitchHub.RegisterHost"/>); without a host the receiver drops
-    /// PRESET_* / HUB_* messages without a reply and refuses `hub_top` / `hub_replay`. The receiver owns authentication,
+    /// `hand_style_*`, `haptics_test`). Only the Hub registers one (<see cref="DemoSwitchHub.RegisterHost"/>); without a host the receiver drops
+    /// PRESET_* / HUB_* messages without a reply and refuses `hub_top` / `hub_replay` / `haptics_test`. The receiver owns authentication,
     /// foreground, sequence and status; the host only reads, checks, stores and starts.
     /// </summary>
     public interface IDemoSwitchHubHost
@@ -112,6 +112,16 @@ namespace Hapbeat.DemoSwitch
         /// settings. False with the error when it could not start; <paramref name="onFailed"/> as in <see cref="TryStartPreset"/>.
         /// </summary>
         bool TryReplay(Action<string> onFailed, out string error);
+
+        /// <summary>Whether this Hub was built with the Hapbeat SDK; without it CONTROL `haptics_test` is refused (`FAILED/not_allowed`).</summary>
+        bool HasHapticsTest { get; }
+
+        /// <summary>
+        /// CONTROL `haptics_test` (every screen, the manage screen included): the manage screen's 触覚テスト, a 100 Hz sine for 1 s
+        /// at a fixed moderate level to this headset's device address. True once the tone is handed to the Hapbeat SDK (not when
+        /// it ends); false with the error when the SDK did not take it.
+        /// </summary>
+        bool TryPlayHapticsTest(out string error);
     }
 
     /// <summary>STATE `screen` values (contracts: State query).</summary>

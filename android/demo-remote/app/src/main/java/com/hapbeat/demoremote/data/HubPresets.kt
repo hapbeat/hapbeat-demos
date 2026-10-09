@@ -127,7 +127,27 @@ object HubPresets {
         }
     }
 
-    const val HUB_NOT_RUNNING = "Hub が起動していません（「Hub を開く」で開けます）"
+    /**
+     * Why the HMD's Hub cannot take a preset / settings write or a start now, or null. [state]: its last STATE (null
+     * when none is known); [lastDemoId]: the foreground demo of its last HERE ("" when it did not answer).
+     */
+    fun hubFrontProblem(state: DemoSwitchMessage.State?, lastDemoId: String, hubDemos: List<HubDemo>? = null): String? = when {
+        state != null && state.currentDemoId != DemoCatalog.HUB_ID -> otherDemoInFront(state.currentDemoId, hubDemos)
+        state != null && !state.foreground -> HUB_NOT_FOREGROUND
+        state != null && state.screen == "manage" -> HUB_MANAGE_OPEN
+        state != null -> null
+        lastDemoId == DemoCatalog.HUB_ID -> HUB_STATE_UNKNOWN
+        lastDemoId.isNotEmpty() -> otherDemoInFront(lastDemoId, hubDemos)
+        else -> HUB_NO_RESPONSE
+    }
+
+    fun otherDemoInFront(demoId: String, hubDemos: List<HubDemo>? = null): String =
+        "前面は Hub ではなく ${DemoCatalog.labelFor(demoId, hubDemos)} です（「Hub を開く」で切り替えられます）"
+
+    /** Neither STATE nor HERE came back (Demo Switch). */
+    const val HUB_NO_RESPONSE = "HMD が応答しません（Hub が起動していない・スリープ・Wi-Fi の不調）"
+    /** HERE says the Hub is in front, but its STATE did not come back (or is not known yet). */
+    const val HUB_STATE_UNKNOWN = "Hub は前面ですが、状態の問い合わせに応答がありません（少し待つか、もう一度試してください）"
     const val HUB_NOT_FOREGROUND = "Hub が前面にありません（HMD 内でメニューや一時停止を閉じてください）"
     /** STATE `screen` manage: the Hub refuses preset and settings writes until the manage screen is closed. */
     const val HUB_MANAGE_OPEN = "Hub の管理画面が開いています（閉じてから操作してください）"

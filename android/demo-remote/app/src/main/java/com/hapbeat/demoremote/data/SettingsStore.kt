@@ -103,6 +103,11 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = prefs.getBoolean(KEY_SHOW_EDITORS, false)
         set(value) { prefs.edit().putBoolean(KEY_SHOW_EDITORS, value).apply() }
 
+    /** Presets imported from a QR / link and not written to a Hub yet ([UnwrittenPresets] JSON; "" = none). */
+    var unwrittenPresets: String
+        get() = prefs.getString(KEY_UNWRITTEN_PRESETS, null) ?: ""
+        set(value) { prefs.edit().putString(KEY_UNWRITTEN_PRESETS, value).apply() }
+
     private companion object {
         const val KEY_CONTROLLER_ID = "controller_id"
         const val KEY_NEXT_SEQ = "next_seq"
@@ -118,5 +123,6 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_MIRROR_ENABLED = "mirror_enabled"
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         const val KEY_SHOW_EDITORS = "show_editors"
+        const val KEY_UNWRITTEN_PRESETS = "unwritten_presets"
     }
 }

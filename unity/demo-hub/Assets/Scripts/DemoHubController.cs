@@ -61,6 +61,9 @@ namespace Hapbeat.DemoHub
         public const string StartNotInstalled = "未インストールです: ";
         public const string StartPresetEmpty = "プリセット {0} にインストール済みのデモがありません";
         public const string StartStep = "ステップ {0}: ";
+        public const string HapticsTest = "触覚テスト";
+        public const string HapticsTestSent = "触覚テスト: プレイヤー {0} / グループ {1} へ 100 Hz・1 秒";
+        public const string HapticsTestFailed = "触覚テストを送れませんでした: ";
 
         public static IEnumerable<string> All => typeof(HubText).GetFields()
             .Where(f => f.IsLiteral && f.FieldType == typeof(string)).Select(f => (string)f.GetRawConstantValue());
@@ -74,8 +77,8 @@ namespace Hapbeat.DemoHub
     /// Every screen shows everything at once (no pages) on one world-space panel that is placed once and
     /// then stays put; the package's 視線をリセット button (shown when the manage screen turns it on) and a
     /// system recenter place it in front of the head again. A controller reads and changes the presets and the Hub-wide settings,
-    /// starts sessions and leaves the manage or finish screen over Demo Switch (<see cref="IDemoSwitchHubHost"/>); only
-    /// `hub_top` is accepted while the manage screen is open.
+    /// starts sessions, leaves the manage or finish screen and plays the 触覚テスト over Demo Switch (<see cref="IDemoSwitchHubHost"/>);
+    /// only `hub_top` and `haptics_test` are accepted while the manage screen is open.
     /// </summary>
     public sealed class DemoHubController : MonoBehaviour, IDemoSwitchHubHost
     {
@@ -106,6 +109,7 @@ namespace Hapbeat.DemoHub
         private const float StatusHeight = 22f;
         private const float FooterButtonWidth = 190f;
         private const float DoneWidth = 120f;
+        private const float HapticsTestWidth = 140f;
         private const float FooterGap = 8f;
         /// <summary>Long press on a row's grip before it can be dragged.</summary>
         internal const float DragHoldSeconds = 0.5f;
@@ -148,6 +152,9 @@ namespace Hapbeat.DemoHub
         private DemoDeviceAddress _deviceAddress;
         private DemoSessionButton _manageButton;
 
+        /// <summary>Where the 触覚テスト tone goes: the Hapbeat SDK, or null in a Hub built without it (tests replace it).</summary>
+        internal HubHapticsTest.Output HapticsOutput = HubHapticsTest.SdkOutput;
+
         public HubScreen Screen { get; private set; }
         public HubSettings Settings { get; private set; } = new HubSettings();
         /// <summary>The preset shown in the manage screen (the last preset while the tiles tab is open).</summary>
@@ -170,6 +177,7 @@ namespace Hapbeat.DemoHub
         private void Start()
         {
             _deviceAddress = DemoDeviceAddress.LoadForThisDevice();
+            if (HapticsOutput != null) HubHapticsTest.StartSdk();
             Initialize(HubCatalog.Load(), HubPlanStore.Default);
             DemoRecenter.Recentered += Recenter;
             DemoSwitchHub.RegisterHost(this);
@@ -499,7 +507,7 @@ namespace Hapbeat.DemoHub
         /// </summary>
         internal Vector2 ManageSize => new Vector2(
             Mathf.Max(Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
-                Margin + 4f * (FooterButtonWidth + FooterGap) + DoneWidth + Margin,
+                Margin + 4f * (FooterButtonWidth + FooterGap) + HapticsTestWidth + FooterGap + DoneWidth + Margin,
                 Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + Margin),
             Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + 4f + StatusHeight + Margin);
 
@@ -556,7 +564,7 @@ namespace Hapbeat.DemoHub
                 BuildPresetTab(size);
             }
 
-            // Footer: settings shared by every launch, then done right after them; the status line below never moves them.
+            // Footer: settings shared by every launch, 触覚テスト, then done; the status line below never moves them.
             var footerY = -size.y * 0.5f + Margin + StatusHeight + 4f + BarHeight * 0.5f;
             var x = left;
             DemoSessionButton Footer(float width, string label, int fontSize, System.Action press)
@@ -581,6 +589,7 @@ namespace Hapbeat.DemoHub
                 ApplyHandStyle();
                 SettingsChanged();
             });
+            Footer(HapticsTestWidth, HubText.HapticsTest, 18, () => TryPlayHapticsTest(out _)).Interactable = HasHapticsTest;
             Footer(DoneWidth, HubText.Done, 20, () => Show(HubScreen.Top));
             _panel.AddText(new Vector2(0, -size.y * 0.5f + Margin + StatusHeight * 0.5f), new Vector2(size.x - 2f * Margin, StatusHeight), _status, 15, Warning);
         }
@@ -945,6 +954,35 @@ namespace Hapbeat.DemoHub
         {
             if (_panel == null || Screen != HubScreen.Top) Show(HubScreen.Top);
         }
+
+        // ---------------------------------------------------------- haptics test
+
+        public bool HasHapticsTest => HapticsOutput != null;
+
+        /// <summary>
+        /// The manage screen's 触覚テスト and CONTROL `haptics_test` (every screen): hands the 100 Hz, 1 s tone to the SDK for this
+        /// device's address and shows that address, or the error, on the status line. The screen stays.
+        /// </summary>
+        public bool TryPlayHapticsTest(out string error)
+        {
+            bool played;
+            if (HapticsOutput == null)
+            {
+                error = "This Hub was built without the Hapbeat SDK.";
+                played = false;
+            }
+            else played = HapticsOutput(HubHapticsTest.Samples(HubHapticsTest.SampleRate), HubHapticsTest.SampleRate, HubHapticsTest.Gain, out error);
+            if (played) Debug.Log("[Demo Hub] Haptics test: " + HubHapticsTest.FrequencyHz + " Hz, " + HubHapticsTest.DurationSeconds + " s, gain " + HubHapticsTest.Gain);
+            else Debug.LogWarning("[Demo Hub] Haptics test failed: " + error);
+            if (_panel != null) SetStatus(played ? HapticsTestLine(_deviceAddress) : HubText.HapticsTestFailed + error);
+            return played;
+        }
+
+        /// <summary>The status line after a 触覚テスト: this device's address as on the top screen.</summary>
+        internal static string HapticsTestLine(DemoDeviceAddress address) =>
+            string.Format(CultureInfo.InvariantCulture, HubText.HapticsTestSent,
+                Axis(address == null ? DemoDeviceAddress.Unspecified : address.Player),
+                Axis(address == null ? DemoDeviceAddress.Unspecified : address.Group));
 
         // --------------------------------------------------------------- finish
 

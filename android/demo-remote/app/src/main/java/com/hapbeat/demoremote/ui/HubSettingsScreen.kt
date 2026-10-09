@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hapbeat.demoremote.ControlCatalog
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.RemoteViewModel
@@ -51,6 +52,11 @@ fun HubSettingsScreen(vm: RemoteViewModel, onDone: () -> Unit) {
     )
     // A change after a save makes its result stale.
     LaunchedEffect(draft) { if (!vm.hubSettingsSaving) vm.clearHubSettingsSaveStatus() }
+    LaunchedEffect(Unit) {
+        vm.clearHubHapticsTestStatus()
+        // The reasons below come from the last STATE: ask for a fresh one now.
+        vm.refreshHubState()
+    }
     val block = vm.hubPresetBlockReason
     val problem = draft?.let { HubSettingsAccess.problem(vm.controllerId, it) }
     val canEdit = read != null
@@ -105,6 +111,29 @@ fun HubSettingsScreen(vm: RemoteViewModel, onDone: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            // Any Hub screen accepts it, the manage screen included; no confirmation (a staff operation).
+            val hubInFront = vm.selectedQuest?.remoteState?.currentDemoId == DemoCatalog.HUB_ID
+            ActionButton(
+                ControlCatalog.hubHapticsTest.label,
+                enabled = vm.demoSwitchBlockReason == null && hubInFront,
+                modifier = Modifier.fillMaxWidth(),
+                outlined = true,
+            ) { vm.sendHubHapticsTest() }
+            // Fixed line: the 触覚テスト result (READY / why it failed), or why it cannot be sent.
+            val test = vm.hubHapticsTestStatus
+            val (testText, testColor) = when {
+                test != null -> test.first to when (test.second) {
+                    LogState.READY -> StatusGreen
+                    LogState.SENT, LogState.ACK -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> StatusRed
+                }
+                !hubInFront -> "Hub が前面のときだけ使えます" to MaterialTheme.colorScheme.onSurfaceVariant
+                else -> " " to MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(
+                testText, Modifier.fillMaxWidth().height(20.dp), style = MaterialTheme.typography.bodySmall, color = testColor,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text("トップに出すデモ（押すと表示 / 非表示）", style = MaterialTheme.typography.titleSmall)
             val demos = read?.demos.orEmpty()

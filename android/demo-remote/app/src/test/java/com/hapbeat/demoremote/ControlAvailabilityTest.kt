@@ -33,11 +33,13 @@ class ControlAvailabilityTest {
     fun sessionButtons() {
         assertNotNull(reason("session_next", state()))
         assertNull(reason("session_next", state(stepIndex = 0)))
-        assertNotNull(reason("session_retry", state(stepIndex = 0, screen = "main")))
-        assertNotNull(reason("session_retry", state(stepIndex = 0)))
-        assertNull(reason("session_retry", state(stepIndex = 0, screen = "completion")))
-        // The Hub's finish screen is also `completion`, but it is not a session step.
-        assertNotNull(reason("session_retry", state(demo = DemoCatalog.HUB_ID, screen = "completion")))
+        // 次へ is in 進行 (a group with a reason line); もう一度 and the セッション group are gone.
+        val progress = ControlCatalog.groups.single { it.title == "進行" }
+        assertTrue(progress.stateful)
+        assertTrue(progress.actions.any { it.action == "session_next" })
+        assertTrue(ControlCatalog.groups.none { it.title == "セッション" })
+        assertTrue(ControlCatalog.groups.flatMap { it.actions }.none { it.action == "session_retry" })
+        assertTrue(ControlCatalog.groups.none { it.actions.isEmpty() })
     }
 
     @Test
@@ -50,6 +52,18 @@ class ControlAvailabilityTest {
         assertNotNull(reason("hub_replay", state(demo = DemoCatalog.HUB_ID, screen = "manage")))
         assertNull(reason("hub_replay", state(demo = DemoCatalog.HUB_ID, screen = "completion")))
         assertEquals(DemoCatalog.HUB_ID, action("hub_top").demoId)
+    }
+
+    @Test
+    fun hapticsTestOnEveryHubScreen() {
+        assertNotNull(reason("haptics_test", null))
+        assertNotNull(reason("haptics_test", state()))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "main")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "manage")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID, screen = "completion")))
+        assertNull(reason("haptics_test", state(demo = DemoCatalog.HUB_ID)))
+        assertEquals(DemoCatalog.HUB_ID, action("haptics_test").demoId)
+        assertEquals(ControlCatalog.hubHapticsTest, action("haptics_test"))
     }
 
     @Test
