@@ -159,6 +159,10 @@ Follows contracts `dc89594` (demo-session.md "ナレーションの音量"; tick
 - **Tests**: `DemoNarration.SetVolumeForTests(volume)` (null: back to the ticket or the default); `DemoSession.ResetForTests` clears it.
 - Ducking other sounds under the narration stays each demo's responsibility.
 
+### Dismissing the completion panel from the app (0.1.0-d23)
+
+- **`DemoSession.DismissCompletion()`**: a demo that restarts play itself while the completion panel is shown (Volley: the participant picks another mode from its hand menu) closes the panel and resumes gameplay (`SetGameplayPaused(false)`, `Closed`) like もう一度, but without `Host.Restart()`. Otherwise the panel stays where it was shown while the demo moves the participant, out of reach.
+
 ## Controller flow and IP discovery
 
 The headset IP does not need to be entered manually. When no explicit target IP is configured, broadcast a version 1 `DISCOVER` request to UDP 7710 from the controller's stable UDP port. The running APK (also while it is not in the foreground) authenticates it and unicasts `HERE`, including its current demo ID, back to that source endpoint. Use the discovered address only when the collection window contains one valid responding IPv4; do not choose the first response when multiple headsets answer.

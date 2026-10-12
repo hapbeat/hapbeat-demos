@@ -235,6 +235,12 @@ namespace Hapbeat.DemoSwitch
             return true;
         }
 
+        /// <summary>
+        /// The app restarted play itself while the completion panel was shown (for example the participant picked
+        /// another mode from an in-app menu): close the panel and resume, as もう一度 would, without a host restart.
+        /// </summary>
+        public static void DismissCompletion() => CloseCompletion();
+
         internal static void CloseCompletion(bool notify = true)
         {
             if (_completion == null) return;
