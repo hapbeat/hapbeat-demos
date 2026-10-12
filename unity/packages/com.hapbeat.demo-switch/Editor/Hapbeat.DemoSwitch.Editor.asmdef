@@ -2,7 +2,8 @@
   "name": "Hapbeat.DemoSwitch.Editor",
   "rootNamespace": "Hapbeat.DemoSwitch.Editor",
   "references": [
-    "Hapbeat.DemoSwitch"
+    "Hapbeat.DemoSwitch",
+    "Unity.XR.Hands"
   ],
   "includePlatforms": ["Editor"],
   "autoReferenced": false
