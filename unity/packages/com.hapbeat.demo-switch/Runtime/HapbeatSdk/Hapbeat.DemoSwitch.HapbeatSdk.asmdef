@@ -12,6 +12,11 @@
       "name": "com.hapbeat.sdk",
       "expression": "0.0.0",
       "define": "HAPBEAT_DEMO_SWITCH_HAS_SDK"
+    },
+    {
+      "name": "com.hapbeat.sdk",
+      "expression": "0.7.0-d1",
+      "define": "HAPBEAT_SDK_AV_SYNC"
     }
   ],
   "noEngineReferences": false
