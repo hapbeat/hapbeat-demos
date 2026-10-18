@@ -26,7 +26,9 @@ import androidx.lifecycle.viewModelScope
 import com.hapbeat.demoremote.adb.AdbConnectResult
 import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.AdbRetryPolicy
+import com.hapbeat.demoremote.adb.BoundaryState
 import com.hapbeat.demoremote.adb.QuestAdb
+import com.hapbeat.demoremote.adb.QuestBoundary
 import com.hapbeat.demoremote.adb.UsbAdb
 import com.hapbeat.demoremote.adb.UsbAdbException
 import com.hapbeat.demoremote.adb.UsbAdbKey
@@ -97,6 +99,8 @@ data class QuestState(
     /** Last STATE reply (QUERY); null when the receiver does not support QUERY or the demo changed. */
     val remoteState: DemoSwitchMessage.State? = null,
     val battery: Int? = null,
+    /** Boundary from `getprop debug.oculus.guardian_pause` ([QuestBoundary]); UNKNOWN until read over adb. */
+    val boundary: BoundaryState = BoundaryState.UNKNOWN,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
     /** Read-only state from adb (developer mode, adb, build, uptime); "" until adb has connected. */
@@ -197,6 +201,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var keepScreenOn by mutableStateOf(settings.keepScreenOn); private set
     /** List responders that run inside a development editor (STATE `editor`) too; off by default. */
     var showEditors by mutableStateOf(settings.showEditors); private set
+    /** Pause the boundary on every adb connect ([QuestBoundary]); on by default. */
+    var pauseBoundaryOnConnect by mutableStateOf(settings.pauseBoundaryOnConnect); private set
     var discovering by mutableStateOf(false); private set
     var scanningAdb by mutableStateOf(false); private set
     /** The last Wi-Fi adb connect to the selected Quest failed because port 5555 is closed (USB re-enable helps). */
@@ -244,6 +250,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** The button offered beside [portStatus]. */
     var portAction by mutableStateOf(PortAction.NONE); private set
     var portActionRunning by mutableStateOf(false); private set
+    /** 「境界を止める／戻す」 is running on the selected HMD. */
+    var boundaryRunning by mutableStateOf(false); private set
 
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
@@ -1229,7 +1237,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         // Already handled: another shell on the same connection failed too, or a connect has replaced it.
         if (quests.firstOrNull { it.ip == ip }?.adb != AdbState.CONNECTED) return
         adbConnections[ip]?.close()
-        updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null) }
+        updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null, boundary = BoundaryState.UNKNOWN) }
         if (ip == selectedIp) {
             stopMirror()
             setAdbMessage("adb 接続が切れました。再接続しています…")
@@ -1294,6 +1302,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val packages = adbShell(ip, "pm list packages")?.output?.let { QuestAdb.parsePackages(it) } ?: return
         val battery = adbShell(ip, "dumpsys battery")?.output?.let { QuestAdb.parseBatteryLevel(it) }
         updateQuest(ip) { it.copy(model = model, installed = packages, battery = battery) }
+        // Every connect (manual, automatic, reconnect, after USB): the property may not survive a reboot.
+        if (settings.pauseBoundaryOnConnect) pauseBoundaryOnConnect(ip)
+        refreshBoundary(ip)
         // Read-only state for the diagnosis (uptime tells a reboot apart from a Wi-Fi problem).
         val developer = adbShell(ip, "settings get global development_settings_enabled")?.output ?: return
         val adbEnabled = adbShell(ip, "settings get global adb_enabled")?.output ?: return
@@ -1302,6 +1313,58 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val info = QuestAdb.describeState(developer, adbEnabled, build, uptime)
         updateQuest(ip) { it.copy(info = info) }
         fileLog("${quests.firstOrNull { it.ip == ip }?.label ?: ip} $ip 状態: $info")
+    }
+
+    /** `setprop debug.oculus.guardian_pause 1` right after an adb connect; only a failure goes to the on-screen log. */
+    private suspend fun pauseBoundaryOnConnect(ip: String) {
+        val response = adbShell(ip, QuestBoundary.setCommand(paused = true)) ?: return
+        val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
+        if (response.exitCode != 0) {
+            addLog(label, "境界を止める（接続時）", null, LogState.ERROR, "exit ${response.exitCode}")
+        } else {
+            fileLog("$label $ip 境界を止めました（接続時）")
+        }
+    }
+
+    /** Reads the boundary state into the Quest entry; UNKNOWN when the shell fails. */
+    private suspend fun refreshBoundary(ip: String): BoundaryState {
+        val state = QuestBoundary.parse(adbShell(ip, QuestBoundary.GET_COMMAND)?.output)
+        updateQuest(ip) { it.copy(boundary = state) }
+        return state
+    }
+
+    /** Why 「境界を止める／戻す」 cannot be pressed, or null (they need adb to the selected HMD). */
+    val boundaryBlockReason: String?
+        get() {
+            val quest = selectedQuest ?: return "Quest を一覧から選択してください"
+            return if (quest.adb == AdbState.CONNECTED) null else "adb 接続中だけ使えます（HMD の状態欄の「adb 接続」でつないでください）"
+        }
+
+    /** Pauses ([paused]) or restores the selected HMD's boundary at once (no dialog), then reads it back for the log. */
+    fun setBoundaryPaused(paused: Boolean) {
+        val quest = selectedQuest ?: return
+        if (boundaryRunning || quest.adb != AdbState.CONNECTED) return
+        val ip = quest.ip
+        boundaryRunning = true
+        viewModelScope.launch {
+            try {
+                val content = if (paused) "境界を止める" else "境界を戻す"
+                val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
+                val response = adbShell(ip, QuestBoundary.setCommand(paused))
+                if (response == null) {
+                    updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
+                    return@launch
+                }
+                val state = refreshBoundary(ip)
+                val expected = if (paused) BoundaryState.PAUSED else BoundaryState.ACTIVE
+                val ok = response.exitCode == 0 && state == expected
+                updateLog(logId) {
+                    it.copy(state = if (ok) LogState.READY else LogState.FAILED, detail = "exit ${response.exitCode} / 境界: ${QuestBoundary.label(state)}")
+                }
+            } finally {
+                boundaryRunning = false
+            }
+        }
     }
 
     /** Keeps connected Quests' Wi-Fi awake with a short shell command; a failure marks the connection lost ([adbShell]). */
@@ -1323,6 +1386,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 quests.filter { it.adb == AdbState.CONNECTED }.map { it.ip }.forEach { ip ->
                     val level = adbShell(ip, "dumpsys battery")?.output?.let { QuestAdb.parseBatteryLevel(it) }
                     if (level != null) updateQuest(ip) { it.copy(battery = level) }
+                    refreshBoundary(ip)
                 }
             }
         }
@@ -2342,6 +2406,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowEditorsSetting(value: Boolean) {
         showEditors = value
         settings.showEditors = value
+    }
+
+    fun setPauseBoundaryOnConnectSetting(value: Boolean) {
+        pauseBoundaryOnConnect = value
+        settings.pauseBoundaryOnConnect = value
     }
 
     private companion object {

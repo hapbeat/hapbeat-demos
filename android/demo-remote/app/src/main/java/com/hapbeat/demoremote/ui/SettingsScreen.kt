@@ -53,6 +53,13 @@ fun SettingsScreen(vm: RemoteViewModel, onBack: () -> Unit, onOpenLicenses: () -
             HorizontalDivider()
             UsbAdbSection(vm)
             HorizontalDivider()
+            LabeledSwitch("adb 接続時に境界を止める", vm.pauseBoundaryOnConnect, enabled = true, onChange = vm::setPauseBoundaryOnConnectSetting)
+            Text(
+                "adb がつながるたびに Quest の境界（ガーディアン）を止めます。境界が無いと壁や人に気づけないので、空きのある会場で使ってください。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider()
             LogSection(vm)
             HorizontalDivider()
             MirrorSection(vm)

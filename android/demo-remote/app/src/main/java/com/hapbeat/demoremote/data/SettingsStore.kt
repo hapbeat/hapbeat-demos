@@ -103,6 +103,11 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = prefs.getBoolean(KEY_SHOW_EDITORS, false)
         set(value) { prefs.edit().putBoolean(KEY_SHOW_EDITORS, value).apply() }
 
+    /** Pause the Quest boundary (`debug.oculus.guardian_pause 1`) every time adb connects; on by default. */
+    var pauseBoundaryOnConnect: Boolean
+        get() = prefs.getBoolean(KEY_PAUSE_BOUNDARY_ON_CONNECT, true)
+        set(value) { prefs.edit().putBoolean(KEY_PAUSE_BOUNDARY_ON_CONNECT, value).apply() }
+
     /** Presets imported from a QR / link and not written to a Hub yet ([UnwrittenPresets] JSON; "" = none). */
     var unwrittenPresets: String
         get() = prefs.getString(KEY_UNWRITTEN_PRESETS, null) ?: ""
@@ -124,5 +129,6 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         const val KEY_SHOW_EDITORS = "show_editors"
         const val KEY_UNWRITTEN_PRESETS = "unwritten_presets"
+        const val KEY_PAUSE_BOUNDARY_ON_CONNECT = "pause_boundary_on_connect"
     }
 }

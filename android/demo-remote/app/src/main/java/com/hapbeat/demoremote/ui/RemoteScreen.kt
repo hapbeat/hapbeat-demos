@@ -70,6 +70,8 @@ import com.hapbeat.demoremote.LogState
 import com.hapbeat.demoremote.PortAction
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
+import com.hapbeat.demoremote.adb.BoundaryState
+import com.hapbeat.demoremote.adb.QuestBoundary
 import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.HubPresetSlot
@@ -237,6 +239,9 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
                 maxLines = 1,
                 modifier = Modifier.width(104.dp),
             )
+            // Fixed width: "なし / あり / 不明" never moves the items on its left.
+            val boundary = if (quest.adb == AdbState.CONNECTED) quest.boundary else BoundaryState.UNKNOWN
+            Text("境界: ${QuestBoundary.label(boundary)}", maxLines = 1, modifier = Modifier.width(80.dp))
         }
         // Read-only state from adb (developer mode / adb / uptime / build); one fixed line.
         Text(
@@ -388,7 +393,28 @@ private fun ControlTab(vm: RemoteViewModel) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // The boundary goes over adb, not Demo Switch: its own group next to the Hub one.
+        if (group.title == "Hub") BoundaryGroup(vm)
     }
+}
+
+/** 「境界を止める／戻す」 over adb, run at once; a fixed line under it says why they are gray. */
+@Composable
+private fun BoundaryGroup(vm: RemoteViewModel) {
+    val block = vm.boundaryBlockReason
+    Text("境界", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val enabled = block == null && !vm.boundaryRunning
+        ActionButton("境界を止める", enabled = enabled, modifier = Modifier.weight(1f)) { vm.setBoundaryPaused(true) }
+        ActionButton("境界を戻す", enabled = enabled, modifier = Modifier.weight(1f), outlined = true) { vm.setBoundaryPaused(false) }
+    }
+    Text(
+        block ?: " ",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** Current state from STATE (QUERY); falls back to the last successful haptics operation from this app. */
