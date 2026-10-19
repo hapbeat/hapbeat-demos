@@ -59,7 +59,7 @@ namespace Hapbeat.DemoHub.Tests
         public void TileStartsAOneStepSessionWithDescriptorDefaults()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost, false, null, new HubDemoSettings());
+            var ticket = HubPlan.Single(_volley, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), true, DemoHandStyle.Ghost, false, null, new HubDemoSettings());
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.True);
@@ -72,7 +72,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 4点先取"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
             Assert.That(parsed.RecenterUi, Is.False);
-            var shown = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true, null, new HubDemoSettings());
+            var shown = HubPlan.Single(_volley, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true, null, new HubDemoSettings());
             Assert.That(DemoSessionTicket.TryParse(shown.ToJson(), out parsed, out error), Is.True, error);
             Assert.That(parsed.RecenterUi, Is.True);
         }
@@ -81,7 +81,7 @@ namespace Hapbeat.DemoHub.Tests
         public void FinishedTileReturnsToTopAndFinishedPlanShowsFinishScreen()
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var single = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, new HubDemoSettings());
+            var single = HubPlan.Single(_boxing, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, new HubDemoSettings());
             var plan = new HubPlan();
             plan.Add(_volley);
             plan.Add(_boxing);
@@ -546,7 +546,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(store.LoadSettings().HandStyle, Is.EqualTo(DemoHandStyle.Skin), "Saved at once.");
 
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle, false, null, new HubDemoSettings());
+                var ticket = HubPlan.Single(_trex, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, controller.Settings.HandStyle, false, null, new HubDemoSettings());
                 Assert.That(ticket.ToJson(), Does.Contain("\"hand_style\":\"skin\""));
             }
             finally { Object.DestroyImmediate(go); }
@@ -581,7 +581,7 @@ namespace Hapbeat.DemoHub.Tests
                 AssertInsideWithoutOverlap(controller);
 
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-                var ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
+                var ticket = HubPlan.Single(_trex, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
                     controller.Settings.TicketNarrationVolume, new HubDemoSettings());
                 Assert.That(ticket.ToJson(), Does.Contain("\"narration_volume\":60"));
 
@@ -595,7 +595,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(controller.Settings.NarrationVolume, Is.EqualTo(50));
                 Assert.That(Texts(controller), Has.No.Member(HubText.NarrationVolumeNote));
                 Assert.That(controller.Settings.TicketNarrationVolume, Is.Null, "50 is omitted: demos older than the narration volume accept the ticket.");
-                ticket = HubPlan.Single(_trex).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
+                ticket = HubPlan.Single(_trex, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false,
                     controller.Settings.TicketNarrationVolume, new HubDemoSettings());
                 Assert.That(ticket.ToJson(), Does.Not.Contain("narration_volume"));
 
@@ -1157,7 +1157,7 @@ namespace Hapbeat.DemoHub.Tests
         {
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
             var demoSettings = BoxingAt("30", "6");
-            var tile = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, demoSettings);
+            var tile = HubPlan.Single(_boxing, demoSettings).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, demoSettings);
             Assert.That(OptionsOf(tile), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "6" }));
             Assert.That(tile.Steps[0].Title, Is.EqualTo("Boxing 30秒"), "The title shows session options only.");
 
@@ -1170,8 +1170,111 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"boxing\",\"options\":{\"haptics_db\":\"0\"}}]}", out request, out error), Is.True, error);
             LogAssert.Expect(LogType.Warning, new Regex("haptics_db is this headset's per-demo setting"));
             var plan = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), new HubSettings(), demoSettings, out error);
-            Assert.That(OptionsOf(plan), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "6" }),
-                "A step's device option is ignored with a warning; its missing session option is the per-demo one.");
+            Assert.That(OptionsOf(plan), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "6" }),
+                "A step's device option is ignored with a warning; its missing session option is the descriptor default.");
+        }
+
+        [Test]
+        public void APresetsOmittedOptionIsTheDefaultWhileATileUsesThePerDemoSettings()
+        {
+            var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+            var demoSettings = BoxingAt("30", "9");
+            var preset = new HubPlan();
+            preset.Steps.Add(new HubPlanStep("boxing", null, true));
+            var fromPreset = preset.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, demoSettings);
+            Assert.That(OptionsOf(fromPreset), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "9" }),
+                "A preset starts as its editor shows it: the omitted round is the descriptor default.");
+            Assert.That(fromPreset.Steps[0].Title, Is.EqualTo(HubPlan.Title(preset.Steps[0], _catalog.Single(e => e.Descriptor.DemoId == "boxing"))),
+                "The editor's title and the launch agree.");
+            var tile = HubPlan.Single(_boxing, demoSettings).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, demoSettings);
+            Assert.That(OptionsOf(tile), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "9" }), "A tile uses the per-demo settings.");
+
+            var presets = new[] { preset, new HubPlan(), new HubPlan() };
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"boxing\"}", out var request, out var error), Is.True, error);
+            Assert.That(OptionsOf(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), new HubSettings(), demoSettings, out error)),
+                Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "9" }), "demo_id without options: the per-demo settings.");
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"preset\":1}", out request, out error), Is.True, error);
+            Assert.That(OptionsOf(request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), new HubSettings(), demoSettings, out error)),
+                Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "9" }), "preset start: the step and the defaults.");
+        }
+
+        [Test]
+        public void AnOlderPresetsDeviceOptionIsDroppedWhenLoaded()
+        {
+            var store = new HubPlanStore(_directory);
+            var old = new HubPlan();
+            old.Steps.Add(new HubPlanStep("boxing", new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "0" }, true));
+            store.Save(old, HubPlanStore.PresetSlot(1));
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                LogAssert.Expect(LogType.Warning, new Regex("Preset 1: boxing haptics_db=0 is a per-demo setting"));
+                controller.Initialize(_catalog, store);
+                Assert.That(controller.ReadPreset(1).Steps.Single().Options, Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30" }),
+                    "PRESET never carries it.");
+                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("2"), "The value is not moved to the per-demo settings.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void TheHubIdIsMadeOnceAndKept()
+        {
+            var store = new HubPlanStore(_directory);
+            var first = store.LoadSettings();
+            Assert.That(DemoSwitchHub.IsHubId(first.HubId), Is.True);
+            Assert.That(store.LoadSettings().HubId, Is.EqualTo(first.HubId), "Stored with the settings.");
+            Assert.That(store.SaveSettings(first), Is.True);
+            Assert.That(store.LoadSettings().HubId, Is.EqualTo(first.HubId));
+            File.WriteAllText(Path.Combine(_directory, HubPlanStore.SettingsSlot + ".json"), "{\"version\":1}");
+            var old = store.LoadSettings();
+            Assert.That(DemoSwitchHub.IsHubId(old.HubId), Is.True, "A file from before the hub_id gets one.");
+            Assert.That(store.LoadSettings().HubId, Is.EqualTo(old.HubId));
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                Assert.That(controller.ReadDemoSettings("boxing").HubId, Is.EqualTo(old.HubId));
+                Assert.That(controller.ReadDemoSettings("handdemo").HubId, Is.EqualTo(old.HubId));
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void AFailedSecondFileLeavesBothFilesAndMemoryAsTheyWere()
+        {
+            var store = new HubPlanStore(_directory);
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                controller.Initialize(_catalog, store);
+                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "4" }, out var error), Is.True, error);
+                var demoFile = Path.Combine(_directory, HubPlanStore.DemoSettingsSlot + ".json");
+                var settingsFile = Path.Combine(_directory, HubPlanStore.SettingsSlot + ".json");
+                var demoText = File.ReadAllText(demoFile);
+                var settingsText = File.ReadAllText(settingsFile);
+                var revision = controller.Settings.Revision;
+
+                // The second file (hub-settings.json) cannot be written: a directory where its temporary file goes.
+                Directory.CreateDirectory(settingsFile + ".tmp");
+                LogAssert.Expect(LogType.Warning, new Regex("Could not save 'demo-settings' and 'hub-settings'"));
+                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "9" }, out error), Is.False);
+                Assert.That(File.ReadAllText(demoFile), Is.EqualTo(demoText), "demo-settings.json unchanged.");
+                Assert.That(File.ReadAllText(settingsFile), Is.EqualTo(settingsText), "hub-settings.json unchanged.");
+                Assert.That(File.Exists(demoFile + ".tmp"), Is.False, "No temporary file left.");
+                Assert.That(controller.Settings.Revision, Is.EqualTo(revision), "The revision kept.");
+                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("4"), "Memory kept the stored value.");
+
+                Directory.Delete(settingsFile + ".tmp");
+                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "9" }, out error), Is.True, error);
+                Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("9"));
+                Assert.That(store.LoadSettings().Revision, Is.EqualTo(revision + 1));
+                Assert.That(Directory.GetFiles(_directory, "*.bak"), Is.Empty);
+            }
+            finally { Object.DestroyImmediate(go); }
         }
 
         [Test]
@@ -1269,7 +1372,7 @@ namespace Hapbeat.DemoHub.Tests
 
                 // The finished plan again uses the current device value.
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-                var old = HubPlan.Single(_boxing).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, BoxingAt("30", "12"));
+                var old = HubPlan.Single(_boxing, BoxingAt("30", "12")).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, BoxingAt("30", "12"));
                 Assert.That(OptionsOf(controller.WithDeviceSettings(old)), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "4" }));
             }
             finally { Object.DestroyImmediate(go); }

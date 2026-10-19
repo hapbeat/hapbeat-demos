@@ -46,11 +46,16 @@ namespace Hapbeat.DemoHub
         /// <summary>Increased on every save of the preset (<see cref="HubPlanStore.SavePreset"/>), by the editor or PRESET_SET.</summary>
         public long Revision { get; set; }
 
-        /// <summary>One-step plan for a demo tile: no options of its own (the per-demo settings decide them), retry offered.</summary>
-        public static HubPlan Single(DemoSessionDescriptor descriptor)
+        /// <summary>
+        /// One-step plan for a step-less start (a demo tile, the `demo_id` external start): the session options of the per-demo
+        /// settings <paramref name="demoSettings"/> (contracts "デモごとの設定"), retry offered.
+        /// </summary>
+        public static HubPlan Single(DemoSessionDescriptor descriptor, HubDemoSettings demoSettings)
         {
             var plan = new HubPlan();
-            plan.Steps.Add(new HubPlanStep(descriptor.DemoId, null, true));
+            var saved = demoSettings.Values(descriptor);
+            plan.Steps.Add(new HubPlanStep(descriptor.DemoId,
+                descriptor.Options.Where(o => !o.IsDevice).ToDictionary(o => o.Id, o => saved[o.Id], StringComparer.Ordinal), true));
             return plan;
         }
 
@@ -160,7 +165,8 @@ namespace Hapbeat.DemoHub
         /// <summary>
         /// Ticket at index 0 for the installed steps. Options contain exactly the active options (contract), resolved with
         /// <paramref name="demoSettings"/> (contracts "デモごとの設定"): a `scope: device` option always has the per-demo value (a
-        /// step's own value is ignored with a warning); a session option has the step's value, else the per-demo value.
+        /// step's own value is ignored with a warning); a session option has the step's value, else the descriptor default, so a
+        /// preset or plan starts as its editor shows it (step-less starts fill the step first, <see cref="Single"/>).
         /// <paramref name="narrationVolume"/> null omits `narration_volume` (<see cref="HubSettings.TicketNarrationVolume"/>).
         /// Returns null when no step is installed.
         /// </summary>
@@ -181,7 +187,7 @@ namespace Hapbeat.DemoHub
 
         /// <summary>
         /// Every option of <paramref name="descriptor"/> for one launch of <paramref name="step"/>: device options from the per-demo
-        /// settings, session options from the step when it holds a valid value, else from the per-demo settings.
+        /// settings, session options from the step when it holds a valid value, else the descriptor default.
         /// </summary>
         public static Dictionary<string, string> ResolveOptions(HubPlanStep step, DemoSessionDescriptor descriptor, HubDemoSettings demoSettings)
         {
@@ -195,7 +201,7 @@ namespace Hapbeat.DemoHub
                     if (held) Debug.LogWarning("[Demo Hub] " + step.DemoId + ": " + option.Id + " is this headset's per-demo setting; the step's value " + value + " is ignored.");
                     result[option.Id] = saved[option.Id];
                 }
-                else result[option.Id] = held && option.HasValue(value) ? value : saved[option.Id];
+                else result[option.Id] = held && option.HasValue(value) ? value : option.Default;
             }
             return result;
         }
@@ -204,6 +210,29 @@ namespace Hapbeat.DemoHub
         /// A preset written by PRESET_SET: the steps with their options as given (checked by <see cref="Check"/>) except the
         /// `scope: device` ones, which a preset never holds; the name; the revision is set by the caller.
         /// </summary>
+        /// <summary>
+        /// A preset saved by an older Hub may hold `scope: device` options of installed demos: they are dropped (warning, the
+        /// value is not moved to the per-demo settings), so PRESET replies and launches never carry them. Not saved; true when
+        /// something was dropped.
+        /// </summary>
+        public bool DropDeviceOptions(IReadOnlyList<DemoSessionCatalogEntry> catalog, int number)
+        {
+            var dropped = false;
+            foreach (var step in Steps)
+            {
+                var descriptor = Find(catalog, step.DemoId)?.Descriptor;
+                if (descriptor == null) continue;
+                foreach (var id in step.Options.Keys.Where(id => descriptor.FindOption(id)?.IsDevice == true).ToList())
+                {
+                    Debug.LogWarning("[Demo Hub] Preset " + number + ": " + step.DemoId + " " + id + "=" + step.Options[id] +
+                        " is a per-demo setting and is dropped from the preset.");
+                    step.Options.Remove(id);
+                    dropped = true;
+                }
+            }
+            return dropped;
+        }
+
         public static HubPlan FromPreset(string name, IReadOnlyList<DemoSwitchPresetStep> steps, IReadOnlyList<DemoSessionCatalogEntry> catalog)
         {
             var plan = new HubPlan { Name = name ?? string.Empty };
@@ -350,8 +379,15 @@ namespace Hapbeat.DemoHub
         /// </summary>
         public HubSettings LoadSettings()
         {
-            if (TryRead(SettingsSlot, out var text) && HubSettings.TryFromJson(text, out var settings)) return settings;
-            settings = new HubSettings();
+            if (TryRead(SettingsSlot, out var text) && HubSettings.TryFromJson(text, out var settings))
+            {
+                // A file from before the hub_id: it gets one now and keeps it.
+                if (settings.HubId != null) return settings;
+                settings.HubId = DemoSwitchHub.NewHubId();
+                Write(SettingsSlot, settings.ToJson());
+                return settings;
+            }
+            settings = new HubSettings { HubId = DemoSwitchHub.NewHubId() };
             if (Exists(SettingsSlot)) return settings;
             if (TryLoad(LegacyLastSlot, out var last) && Save(last, PresetSlot(1)))
             {
@@ -367,13 +403,73 @@ namespace Hapbeat.DemoHub
             TryRead(DemoSettingsSlot, out var text) && HubDemoSettings.TryFromJson(text, out var demoSettings) ? demoSettings : new HubDemoSettings();
 
         /// <summary>
-        /// Saves the per-demo settings, then the Hub settings with their revision increased (the counter DEMO_SETTINGS and
-        /// HUB_SETTINGS share); false when either write failed.
+        /// Saves the per-demo settings together with the Hub settings with their revision increased (the counter DEMO_SETTINGS
+        /// and HUB_SETTINGS share): both are written to temporary files first and replace the old files only when both writes
+        /// succeeded, so the two never disagree. False (nothing changed on disk, the revision kept) when either failed.
         /// </summary>
-        public bool SaveDemoSettings(HubDemoSettings demoSettings, HubSettings settings) =>
-            Write(DemoSettingsSlot, demoSettings.ToJson()) && SaveSettings(settings);
+        public bool SaveDemoSettings(HubDemoSettings demoSettings, HubSettings settings)
+        {
+            settings.Revision++;
+            if (WriteTogether(DemoSettingsSlot, demoSettings.ToJson(), SettingsSlot, settings.ToJson())) return true;
+            settings.Revision--;
+            return false;
+        }
 
         public bool Exists(string slot) => File.Exists(PathFor(slot));
+
+        /// <summary>
+        /// Two files that must match: both temporary files are written, then both replace the old ones; a failure on the way
+        /// deletes the temporary files and puts back what was replaced.
+        /// </summary>
+        private bool WriteTogether(string firstSlot, string firstText, string secondSlot, string secondText)
+        {
+            var slots = new[] { firstSlot, secondSlot };
+            var texts = new[] { firstText, secondText };
+            var temporaries = slots.Select(slot => PathFor(slot) + ".tmp").ToArray();
+            var backups = slots.Select(slot => PathFor(slot) + ".bak").ToArray();
+            var replaced = 0;
+            try
+            {
+                Directory.CreateDirectory(_directory);
+                for (var i = 0; i < 2; i++) File.WriteAllText(temporaries[i], texts[i], new UTF8Encoding(false));
+                for (; replaced < 2; replaced++)
+                {
+                    var path = PathFor(slots[replaced]);
+                    if (File.Exists(backups[replaced])) File.Delete(backups[replaced]);
+                    if (File.Exists(path)) File.Move(path, backups[replaced]);
+                    File.Move(temporaries[replaced], path);
+                }
+                foreach (var backup in backups) if (File.Exists(backup)) File.Delete(backup);
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                Debug.LogWarning("[Demo Hub] Could not save '" + firstSlot + "' and '" + secondSlot + "': " + exception.Message);
+                // Put back each file already replaced, or moved aside when the failure came, newest first.
+                for (var i = Math.Min(replaced, 1); i >= 0; i--)
+                {
+                    try
+                    {
+                        var path = PathFor(slots[i]);
+                        if (File.Exists(backups[i]) && (i < replaced || !File.Exists(path)))
+                        {
+                            if (File.Exists(path)) File.Delete(path);
+                            File.Move(backups[i], path);
+                        }
+                    }
+                    catch (Exception restore) when (restore is IOException || restore is UnauthorizedAccessException)
+                    {
+                        Debug.LogWarning("[Demo Hub] Could not restore '" + slots[i] + "': " + restore.Message);
+                    }
+                }
+                foreach (var temporary in temporaries)
+                {
+                    try { if (File.Exists(temporary)) File.Delete(temporary); }
+                    catch (Exception remove) when (remove is IOException || remove is UnauthorizedAccessException) { Debug.LogWarning("[Demo Hub] " + remove.Message); }
+                }
+                return false;
+            }
+        }
 
         private bool Write(string slot, string text)
         {

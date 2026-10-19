@@ -32,6 +32,11 @@ namespace Hapbeat.DemoHub
         public int NarrationVolume { get; set; } = DemoSwitchSettings.DefaultNarrationVolume;
         /// <summary>Increased on every save of the settings (<see cref="HubPlanStore.SaveSettings"/>): manage screen, HUB_SETTINGS_SET, a preset's `visible`.</summary>
         public long Revision { get; set; }
+        /// <summary>
+        /// DEMO_SETTINGS `hub_id`: 16 lowercase hex made once at the Hub's first start (<see cref="HubPlanStore.LoadSettings"/>) and
+        /// kept here; null only before that.
+        /// </summary>
+        public string HubId { get; set; }
 
         /// <summary>
         /// The ticket's `narration_volume`: omitted at the default 50, because a demo built before the narration volume
@@ -49,7 +54,8 @@ namespace Hapbeat.DemoHub
             ["staff_waiting"] = StaffWaiting,
             ["hand_style"] = DemoHandStyles.ToValue(HandStyle),
             ["recenter_ui"] = RecenterUi,
-            ["narration_volume"] = NarrationVolume
+            ["narration_volume"] = NarrationVolume,
+            ["hub_id"] = HubId
         }.ToString(Formatting.Indented);
 
         public static bool TryFromJson(string json, out HubSettings settings)
@@ -69,6 +75,8 @@ namespace Hapbeat.DemoHub
                     NarrationVolume = root["narration_volume"] is JValue volume && volume.Type == JTokenType.Integer
                         && DemoNarration.IsValidVolume(volume.Value<long>()) ? volume.Value<int>() : DemoSwitchSettings.DefaultNarrationVolume
                 };
+                if (root["hub_id"] is JValue hubId && hubId.Type == JTokenType.String && DemoSwitchHub.IsHubId(hubId.Value<string>()))
+                    result.HubId = hubId.Value<string>();
                 // Files from before the revision load as revision 0.
                 if (root["revision"] is JValue revision && revision.Type == JTokenType.Integer
                     && long.TryParse(revision.ToString(Formatting.None), out var number) && number >= 0)
@@ -417,8 +425,9 @@ namespace Hapbeat.DemoHub
         /// <summary>
         /// The session's ticket, as the top screen would start it: a preset's installed steps, one step of
         /// <see cref="DemoId"/> with the given options and retry on, or the external plan's <see cref="Steps"/> with their
-        /// options and retry (options not given, and unknown options and values with a warning, come from the per-demo
-        /// settings <paramref name="demoSettings"/>, which also decide every `scope: device` option); finish = this Hub,
+        /// options and retry (unknown options and values are left out with a warning; an option a step does not give is the
+        /// descriptor default, while for <see cref="DemoId"/> it comes from the per-demo settings <paramref name="demoSettings"/>,
+        /// which also decide every `scope: device` option); finish = this Hub,
         /// and the manage screen's haptics UI, 視線をリセット, hand style and narration volume. Null with <paramref name="error"/> (shown on the
         /// top screen) when nothing installed can start, or when any external plan step is not installed.
         /// </summary>
@@ -457,7 +466,7 @@ namespace Hapbeat.DemoHub
                     error = HubText.StartNotInstalled + DemoId;
                     return null;
                 }
-                plan = HubPlan.Single(entry.Descriptor);
+                plan = HubPlan.Single(entry.Descriptor, demoSettings);
                 ApplyOptions(plan.Steps[0], entry.Descriptor, Options);
                 error = HubText.StartNotInstalled + DemoId;
             }
@@ -467,7 +476,7 @@ namespace Hapbeat.DemoHub
             return ticket;
         }
 
-        /// <summary>Sets the given options on <paramref name="step"/>; an unknown option or value is left to the per-demo settings, with a warning.</summary>
+        /// <summary>Sets the given options on <paramref name="step"/>; an unknown option or value keeps what the step had, with a warning.</summary>
         private static void ApplyOptions(HubPlanStep step, DemoSessionDescriptor descriptor, IReadOnlyDictionary<string, string> options)
         {
             foreach (var pair in options)
@@ -475,7 +484,7 @@ namespace Hapbeat.DemoHub
                 var option = descriptor.FindOption(pair.Key);
                 if (option == null || !option.HasValue(pair.Value))
                 {
-                    Debug.LogWarning("[Demo Hub] External start: option " + pair.Key + "=" + pair.Value + " is unknown for " + step.DemoId + "; the per-demo setting is used.");
+                    Debug.LogWarning("[Demo Hub] External start: option " + pair.Key + "=" + pair.Value + " is unknown for " + step.DemoId + "; it is ignored.");
                     continue;
                 }
                 step.Options[pair.Key] = pair.Value;

@@ -255,6 +255,7 @@ namespace Hapbeat.DemoHub
             _store = store;
             Settings = _store.LoadSettings();
             for (var number = 1; number <= HubPlanStore.PresetCount; number++) _presets[number - 1] = _store.LoadPreset(number);
+            for (var number = 1; number <= HubPlanStore.PresetCount; number++) _presets[number - 1].DropDeviceOptions(_catalog, number);
             _demoSettings = _store.LoadDemoSettings();
             _demoSettings.Check(_catalog);
             ApplyHandStyle();
@@ -473,9 +474,9 @@ namespace Hapbeat.DemoHub
 
         internal void StartPreset(int number) => TryStartPreset(number, null, out _);
 
-        /// <summary>A demo tile is a one-step session: the per-demo settings, retry, finish = this Hub.</summary>
+        /// <summary>A demo tile is a one-step session: the per-demo settings (session and device options), retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
-            Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
+            Launch(HubPlan.Single(entry.Descriptor, _demoSettings).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
                 Settings.TicketNarrationVolume, _demoSettings));
 
         private static DemoSessionComponent Finish() =>
@@ -1069,8 +1070,8 @@ namespace Hapbeat.DemoHub
         public DemoSwitchDemoSettings ReadDemoSettings(string demoId)
         {
             var entry = HubPlan.Find(_catalog, demoId);
-            if (entry == null) return new DemoSwitchDemoSettings(Settings.Revision, false, null);
-            return new DemoSwitchDemoSettings(Settings.Revision, true,
+            if (entry == null) return new DemoSwitchDemoSettings(Settings.HubId, Settings.Revision, false, null);
+            return new DemoSwitchDemoSettings(Settings.HubId, Settings.Revision, true,
                 DemoSwitchHub.FitsDemoSettings(entry.Descriptor) ? _demoSettings.Values(entry.Descriptor) : null);
         }
 
