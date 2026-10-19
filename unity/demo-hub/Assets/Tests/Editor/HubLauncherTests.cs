@@ -1213,7 +1213,7 @@ namespace Hapbeat.DemoHub.Tests
                 controller.Initialize(_catalog, store);
                 Assert.That(controller.ReadPreset(1).Steps.Single().Options, Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30" }),
                     "PRESET never carries it.");
-                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("2"), "The value is not moved to the per-demo settings.");
+                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("3"), "The value is not moved to the per-demo settings.");
             }
             finally { Object.DestroyImmediate(go); }
         }
@@ -1251,7 +1251,7 @@ namespace Hapbeat.DemoHub.Tests
             {
                 var controller = go.AddComponent<DemoHubController>();
                 controller.Initialize(_catalog, store);
-                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "4" }, out var error), Is.True, error);
+                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "15" }, out var error), Is.True, error);
                 var demoFile = Path.Combine(_directory, HubPlanStore.DemoSettingsSlot + ".json");
                 var settingsFile = Path.Combine(_directory, HubPlanStore.SettingsSlot + ".json");
                 var demoText = File.ReadAllText(demoFile);
@@ -1266,7 +1266,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(File.ReadAllText(settingsFile), Is.EqualTo(settingsText), "hub-settings.json unchanged.");
                 Assert.That(File.Exists(demoFile + ".tmp"), Is.False, "No temporary file left.");
                 Assert.That(controller.Settings.Revision, Is.EqualTo(revision), "The revision kept.");
-                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("4"), "Memory kept the stored value.");
+                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("15"), "Memory kept the stored value.");
 
                 Directory.Delete(settingsFile + ".tmp");
                 Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "9" }, out error), Is.True, error);
@@ -1300,8 +1300,8 @@ namespace Hapbeat.DemoHub.Tests
             var legacy = new HubPlan();
             legacy.Steps.Add(new HubPlanStep("boxing", new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "0" }, true));
             LogAssert.Expect(LogType.Warning, new Regex("haptics_db is this headset's per-demo setting"));
-            ticket = legacy.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, BoxingAt("30", "4"));
-            Assert.That(OptionsOf(ticket), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "4" }));
+            ticket = legacy.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, BoxingAt("30", "15"));
+            Assert.That(OptionsOf(ticket), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "15" }));
         }
 
         [Test]
@@ -1311,7 +1311,7 @@ namespace Hapbeat.DemoHub.Tests
             var settings = store.LoadSettings();
             var revision = settings.Revision;
             var demoSettings = store.LoadDemoSettings();
-            Assert.That(demoSettings.Values(_boxing), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "2" }), "Descriptor defaults at first.");
+            Assert.That(demoSettings.Values(_boxing), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "3" }), "Descriptor defaults at first.");
             demoSettings.Set("boxing", new Dictionary<string, string> { ["haptics_db"] = "6" });
             demoSettings.Set("handdemo", new Dictionary<string, string> { ["tutorial"] = "off" });
             Assert.That(store.SaveDemoSettings(demoSettings, settings), Is.True);
@@ -1323,10 +1323,10 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(loaded.Values(_boxing), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "6" }));
 
             loaded.Set("boxing", new Dictionary<string, string> { ["haptics_db"] = "99", ["speed"] = "fast" });
-            LogAssert.Expect(LogType.Warning, new Regex("haptics_db=99.*the default 2"));
+            LogAssert.Expect(LogType.Warning, new Regex("haptics_db=99.*the default 3"));
             LogAssert.Expect(LogType.Warning, new Regex("speed=fast.*dropped"));
             loaded.Check(_catalog);
-            Assert.That(loaded.Values(_boxing)["haptics_db"], Is.EqualTo("2"), "An invalid value is the default again.");
+            Assert.That(loaded.Values(_boxing)["haptics_db"], Is.EqualTo("3"), "An invalid value is the default again.");
             Assert.That(HubDemoSettings.TryFromJson(loaded.ToJson(), out var again), Is.True);
             Assert.That(again.ToJson(), Does.Contain("\"handdemo\""), "Values of demos that are not installed are kept.");
 
@@ -1334,6 +1334,28 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(blocked.SaveDemoSettings(loaded, settings), Is.False);
             Assert.That(settings.Revision, Is.EqualTo(revision + 1));
             Assert.That(HubDemoSettings.TryFromJson("{\"version\":2,\"demos\":{}}", out _), Is.False);
+        }
+
+        [Test]
+        public void AStoredTrimFromBeforeTheThreeDecibelStepsIsTheDefaultAgainWithAWarning()
+        {
+            var store = new HubPlanStore(_directory);
+            Directory.CreateDirectory(_directory);
+            File.WriteAllText(Path.Combine(_directory, HubPlanStore.DemoSettingsSlot + ".json"),
+                "{\"version\":1,\"demos\":{\"boxing\":{\"haptics_db\":\"2\",\"round\":\"30\"}}}");
+            var go = new GameObject("hub test");
+            try
+            {
+                var controller = go.AddComponent<DemoHubController>();
+                LogAssert.Expect(LogType.Warning, new Regex("saved setting haptics_db=2 is not in its descriptor; the default 3 is used"));
+                controller.Initialize(_catalog, store);
+                Assert.That(controller.ReadDemoSettings("boxing").Settings, Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "3" }));
+                var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
+                var ticket = HubPlan.Single(_boxing, controller.DemoSettings).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false,
+                    DemoHandStyle.Ghost, false, null, controller.DemoSettings);
+                Assert.That(OptionsOf(ticket)["haptics_db"], Is.EqualTo("3"), "Launched at the default.");
+            }
+            finally { Object.DestroyImmediate(go); }
         }
 
         [Test]
@@ -1347,7 +1369,7 @@ namespace Hapbeat.DemoHub.Tests
                 controller.Initialize(_catalog, store);
                 var read = controller.ReadDemoSettings("boxing");
                 Assert.That(read.Installed, Is.True);
-                Assert.That(read.Settings, Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "2" }), "Every option, both scopes.");
+                Assert.That(read.Settings, Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "3" }), "Every option, both scopes.");
                 var volley = controller.ReadDemoSettings("volley");
                 Assert.That(volley.Settings.Keys, Is.EquivalentTo(new[] { "scene", "tutorial", "points" }), "Inactive options too.");
                 var missing = controller.ReadDemoSettings("handdemo");
@@ -1360,20 +1382,20 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(offending, Is.EqualTo("haptics_db"));
                 Assert.That(controller.CheckDemoSettings("boxing", new Dictionary<string, string> { ["speed"] = "fast" }, out offending), Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
                 Assert.That(offending, Is.EqualTo("speed"));
-                Assert.That(controller.CheckDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "4" }, out offending), Is.EqualTo(DemoSwitchPresetCheck.Ok));
+                Assert.That(controller.CheckDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "15" }, out offending), Is.EqualTo(DemoSwitchPresetCheck.Ok));
 
                 var revision = controller.Settings.Revision;
-                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "4" }, out var error), Is.True, error);
-                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("4"));
+                Assert.That(controller.TryStoreDemoSettings("boxing", new Dictionary<string, string> { ["haptics_db"] = "15" }, out var error), Is.True, error);
+                Assert.That(controller.ReadDemoSettings("boxing").Settings["haptics_db"], Is.EqualTo("15"));
                 Assert.That(controller.ReadDemoSettings("boxing").Settings["round"], Is.EqualTo("55"), "Only the given option changes.");
                 Assert.That(controller.ReadDemoSettings("boxing").Revision, Is.EqualTo(revision + 1));
                 Assert.That(controller.ReadSettings().Revision, Is.EqualTo(revision + 1), "The same counter as HUB_SETTINGS.");
-                Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("4"), "Saved.");
+                Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("15"), "Saved.");
 
                 // The finished plan again uses the current device value.
                 var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
                 var old = HubPlan.Single(_boxing, BoxingAt("30", "12")).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, BoxingAt("30", "12"));
-                Assert.That(OptionsOf(controller.WithDeviceSettings(old)), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "4" }));
+                Assert.That(OptionsOf(controller.WithDeviceSettings(old)), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "15" }));
             }
             finally { Object.DestroyImmediate(go); }
         }
@@ -1397,7 +1419,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(controller.SelectedDemo, Is.EqualTo(_catalog.ToList().FindIndex(e => e.Descriptor.DemoId == "boxing")));
                 Assert.That(Texts(controller), Has.Member(HubText.DeviceSettings), "Device options are marked.");
                 var round = Buttons(controller).Single(b => b.Label == "ラウンド：55秒");
-                var trim = Buttons(controller).Single(b => b.Label == "触覚の強さ：-2 dB");
+                var trim = Buttons(controller).Single(b => b.Label == "触覚の強さ：-3 dB");
                 var heading = controller.Panel.GetComponentsInChildren<UnityEngine.UI.Text>().Single(t => t.text == HubText.DeviceSettings);
                 Assert.That(round.Rect.anchoredPosition.y, Is.GreaterThan(heading.rectTransform.anchoredPosition.y), "Session options first.");
                 Assert.That(trim.Rect.anchoredPosition.y, Is.LessThan(heading.rectTransform.anchoredPosition.y), "Device options under their heading.");
@@ -1407,8 +1429,8 @@ namespace Hapbeat.DemoHub.Tests
 
                 var revision = controller.Settings.Revision;
                 Press(trim);
-                Assert.That(Buttons(controller).Single(b => b.Label.StartsWith("触覚の強さ")).Label, Is.EqualTo("触覚の強さ：-4 dB"));
-                Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("4"), "Saved at once.");
+                Assert.That(Buttons(controller).Single(b => b.Label.StartsWith("触覚の強さ")).Label, Is.EqualTo("触覚の強さ：-6 dB"));
+                Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("6"), "Saved at once.");
                 Assert.That(store.LoadSettings().Revision, Is.EqualTo(revision + 1));
 
                 Press(Buttons(controller).Single(b => b.Label == "Volley"));
