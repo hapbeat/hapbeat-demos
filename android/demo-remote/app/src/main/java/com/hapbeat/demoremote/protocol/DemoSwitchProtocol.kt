@@ -98,11 +98,12 @@ sealed interface DemoSwitchMessage {
 
     /**
      * The Hub's per-demo settings of [target] (demo-switch-control.md「Demo settings」): every option of its descriptor with
-     * the stored value; [installed] false (and no [settings]) when the Hub does not have the demo. [revision] is the
-     * HUB_SETTINGS counter.
+     * the stored value; [installed] false (and no [settings]) when the Hub does not have the demo; installed with no
+     * [settings]: the Hub keeps none for it. [hubId] identifies the Hub (16 lowercase hex); [revision] is the HUB_SETTINGS
+     * counter.
      */
     data class DemoSettings(
-        override val controllerId: String, val nonce: String, val revision: Long, val target: String, val installed: Boolean,
+        override val controllerId: String, val nonce: String, val hubId: String, val revision: Long, val target: String, val installed: Boolean,
         val settings: Map<String, String>, override val auth: String?,
     ) : DemoSwitchMessage
 
@@ -289,8 +290,9 @@ object DemoSwitchProtocol {
 
     fun canonicalDemoSettings(m: DemoSwitchMessage.DemoSettings): String = StringBuilder(HEADER + "DEMO_SETTINGS\n").apply {
         field(this, "version", "1"); field(this, "type", "DEMO_SETTINGS"); field(this, "controller_id", m.controllerId)
-        field(this, "nonce", m.nonce); field(this, "revision", m.revision.toString()); field(this, "target", m.target)
-        field(this, "installed", m.installed.toString()); field(this, "settings", canonicalDemoSettingsValues(m.settings))
+        field(this, "nonce", m.nonce); field(this, "hub_id", m.hubId); field(this, "revision", m.revision.toString())
+        field(this, "target", m.target); field(this, "installed", m.installed.toString())
+        field(this, "settings", canonicalDemoSettingsValues(m.settings))
     }.toString()
 
     fun canonicalDemoSettingsSet(controllerId: String, seq: Long, target: String, settings: Map<String, String>): String =
@@ -657,6 +659,7 @@ object DemoSwitchProtocol {
                 DemoSwitchMessage.DemoSettings(
                     controllerId = controllerId,
                     nonce = nonceField(obj) ?: return null,
+                    hubId = stringField(obj, "hub_id")?.takeIf { NONCE.matches(it) } ?: return null,
                     revision = intField(obj, "revision")?.takeIf { it in 0..MAX_SEQ } ?: return null,
                     target = identifierField(obj, "target") ?: return null,
                     installed = installed,
@@ -779,7 +782,7 @@ object DemoSwitchProtocol {
     private val HUB_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "visible_demos")
     private val HUB_START_FIELDS = SWITCH_FIELDS + "steps"
     private val DEMO_SETTINGS_GET_FIELDS = DISCOVER_FIELDS + "target"
-    private val DEMO_SETTINGS_FIELDS = DEMO_SETTINGS_GET_FIELDS + setOf("revision", "installed", "settings")
+    private val DEMO_SETTINGS_FIELDS = DEMO_SETTINGS_GET_FIELDS + setOf("hub_id", "revision", "installed", "settings")
     private val DEMO_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("target", "settings")
 
     /** Required fields present and no field other than those, [optional] ones and auth. */

@@ -82,6 +82,12 @@ import java.util.Locale
 
 enum class AdbState { DISCONNECTED, CONNECTING, AUTH_WAIT, CONNECTED }
 
+/**
+ * What a DEMO_SETTINGS_GET of the open settings screen found: none finished yet, no answer, the demo is not installed on
+ * the Hub, installed but the Hub keeps no per-demo settings for it (`installed` true, empty `settings`), or read.
+ */
+enum class DemoSettingsRead { NONE, NO_ANSWER, NOT_INSTALLED, NO_SETTINGS, READ }
+
 data class QuestState(
     val ip: String,
     val label: String,
@@ -242,18 +248,22 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Progress / result of the Hub settings screen's 触覚テスト (text, state); null before sending. */
     var hubHapticsTestStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     /**
-     * The phone's copy of each Quest's per-demo settings (demo-session.md「デモごとの設定」), with the changes saved while the
-     * Hub was not in front (unwritten). Kept in the settings, so they survive closing the app ([DemoSettingsStore]).
+     * The phone's copy of each Hub's per-demo settings (demo-session.md「デモごとの設定」, keyed by its `hub_id`), with the changes
+     * saved while the Hub was not in front (unwritten). Kept in the settings, so they survive closing the app ([DemoSettingsStore]).
      */
     var demoSettingsBook by mutableStateOf(DemoSettingsStore.decode(settings.demoSettings)); private set
     var demoSettingsReading by mutableStateOf(false); private set
-    /** Fixed line of the per-demo settings screen: when they were read, or why reading failed (text, isError). */
-    var demoSettingsStatus by mutableStateOf("" to false); private set
-    /** Whether the Hub has the demo of the last DEMO_SETTINGS read (null: no answer yet). */
-    var demoSettingsInstalled by mutableStateOf<Boolean?>(null); private set
-    /** Progress / result of the per-demo settings screen's 保存 (text, state); null before saving. */
-    var demoSettingsSaveStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
+    /** What the last read of the open settings screen found ([DemoSettingsRead.NONE] while none finished). */
+    var demoSettingsRead by mutableStateOf(DemoSettingsRead.NONE); private set
+    /** When the open settings screen's demo was last read ("HH:mm:ss"; "" before). */
+    var demoSettingsReadTime by mutableStateOf(""); private set
+    /** The settings screen's own result line next to its buttons (text, state); cleared when the screen opens. */
+    var demoScreenStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
+    /** The デモ tab's result line of the unwritten list (text, state). */
+    var demoTabStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     var demoSettingsSaving by mutableStateOf(false); private set
+    /** Each headset's `hub_id` (key: IP) as its Hub last reported it in DEMO_SETTINGS. Memory only: the copies are keyed by it. */
+    val hubIds = mutableStateMapOf<String, String>()
     /** A one-demo start is running (it may switch to the Hub and wait for it first). */
     var sessionStarting by mutableStateOf(false); private set
     /** A user-started Wi-Fi adb connect to this IP gets no answer: the "Quest may be asleep" dialog is up. */
@@ -280,17 +290,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Demos installed on the selected HMD's Hub (from HUB_SETTINGS), or null while unknown. */
     val selectedHubDemos: List<HubDemo>? get() = selectedHubSettings?.demos
 
-    /** The keys the phone keeps the selected HMD's per-demo settings under (serial, then IP); empty without a selection. */
-    private val selectedQuestKeys: List<String>
-        get() = selectedQuest?.let { DemoSettingsStore.questKeys(it.serial, it.ip) } ?: emptyList()
+    /** The selected HMD's `hub_id`, once its Hub answered a DEMO_SETTINGS_GET in this run; null before. */
+    val selectedHubId: String? get() = selectedIp?.let { hubIds[it] }
 
-    /** The phone's copy of [demoId]'s per-demo settings on the selected HMD, or null when it has none. */
-    fun demoSettingsEntry(demoId: String): DemoSettingsEntry? =
-        selectedQuestKeys.takeIf { it.isNotEmpty() }?.let { DemoSettingsStore.entry(demoSettingsBook, it, demoId) }
+    /** The phone's copy of [demoId]'s per-demo settings on the selected HMD's Hub, or null (Hub not known or never read). */
+    fun demoSettingsEntry(demoId: String): DemoSettingsEntry? = selectedHubId?.let { DemoSettingsStore.entry(demoSettingsBook, it, demoId) }
 
-    /** Per-demo changes saved on the phone for the selected HMD that its Hub does not have yet. */
+    /** Per-demo changes saved on the phone for the selected HMD's Hub that it does not have yet. */
     val selectedUnwrittenDemoSettings: List<UnwrittenDemoSettings>
-        get() = selectedQuestKeys.takeIf { it.isNotEmpty() }?.let { DemoSettingsStore.unwritten(demoSettingsBook, it) } ?: emptyList()
+        get() = selectedHubId?.let { DemoSettingsStore.unwritten(demoSettingsBook, it) } ?: emptyList()
 
     /** Presets 1..3 last read from the selected HMD (null entries: not read). */
     val selectedHubPresets: List<HubPresetSlot?> get() = selectedIp?.let { hubPresets[it] } ?: List(HubPresets.NUMBERS.size) { null }
@@ -849,6 +857,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 val notForeground = status.message == DemoSwitchProtocol.NOT_IN_FOREGROUND_MESSAGE
                 val hubWrite = command.action in HUB_COMMAND_ACTIONS
                 val detail = when {
+                    command.action == ACTION_DEMO_SETTINGS_SET -> HubPresets.demoSettingsFailureText(status.code, status.message, hubSettings[command.ip]?.demos)
                     hubWrite -> HubPresets.failureText(status.code, status.message, hubSettings[command.ip]?.demos)
                     notForeground -> NOT_FOREGROUND_TEXT
                     status.message.isEmpty() -> status.code
@@ -1542,6 +1551,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         hubFrontIp = quest.ip
         readHubPresets(HubPresets.NUMBERS)
         readHubSettings()
+        learnHubId(quest.ip)
+    }
+
+    /**
+     * The Hub's `hub_id` (DEMO_SETTINGS answers it for any target, also one that is not a demo) once per run, so the デモ tab
+     * shows that Hub's unwritten changes before a settings screen is opened.
+     */
+    private fun learnHubId(ip: String) {
+        if (hubIds.containsKey(ip)) return
+        viewModelScope.launch { fetchDemoSettings(ip, DemoCatalog.HUB_ID)?.let { hubIds[ip] = it.hubId } }
     }
 
     /** "再読込". */
@@ -1707,17 +1726,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- per-demo settings (Demo Switch DEMO_SETTINGS_GET / DEMO_SETTINGS_SET) ----
 
-    /** Opening a demo's settings: the last results no longer apply. */
-    fun clearDemoSettingsStatus() {
-        if (demoSettingsSaving) return
-        demoSettingsSaveStatus = null
-        demoSettingsStatus = "" to false
-        demoSettingsInstalled = null
+    /** Opening a demo's settings screen: its result line and read state start empty. */
+    fun openDemoSettings() {
+        if (!demoSettingsSaving) demoScreenStatus = null
+        demoSettingsRead = DemoSettingsRead.NONE
+        demoSettingsReadTime = ""
     }
 
     /**
      * Reads [demoId]'s per-demo settings from the selected HMD's Hub (answered while the Hub runs, also when it is not in
-     * front). The phone's copy takes the Hub's values; its unwritten changes stay.
+     * front). The reply's `hub_id` names the Hub; its copy on the phone takes the Hub's values, unwritten changes stay.
      */
     fun readDemoSettings(demoId: String) {
         val quest = selectedQuest ?: return
@@ -1725,26 +1743,23 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         demoSettingsJob = viewModelScope.launch {
             val job = coroutineContext[Job]
             demoSettingsReading = true
-            demoSettingsStatus = "読み込み中…" to false
             try {
                 val reply = fetchDemoSettings(quest.ip, demoId)
-                when {
-                    reply == null -> {
-                        demoSettingsStatus = "Hub が応答しません（Hub が起動していないか、Hub の版が古い）" to true
-                        fileLog("デモの設定の読み込み: 応答なし (${quest.ip} $demoId)")
-                    }
-                    !reply.installed -> {
-                        demoSettingsInstalled = false
-                        demoSettingsStatus = "${DemoCatalog.labelFor(demoId, selectedHubDemos)} は HMD の Hub に入っていません" to true
-                    }
+                if (reply == null) {
+                    demoSettingsRead = DemoSettingsRead.NO_ANSWER
+                    fileLog("デモの設定の読み込み: 応答なし (${quest.ip} $demoId)")
+                    return@launch
+                }
+                hubIds[quest.ip] = reply.hubId
+                demoSettingsRead = when {
+                    !reply.installed -> DemoSettingsRead.NOT_INSTALLED
+                    reply.settings.isEmpty() -> DemoSettingsRead.NO_SETTINGS
                     else -> {
-                        demoSettingsInstalled = true
-                        updateDemoSettings(DemoSettingsStore.questKeys(quest.serial, quest.ip)) { book, keys ->
-                            DemoSettingsStore.onRead(book, keys, demoId, reply.settings)
-                        }
-                        demoSettingsStatus = "読み込み ${timeFormat.format(Date())}" to false
+                        updateDemoSettings { DemoSettingsStore.onRead(it, reply.hubId, demoId, reply.settings) }
+                        DemoSettingsRead.READ
                     }
                 }
+                demoSettingsReadTime = timeFormat.format(Date())
             } finally {
                 if (demoSettingsJob === job) demoSettingsReading = false
             }
@@ -1769,46 +1784,50 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    private fun updateDemoSettings(
-        keys: List<String>, block: (Map<String, Map<String, DemoSettingsEntry>>, List<String>) -> Map<String, Map<String, DemoSettingsEntry>>,
-    ) {
-        demoSettingsBook = block(demoSettingsBook, keys)
+    private fun updateDemoSettings(block: (Map<String, Map<String, DemoSettingsEntry>>) -> Map<String, Map<String, DemoSettingsEntry>>) {
+        demoSettingsBook = block(demoSettingsBook)
         settings.demoSettings = DemoSettingsStore.encode(demoSettingsBook)
     }
 
     /**
-     * 保存: keeps [edited] on the phone as [demoId]'s unwritten change for the selected HMD (it survives closing the app),
-     * then writes it to the Hub (DEMO_SETTINGS_SET) when the Hub is in front. Otherwise it stays 未書き込み until the user
-     * writes it with the Hub in front ([writeDemoSettings]).
+     * 保存 on the settings screen: [changed] (only the options the user changed) joins [demoId]'s unwritten change for the
+     * selected HMD's Hub (it survives closing the app), then is written (DEMO_SETTINGS_SET) when the Hub is in front;
+     * otherwise it stays 未書き込み until the user writes it. Needs that Hub's settings read at least once (its `hub_id`).
      */
-    fun saveDemoSettings(demoId: String, edited: Map<String, String>) {
-        val quest = selectedQuest ?: return
-        if (demoSettingsSaving) return
-        updateDemoSettings(DemoSettingsStore.questKeys(quest.serial, quest.ip)) { book, keys -> DemoSettingsStore.save(book, keys, demoId, edited) }
-        writeDemoSettings(demoId)
+    fun saveDemoSettings(demoId: String, changed: Map<String, String>) {
+        val hubId = selectedHubId ?: return
+        if (demoSettingsSaving || DemoSettingsStore.entry(demoSettingsBook, hubId, demoId) == null) return
+        updateDemoSettings { DemoSettingsStore.save(it, hubId, demoId, changed) }
+        writeDemoSettings(demoId, onScreen = true)
     }
 
-    /** Writes [demoId]'s unwritten change for the selected HMD (DEMO_SETTINGS_SET); nothing to write: says so. */
-    fun writeDemoSettings(demoId: String) {
+    /**
+     * Writes [demoId]'s unwritten change for the selected HMD's Hub (DEMO_SETTINGS_SET with only those options). The result
+     * goes to the settings screen's line ([onScreen]) or the デモ tab's; [then] runs after READY.
+     */
+    fun writeDemoSettings(demoId: String, onScreen: Boolean, then: (() -> Unit)? = null) {
         val quest = selectedQuest ?: return
+        val hubId = selectedHubId ?: return
         if (demoSettingsSaving) return
-        val keys = DemoSettingsStore.questKeys(quest.serial, quest.ip)
-        val changes = DemoSettingsStore.entry(demoSettingsBook, keys, demoId)?.unwritten.orEmpty()
+        val show = { status: Pair<String, LogState> -> if (onScreen) demoScreenStatus = status else demoTabStatus = status }
+        val changes = DemoSettingsStore.entry(demoSettingsBook, hubId, demoId)?.unwritten.orEmpty()
         if (changes.isEmpty()) {
-            demoSettingsSaveStatus = "Hub と同じ内容です" to LogState.READY
+            show("Hub と同じ内容です" to LogState.READY)
+            then?.invoke()
             return
         }
         demoSettingsSaving = true
-        demoSettingsSaveStatus = "送信中…" to LogState.SENT
+        show("送信中…" to LogState.SENT)
         viewModelScope.launch {
             try {
-                val (text, state) = sendDemoSettings(quest, demoId, changes)
-                if (state == LogState.READY) {
-                    updateDemoSettings(keys) { book, k -> DemoSettingsStore.onWritten(book, k, demoId, changes) }
-                    demoSettingsSaveStatus = "Hub に保存しました" to state
-                    if (selectedIp == quest.ip) readDemoSettings(demoId)
+                val (text, state) = sendDemoSettings(quest, demoId, changes) { show(it) }
+                if (state == LogState.READY && hubIds[quest.ip] == hubId) {
+                    updateDemoSettings { DemoSettingsStore.onWritten(it, hubId, demoId, changes) }
+                    show("Hub に保存しました" to state)
+                    if (selectedIp == quest.ip && onScreen) readDemoSettings(demoId)
+                    then?.invoke()
                 } else {
-                    demoSettingsSaveStatus = "未書き込み（スマホに保存）: $text" to state
+                    show((if (then != null) "起動しませんでした（設定を Hub に書き込めません）: $text" else "未書き込み（スマホに保存）: $text") to state)
                 }
             } finally {
                 demoSettingsSaving = false
@@ -1816,7 +1835,22 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun sendDemoSettings(quest: QuestState, demoId: String, changes: Map<String, String>): Pair<String, LogState> {
+    /**
+     * 「起動」 on the settings screen: an unwritten change of [demoId] is written first (DEMO_SETTINGS_SET); only after READY
+     * the demo starts through the Hub with its saved settings ([startSession]). A failed write starts nothing.
+     */
+    fun startDemo(demoId: String) {
+        if (sessionStarting || demoSettingsSaving) return
+        if (demoSettingsEntry(demoId)?.unwritten.orEmpty().isEmpty()) {
+            startSession(demoId)
+            return
+        }
+        writeDemoSettings(demoId, onScreen = true) { startSession(demoId) }
+    }
+
+    private suspend fun sendDemoSettings(
+        quest: QuestState, demoId: String, changes: Map<String, String>, onAck: (Pair<String, LogState>) -> Unit,
+    ): Pair<String, LogState> {
         val config = authConfig
         val content = "${DemoCatalog.labelFor(demoId, hubSettings[quest.ip]?.demos)} の設定を保存"
         val refused = { reason: String -> addLog(quest.label, content, null, LogState.ERROR, reason); reason to LogState.ERROR }
@@ -1829,7 +1863,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val done = CompletableDeferred<Pair<String, LogState>>()
         send(quest, seq, DemoCatalog.HUB_ID, content, payload, CONTROL_TIMEOUT_MS, ACTION_DEMO_SETTINGS_SET) { result, detail ->
             when (result) {
-                LogState.ACK -> demoSettingsSaveStatus = "Hub が受け付けました。保存中…" to LogState.ACK
+                LogState.ACK -> onAck("Hub が受け付けました。保存中…" to LogState.ACK)
                 LogState.READY -> done.complete("保存しました" to LogState.READY)
                 else -> done.complete(detail to result)
             }
@@ -2015,7 +2049,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「Hub に書き込む」: PRESET_SET of the unwritten preset [id] into its slot of the selected HMD's Hub (`visible` true,
+     * 「Hub へ書き込み」: PRESET_SET of the unwritten preset [id] into its slot of the selected HMD's Hub (`visible` true,
      * like an import). Removed from the phone once written; kept with the reason otherwise.
      */
     fun writeUnwritten(id: Long) {

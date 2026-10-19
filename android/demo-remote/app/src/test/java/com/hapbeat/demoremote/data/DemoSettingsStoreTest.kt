@@ -7,75 +7,72 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * demo-session.md「デモごとの設定」: the phone's copy of each Quest's per-demo settings, with the changes saved while the Hub
- * was not in front kept as unwritten until written; and the per-demo (`scope: device`) options a preset never holds.
+ * demo-session.md「デモごとの設定」: the phone's copy of each Hub's per-demo settings (keyed by `hub_id`), with only the options
+ * the user changed kept as unwritten until written; and the per-demo (`scope: device`) options a preset never holds.
  */
 class DemoSettingsStoreTest {
-    private val quest = DemoSettingsStore.questKeys("2G0YC5ZG8N01AB", "192.168.1.20")
-    private val other = DemoSettingsStore.questKeys("", "192.168.1.21")
+    private val hub = "5c1e0a9b7d3f2468"
+    private val otherHub = "0123456789abcdef"
+    private val read = mapOf("round" to "55", "haptics_db" to "2")
 
     @Test
-    fun saveWithoutTheHubKeepsTheChangeUnwrittenAcrossARestart() {
-        var book = DemoSettingsStore.onRead(emptyMap(), quest, "boxing", mapOf("round" to "55", "haptics_db" to "2"))
-        book = DemoSettingsStore.save(book, quest, "boxing", mapOf("round" to "55", "haptics_db" to "6"))
-        val entry = DemoSettingsStore.entry(book, quest, "boxing")!!
-        assertEquals("Only what differs from the Hub.", mapOf("haptics_db" to "6"), entry.unwritten)
+    fun saveWithoutTheHubKeepsOnlyTheChangedOptionAcrossARestart() {
+        var book = DemoSettingsStore.onRead(emptyMap(), hub, "boxing", read)
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6"))
+        val entry = DemoSettingsStore.entry(book, hub, "boxing")!!
+        assertEquals("Only what the user changed.", mapOf("haptics_db" to "6"), entry.unwritten)
         assertEquals(mapOf("round" to "55", "haptics_db" to "6"), entry.values)
 
         // Closing the app: the settings string is read back.
         val restored = DemoSettingsStore.decode(DemoSettingsStore.encode(book))
         assertEquals(book, restored)
-        assertEquals(listOf(UnwrittenDemoSettings("serial:2G0YC5ZG8N01AB", "boxing", mapOf("haptics_db" to "6"))),
-            DemoSettingsStore.unwritten(restored, quest))
-        assertTrue("Another Quest has its own settings.", DemoSettingsStore.unwritten(restored, other).isEmpty())
-        assertNull(DemoSettingsStore.entry(restored, other, "boxing"))
+        assertEquals(listOf(UnwrittenDemoSettings(hub, "boxing", mapOf("haptics_db" to "6"))), DemoSettingsStore.unwritten(restored, hub))
+        assertTrue("Another Hub has its own copies.", DemoSettingsStore.unwritten(restored, otherHub).isEmpty())
+        assertNull(DemoSettingsStore.entry(restored, otherHub, "boxing"))
+    }
+
+    @Test
+    fun aHubNeverReadGetsNoUnwrittenChange() {
+        assertTrue(DemoSettingsStore.save(emptyMap(), hub, "boxing", mapOf("haptics_db" to "6")).isEmpty())
+    }
+
+    @Test
+    fun aChangeOnTheHeadsetIsNotOverwrittenByAnUntouchedValue() {
+        var book = DemoSettingsStore.onRead(emptyMap(), hub, "boxing", read)
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6"))
+        // Meanwhile staff change the round on the Hub's manage screen; the next read brings it.
+        book = DemoSettingsStore.onRead(book, hub, "boxing", mapOf("round" to "30", "haptics_db" to "2"))
+        val entry = DemoSettingsStore.entry(book, hub, "boxing")!!
+        assertEquals("The write carries only haptics_db.", mapOf("haptics_db" to "6"), entry.unwritten)
+        assertEquals(mapOf("round" to "30", "haptics_db" to "6"), entry.values)
     }
 
     @Test
     fun writingOrReadingTheSameValueClearsTheUnwrittenChange() {
-        var book = DemoSettingsStore.save(emptyMap(), quest, "boxing", mapOf("haptics_db" to "6", "round" to "30"))
-        assertEquals("Hub values unknown: everything is unwritten.", mapOf("haptics_db" to "6", "round" to "30"),
-            DemoSettingsStore.entry(book, quest, "boxing")!!.unwritten)
-        book = DemoSettingsStore.onWritten(book, quest, "boxing", mapOf("haptics_db" to "6"))
-        assertEquals(mapOf("round" to "30"), DemoSettingsStore.entry(book, quest, "boxing")!!.unwritten)
-        assertEquals("6", DemoSettingsStore.entry(book, quest, "boxing")!!.hub["haptics_db"])
+        var book = DemoSettingsStore.onRead(emptyMap(), hub, "boxing", read)
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6", "round" to "30"))
+        book = DemoSettingsStore.onWritten(book, hub, "boxing", mapOf("haptics_db" to "6"))
+        assertEquals(mapOf("round" to "30"), DemoSettingsStore.entry(book, hub, "boxing")!!.unwritten)
+        assertEquals("6", DemoSettingsStore.entry(book, hub, "boxing")!!.hub["haptics_db"])
         // The Hub already has round 30 (written from elsewhere): reading clears it.
-        book = DemoSettingsStore.onRead(book, quest, "boxing", mapOf("round" to "30", "haptics_db" to "6"))
-        assertTrue(DemoSettingsStore.entry(book, quest, "boxing")!!.unwritten.isEmpty())
-        assertTrue(DemoSettingsStore.unwritten(book, quest).isEmpty())
+        book = DemoSettingsStore.onRead(book, hub, "boxing", mapOf("round" to "30", "haptics_db" to "6"))
+        assertTrue(DemoSettingsStore.unwritten(book, hub).isEmpty())
         // A change back to the Hub's value cancels the unwritten one.
-        book = DemoSettingsStore.save(book, quest, "boxing", mapOf("haptics_db" to "4"))
-        book = DemoSettingsStore.save(book, quest, "boxing", mapOf("haptics_db" to "6"))
-        assertTrue(DemoSettingsStore.entry(book, quest, "boxing")!!.unwritten.isEmpty())
-    }
-
-    @Test
-    fun readingKeepsUnwrittenChangesTheHubDoesNotHave() {
-        var book = DemoSettingsStore.save(emptyMap(), quest, "boxing", mapOf("haptics_db" to "9"))
-        book = DemoSettingsStore.onRead(book, quest, "boxing", mapOf("round" to "55", "haptics_db" to "2"))
-        val entry = DemoSettingsStore.entry(book, quest, "boxing")!!
-        assertEquals(mapOf("haptics_db" to "9"), entry.unwritten)
-        assertEquals("9", entry.values["haptics_db"])
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "4"))
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6"))
+        assertTrue(DemoSettingsStore.entry(book, hub, "boxing")!!.unwritten.isEmpty())
     }
 
     @Test
     fun onlyTheTableOptionsAndValuesAreKept() {
-        val book = DemoSettingsStore.onRead(emptyMap(), quest, "boxing", mapOf("haptics_db" to "-2", "speed" to "fast", "round" to "30"))
-        assertEquals(mapOf("round" to "30"), DemoSettingsStore.entry(book, quest, "boxing")!!.hub)
+        val book = DemoSettingsStore.onRead(emptyMap(), hub, "boxing", mapOf("haptics_db" to "-2", "speed" to "fast", "round" to "30"))
+        assertEquals(mapOf("round" to "30"), DemoSettingsStore.entry(book, hub, "boxing")!!.hub)
         assertTrue(DemoSettingsStore.decode("").isEmpty())
         assertTrue(DemoSettingsStore.decode("{").isEmpty())
-        assertTrue(DemoSettingsStore.decode("""{"version":2,"quests":{}}""").isEmpty())
-        val stored = """{"version":1,"quests":{"ip:192.168.1.21":{"boxing":{"hub":{"round":"30","speed":"x"},"unwritten":{"haptics_db":"7"}},"unknown-demo":{"hub":{}}},"bad":{}}}"""
-        assertEquals(mapOf("ip:192.168.1.21" to mapOf("boxing" to DemoSettingsEntry(mapOf("round" to "30")))), DemoSettingsStore.decode(stored))
-    }
-
-    @Test
-    fun aChangeSavedBeforeTheSerialWasKnownMovesToTheSerial() {
-        val byIp = DemoSettingsStore.questKeys("", "192.168.1.20")
-        var book = DemoSettingsStore.save(emptyMap(), byIp, "boxing", mapOf("haptics_db" to "4"))
-        assertEquals("Found under the IP once the serial is known.", mapOf("haptics_db" to "4"), DemoSettingsStore.entry(book, quest, "boxing")!!.unwritten)
-        book = DemoSettingsStore.onWritten(book, quest, "boxing", mapOf("haptics_db" to "4"))
-        assertEquals(setOf("serial:2G0YC5ZG8N01AB"), book.keys)
+        assertTrue("The serial / IP keyed copies of the d4 build are not migrated.",
+            DemoSettingsStore.decode("""{"version":1,"quests":{"serial:X":{"boxing":{"hub":{"round":"30"}}}}}""").isEmpty())
+        val stored = """{"version":2,"hubs":{"$hub":{"boxing":{"hub":{"round":"30","speed":"x"},"unwritten":{"haptics_db":"7"}},"unknown-demo":{"hub":{}}},"ip:1.2.3.4":{}}}"""
+        assertEquals(mapOf(hub to mapOf("boxing" to DemoSettingsEntry(mapOf("round" to "30")))), DemoSettingsStore.decode(stored))
     }
 
     @Test
@@ -98,5 +95,14 @@ class DemoSettingsStoreTest {
         // An unwritten preset stored with one (before) is read back without it.
         val kept = UnwrittenPresets.add(emptyList(), listOf(RemotePreset("A", listOf(PresetStep("boxing", mapOf("haptics_db" to "6"))))), listOf(1))
         assertEquals(listOf(PresetStep("boxing")), UnwrittenPresets.decode(UnwrittenPresets.encode(kept)).single().preset.steps)
+    }
+
+    @Test
+    fun demoSettingsFailuresReadAsPlainJapanese() {
+        assertEquals("Hub のこのデモにない設定です（触覚の強さ。Hub とリモコンの版を確認）", HubPresets.demoSettingsFailureText("invalid_payload", "haptics_db"))
+        assertEquals("Boxing が HMD の Hub に入っていないか、Hub にこのデモの設定がありません", HubPresets.demoSettingsFailureText("not_allowed", "boxing"))
+        assertTrue(HubPresets.demoSettingsFailureText("not_allowed", "An operation is in progress.").startsWith("Hub が受け付けませんでした"))
+        assertEquals(HubPresets.HUB_NOT_FOREGROUND, HubPresets.demoSettingsFailureText("not_allowed", "not in foreground"))
+        assertEquals("Hub で保存できませんでした: disk full", HubPresets.demoSettingsFailureText("launch_failed", "disk full"))
     }
 }

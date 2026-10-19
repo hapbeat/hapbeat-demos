@@ -505,7 +505,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
 
 /**
  * Presets imported from a QR / link and kept on the phone (the Hub was not in front): 確認 (content and slot), 削除 and
- * Hub に書き込む (PRESET_SET, only while the Hub is in front). The heading and the status line are always there.
+ * Hub へ書き込み (PRESET_SET, only while the Hub is in front). The heading and the status line are always there.
  */
 @Composable
 private fun UnwrittenPresetSection(vm: RemoteViewModel, block: String?, hubDemos: List<HubDemo>?) {
@@ -535,7 +535,7 @@ private fun UnwrittenPresetSection(vm: RemoteViewModel, block: String?, hubDemos
             TextButton(onClick = { shown = item.id }, modifier = Modifier.width(56.dp)) { Text("確認") }
             TextButton(onClick = { deleting = item.id }, enabled = vm.unwrittenWriting != item.id, modifier = Modifier.width(56.dp)) { Text("削除") }
             ActionButton(
-                if (vm.unwrittenWriting == item.id) "書込中" else "Hub に書き込む",
+                if (vm.unwrittenWriting == item.id) "書込中" else "Hub へ書き込み",
                 enabled = block == null && vm.unwrittenWriting == null && !vm.importRunning,
                 modifier = Modifier.width(112.dp),
             ) { vm.writeUnwritten(item.id) }
@@ -725,7 +725,7 @@ private fun UnwrittenDemoSettingsSection(vm: RemoteViewModel, hubDemos: List<Hub
     val items = vm.selectedUnwrittenDemoSettings
     val block = vm.hubPresetBlockReason
     Text("未書き込みのデモの設定（${items.size} 件）", style = MaterialTheme.typography.titleSmall)
-    val save = vm.demoSettingsSaveStatus
+    val save = vm.demoTabStatus
     Text(
         when {
             save != null -> save.first
@@ -753,10 +753,10 @@ private fun UnwrittenDemoSettingsSection(vm: RemoteViewModel, hubDemos: List<Hub
             }
             TextButton(onClick = { onOpenDemoSettings(item.demoId) }, modifier = Modifier.width(56.dp)) { Text("確認") }
             ActionButton(
-                if (vm.demoSettingsSaving) "書込中" else "Hub に書き込む",
+                if (vm.demoSettingsSaving) "書込中" else "Hub へ書き込み",
                 enabled = block == null && !vm.demoSettingsSaving,
                 modifier = Modifier.width(112.dp),
-            ) { vm.writeDemoSettings(item.demoId) }
+            ) { vm.writeDemoSettings(item.demoId, onScreen = false) }
         }
     }
 }

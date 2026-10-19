@@ -163,11 +163,11 @@ private fun StepRow(
 
 /**
  * One row per descriptor option of a demo, one chip per value; a missing key shows its descriptor default as chosen
- * ([DemoCatalog.chosenValue], [DemoCatalog.withChoice]). Shared by the preset editor and the per-demo settings. Demos
- * without options show nothing.
+ * ([DemoCatalog.chosenValue], [DemoCatalog.withChoice]). Shared by the preset editor and the per-demo settings; [enabled]
+ * false shows the values without letting them change. Demos without options show nothing.
  */
 @Composable
-fun OptionChooser(options: List<DemoOption>, values: Map<String, String>, onChange: (Map<String, String>) -> Unit) {
+fun OptionChooser(options: List<DemoOption>, values: Map<String, String>, enabled: Boolean = true, onChange: (Map<String, String>) -> Unit) {
     options.forEach { option ->
         val chosen = DemoCatalog.chosenValue(option, values)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -176,6 +176,7 @@ fun OptionChooser(options: List<DemoOption>, values: Map<String, String>, onChan
                 option.values.forEach { v ->
                     FilterChip(
                         selected = chosen == v.value,
+                        enabled = enabled,
                         onClick = { onChange(DemoCatalog.withChoice(values, option, v.value)) },
                         label = { Text(v.label) },
                     )

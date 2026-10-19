@@ -6,87 +6,80 @@ import com.hapbeat.demoremote.protocol.JsonException
 import com.hapbeat.demoremote.protocol.JsonNumber
 import com.hapbeat.demoremote.protocol.JsonObject
 import com.hapbeat.demoremote.protocol.JsonString
+import com.hapbeat.demoremote.protocol.JsonValue
 import com.hapbeat.demoremote.protocol.MiniJson
 
 /**
- * One demo's per-demo settings (demo-session.md「デモごとの設定」) as the phone keeps them for one Quest: [hub] the values last
- * read from or written to that Quest's Hub (DEMO_SETTINGS), [unwritten] changes saved on the phone that the Hub does not
- * have yet (the Hub was not in front or did not answer). They are written when the Hub is in front again and the user
- * asks (DEMO_SETTINGS_SET).
+ * One demo's per-demo settings (demo-session.md「デモごとの設定」) as the phone keeps them for one Hub: [hub] the values last
+ * read from or written to that Hub (DEMO_SETTINGS), [unwritten] only the options the user changed on the phone that the
+ * Hub does not have yet (the Hub was not in front or did not answer). They are written when the Hub is in front again and
+ * the user asks (DEMO_SETTINGS_SET carries only these, so values changed on the headset are never overwritten).
  */
 data class DemoSettingsEntry(val hub: Map<String, String> = emptyMap(), val unwritten: Map<String, String> = emptyMap()) {
     /** What the phone shows: the Hub's values with the unwritten changes over them. */
     val values: Map<String, String> get() = hub + unwritten
 }
 
-/** Unwritten changes of one demo on one Quest ([quest]: a [DemoSettingsStore.questKey]). */
-data class UnwrittenDemoSettings(val quest: String, val demoId: String, val settings: Map<String, String>)
+/** Unwritten changes of one demo on one Hub ([hubId]: its DEMO_SETTINGS `hub_id`). */
+data class UnwrittenDemoSettings(val hubId: String, val demoId: String, val settings: Map<String, String>)
 
 /**
- * The phone's copy of each Quest's per-demo settings: Quest key ([questKey]) → demo ID → entry. Kept in the settings
- * (one JSON string), so unwritten changes survive closing the app. Pure Kotlin so it runs in JVM unit tests. Only
- * demos and options of this app's table with their listed values are kept; anything else read back is dropped.
+ * The phone's copy of each Hub's per-demo settings: `hub_id` (DEMO_SETTINGS, the Hub's own ID, so a copy follows the
+ * headset and not its IP or adb serial) → demo ID → entry. Kept in the settings (one JSON string), so unwritten changes
+ * survive closing the app. A copy exists only for a Hub whose settings were read at least once. Pure Kotlin so it runs in
+ * JVM unit tests. Only demos and options of this app's table with their listed values are kept; anything else read back
+ * is dropped.
  */
 object DemoSettingsStore {
-    private const val VERSION = 1
+    private const val VERSION = 2
+    private val HUB_ID = Regex("^[0-9a-f]{16}$")
 
-    /** A Quest by its adb serial when known, else by its IP (as the remembered selection). */
-    fun questKey(serial: String, ip: String): String = if (serial.isNotEmpty()) "serial:$serial" else "ip:$ip"
+    fun isHubId(value: String): Boolean = HUB_ID.matches(value)
 
-    /** The keys [entry] / [unwritten] look under for a Quest: its serial first, then its IP (saved before the serial was known). */
-    fun questKeys(serial: String, ip: String): List<String> = listOfNotNull(serial.takeIf { it.isNotEmpty() }?.let { "serial:$it" }, "ip:$ip")
-
-    fun entry(book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>, demoId: String): DemoSettingsEntry? =
-        keys.firstNotNullOfOrNull { book[it]?.get(demoId) }
+    fun entry(book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String, demoId: String): DemoSettingsEntry? = book[hubId]?.get(demoId)
 
     /**
-     * DEMO_SETTINGS of [demoId] read from the Quest's Hub: [settings] becomes the Hub's values (only the options of this
+     * DEMO_SETTINGS of [demoId] read from the Hub [hubId]: [settings] becomes the Hub's values (only the options of this
      * app's table); unwritten changes stay, except those the Hub already has.
      */
     fun onRead(
-        book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>, demoId: String, settings: Map<String, String>,
+        book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String, demoId: String, settings: Map<String, String>,
     ): Map<String, Map<String, DemoSettingsEntry>> {
         val hub = known(demoId, settings)
-        val old = entry(book, keys, demoId) ?: DemoSettingsEntry()
-        return put(book, keys, demoId, DemoSettingsEntry(hub, old.unwritten.filter { (id, value) -> hub[id] != value }))
+        val old = entry(book, hubId, demoId) ?: DemoSettingsEntry()
+        return put(book, hubId, demoId, DemoSettingsEntry(hub, old.unwritten.filter { (id, value) -> hub[id] != value }))
     }
 
     /**
-     * 保存: [edited] (the values shown, every option or only some) becomes the unwritten change, as far as it differs from
-     * the Hub's values (all of it while those are unknown). Changes back to the Hub's value cancel the unwritten one.
+     * 保存: [changed] holds only the options the user changed on the screen. They join the unwritten changes; one set back
+     * to the Hub's value is no longer a change. Nothing for a Hub whose settings were never read ([entry] null).
      */
     fun save(
-        book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>, demoId: String, edited: Map<String, String>,
+        book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String, demoId: String, changed: Map<String, String>,
     ): Map<String, Map<String, DemoSettingsEntry>> {
-        val old = entry(book, keys, demoId) ?: DemoSettingsEntry()
-        val changed = known(demoId, edited).filter { (id, value) -> old.hub[id] != value }
-        return put(book, keys, demoId, old.copy(unwritten = changed))
+        val old = entry(book, hubId, demoId) ?: return book
+        val unwritten = (old.unwritten + known(demoId, changed)).filter { (id, value) -> old.hub[id] != value }
+        return put(book, hubId, demoId, old.copy(unwritten = unwritten))
     }
 
     /** The Hub took [written] (READY): they are the Hub's values now and no longer unwritten (later changes stay). */
     fun onWritten(
-        book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>, demoId: String, written: Map<String, String>,
+        book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String, demoId: String, written: Map<String, String>,
     ): Map<String, Map<String, DemoSettingsEntry>> {
-        val old = entry(book, keys, demoId) ?: DemoSettingsEntry()
-        return put(book, keys, demoId, DemoSettingsEntry(old.hub + written, old.unwritten.filter { (id, value) -> written[id] != value }))
+        val old = entry(book, hubId, demoId) ?: return book
+        return put(book, hubId, demoId, DemoSettingsEntry(old.hub + written, old.unwritten.filter { (id, value) -> written[id] != value }))
     }
 
-    /** Every unwritten change of the Quest with [keys], in catalog order. */
-    fun unwritten(book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>): List<UnwrittenDemoSettings> =
+    /** Every unwritten change for the Hub [hubId], in catalog order. */
+    fun unwritten(book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String): List<UnwrittenDemoSettings> =
         DemoCatalog.sessionApps.mapNotNull { app ->
-            val key = keys.firstOrNull { book[it]?.get(app.demoId) != null } ?: return@mapNotNull null
-            val changes = book[key]!![app.demoId]!!.unwritten
-            if (changes.isEmpty()) null else UnwrittenDemoSettings(key, app.demoId, changes)
+            val changes = book[hubId]?.get(app.demoId)?.unwritten.orEmpty()
+            if (changes.isEmpty()) null else UnwrittenDemoSettings(hubId, app.demoId, changes)
         }
 
-    /** Stores [entry] under the first (primary) key and removes the demo from the other keys of the same Quest. */
     private fun put(
-        book: Map<String, Map<String, DemoSettingsEntry>>, keys: List<String>, demoId: String, entry: DemoSettingsEntry,
-    ): Map<String, Map<String, DemoSettingsEntry>> {
-        val result = book.mapValues { (key, demos) -> if (key in keys) demos - demoId else demos }.toMutableMap()
-        result[keys.first()] = (result[keys.first()] ?: emptyMap()) + (demoId to entry)
-        return result.filterValues { it.isNotEmpty() }
-    }
+        book: Map<String, Map<String, DemoSettingsEntry>>, hubId: String, demoId: String, entry: DemoSettingsEntry,
+    ): Map<String, Map<String, DemoSettingsEntry>> = book + (hubId to ((book[hubId] ?: emptyMap()) + (demoId to entry)))
 
     /** Only options of [demoId]'s table with one of their values. */
     private fun known(demoId: String, values: Map<String, String>): Map<String, String> {
@@ -96,22 +89,23 @@ object DemoSettingsStore {
 
     fun encode(book: Map<String, Map<String, DemoSettingsEntry>>): String = MiniJson.write(linkedMapOf(
         "version" to VERSION,
-        "quests" to book.toSortedMap().mapValues { (_, demos) ->
+        "hubs" to book.toSortedMap().mapValues { (_, demos) ->
             demos.toSortedMap().mapValues { (_, entry) ->
                 linkedMapOf("hub" to entry.hub.toSortedMap(), "unwritten" to entry.unwritten.toSortedMap())
             }
         },
     ))
 
+    /** Stored copies; anything from another version (the serial / IP keyed d4 build) reads as none. */
     fun decode(text: String): Map<String, Map<String, DemoSettingsEntry>> {
         if (text.isEmpty()) return emptyMap()
         val root = try { MiniJson.parse(text) } catch (_: JsonException) { return emptyMap() }
         val fields = (root as? JsonObject)?.fields ?: return emptyMap()
         if ((fields["version"] as? JsonNumber)?.longOrNull() != VERSION.toLong()) return emptyMap()
-        val quests = (fields["quests"] as? JsonObject)?.fields ?: return emptyMap()
+        val hubs = (fields["hubs"] as? JsonObject)?.fields ?: return emptyMap()
         val result = mutableMapOf<String, Map<String, DemoSettingsEntry>>()
-        for ((quest, value) in quests) {
-            if (!quest.startsWith("serial:") && !quest.startsWith("ip:")) continue
+        for ((hubId, value) in hubs) {
+            if (!isHubId(hubId)) continue
             val demos = (value as? JsonObject)?.fields ?: continue
             val entries = mutableMapOf<String, DemoSettingsEntry>()
             for ((demoId, entryValue) in demos) {
@@ -119,11 +113,11 @@ object DemoSettingsStore {
                 val f = (entryValue as? JsonObject)?.fields ?: continue
                 entries[demoId] = DemoSettingsEntry(known(demoId, strings(f["hub"])), known(demoId, strings(f["unwritten"])))
             }
-            if (entries.isNotEmpty()) result[quest] = entries
+            if (entries.isNotEmpty()) result[hubId] = entries
         }
         return result
     }
 
-    private fun strings(value: com.hapbeat.demoremote.protocol.JsonValue?): Map<String, String> =
+    private fun strings(value: JsonValue?): Map<String, String> =
         (value as? JsonObject)?.fields?.mapNotNull { (k, v) -> (v as? JsonString)?.value?.let { k to it } }?.toMap() ?: emptyMap()
 }

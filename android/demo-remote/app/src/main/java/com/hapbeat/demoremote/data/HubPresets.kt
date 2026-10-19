@@ -131,6 +131,24 @@ object HubPresets {
     }
 
     /**
+     * FAILED of DEMO_SETTINGS_SET in words: [message] is the target (a demo that is not installed, or one the Hub keeps no
+     * per-demo settings for) or the first unknown option ID.
+     */
+    fun demoSettingsFailureText(code: String, message: String, hubDemos: List<HubDemo>? = null): String {
+        val demo = message.takeIf { id -> DemoCatalog.sessionApps.any { it.demoId == id } || hubDemos?.any { it.demoId == id } == true }
+        val option = DemoCatalog.sessionApps.flatMap { it.options }.firstOrNull { it.id == message }
+        return when {
+            message == DemoSwitchProtocol.NOT_IN_FOREGROUND_MESSAGE -> HUB_NOT_FOREGROUND
+            code == "invalid_payload" -> "Hub のこのデモにない設定です（${option?.label ?: message}。Hub とリモコンの版を確認）"
+            code == "not_allowed" && demo != null ->
+                "${DemoCatalog.labelFor(demo, hubDemos)} が HMD の Hub に入っていないか、Hub にこのデモの設定がありません"
+            code == "not_allowed" -> "Hub が受け付けませんでした（管理画面の表示中・起動中など。少し待ってもう一度）"
+            code == "launch_failed" -> "Hub で保存できませんでした" + if (message.isEmpty()) "" else ": $message"
+            else -> failureText(code, message, hubDemos)
+        }
+    }
+
+    /**
      * Why the HMD's Hub cannot take a preset / settings write or a start now, or null. [state]: its last STATE (null
      * when none is known); [lastDemoId]: the foreground demo of its last HERE ("" when it did not answer).
      */
