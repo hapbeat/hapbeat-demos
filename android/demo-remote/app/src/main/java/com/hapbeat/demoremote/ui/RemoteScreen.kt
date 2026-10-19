@@ -144,6 +144,16 @@ private fun ActionsAndLog(
             modifier = Modifier.weight(1f).height(64.dp),
         ) { vm.sendControl(ControlCatalog.menuOpen) }
     }
+    // The Hub's own settings (launch defaults, tiles, the HMD's Hapbeat address, 触覚テスト) right under 「Hub を開く」.
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ActionButton(
+            "Hub の設定",
+            enabled = quest != null,
+            modifier = Modifier.weight(1f).height(48.dp),
+            outlined = true,
+        ) { onOpenHubSettings() }
+        Spacer(Modifier.weight(1f))
+    }
     NoticeArea(vm)
     TabRow(selectedTabIndex = tab) {
         listOf("起動", "切替", "操作", "デモ").forEachIndexed { i, title ->
@@ -452,7 +462,6 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
     val hubDemos = vm.selectedHubDemos
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("プリセット（Hub に保存）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-        TextButton(onClick = onOpenHubSettings, enabled = quest != null, modifier = Modifier.width(112.dp)) { Text("Hub の設定") }
         // Fixed width so the label swap does not shift the heading.
         TextButton(
             onClick = vm::reloadHubPresets,
