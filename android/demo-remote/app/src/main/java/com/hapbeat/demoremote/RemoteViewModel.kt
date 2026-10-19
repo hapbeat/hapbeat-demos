@@ -27,6 +27,9 @@ import com.hapbeat.demoremote.adb.AdbConnectResult
 import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.AdbRetryPolicy
 import com.hapbeat.demoremote.adb.BoundaryState
+import com.hapbeat.demoremote.adb.DeviceAddress
+import com.hapbeat.demoremote.adb.DeviceAddressFile
+import com.hapbeat.demoremote.adb.DeviceAddressSummary
 import com.hapbeat.demoremote.adb.QuestAdb
 import com.hapbeat.demoremote.adb.QuestBoundary
 import com.hapbeat.demoremote.adb.UsbAdb
@@ -112,6 +115,8 @@ data class QuestState(
     val boundary: BoundaryState = BoundaryState.UNKNOWN,
     /** Installed packages from `pm list packages`; null until adb has connected. */
     val installed: Set<String>? = null,
+    /** The installed demos' `hapbeat-device.json` read over adb ([DeviceAddressFile]); null until read. */
+    val address: DeviceAddressSummary? = null,
     /** Read-only state from adb (developer mode, adb, build, uptime); "" until adb has connected. */
     val info: String = "",
     /** STATE `device_model` last reported; null until a STATE carried it. */
@@ -247,6 +252,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     var hubSettingsSaving by mutableStateOf(false); private set
     /** Progress / result of the Hub settings screen's 触覚テスト (text, state); null before sending. */
     var hubHapticsTestStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
+    /** 「書き込む」 of the device address is running on the selected HMD. */
+    var deviceAddressWriting by mutableStateOf(false); private set
+    /** Progress / result of the last device address write on the selected HMD (text, state); null before writing. */
+    var deviceAddressStatus by mutableStateOf<Pair<String, LogState>?>(null); private set
     /**
      * The phone's copy of each Hub's per-demo settings (demo-session.md「デモごとの設定」, keyed by its `hub_id`), with the changes
      * saved while the Hub was not in front (unwritten). Kept in the settings, so they survive closing the app ([DemoSettingsStore]).
@@ -506,6 +515,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         hubSettingsJob?.cancel()
         hubPresetStatus = ""
         hubSettingsStatus = ""
+        deviceAddressStatus = null
         hubFrontIp = null
         resetPortDiagnosis(force = true)
         followHubFront()
@@ -1281,7 +1291,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         // Already handled: another shell on the same connection failed too, or a connect has replaced it.
         if (quests.firstOrNull { it.ip == ip }?.adb != AdbState.CONNECTED) return
         adbConnections[ip]?.close()
-        updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null, boundary = BoundaryState.UNKNOWN) }
+        updateQuest(ip) { it.copy(adb = AdbState.DISCONNECTED, battery = null, boundary = BoundaryState.UNKNOWN, address = null) }
         if (ip == selectedIp) {
             stopMirror()
             setAdbMessage("adb 接続が切れました。再接続しています…")
@@ -1349,6 +1359,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         // Every connect (manual, automatic, reconnect, after USB): the property may not survive a reboot.
         if (settings.pauseBoundaryOnConnect) pauseBoundaryOnConnect(ip)
         refreshBoundary(ip)
+        refreshDeviceAddress(ip)
         // Read-only state for the diagnosis (uptime tells a reboot apart from a Wi-Fi problem).
         val developer = adbShell(ip, "settings get global development_settings_enabled")?.output ?: return
         val adbEnabled = adbShell(ip, "settings get global adb_enabled")?.output ?: return
@@ -1409,6 +1420,82 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 boundaryRunning = false
             }
         }
+    }
+
+    // ---- device address (hapbeat-device.json) ----------------------------------------------------------
+
+    /** Why the device address cannot be written to the selected HMD, or null (adb and at least one known demo). */
+    val deviceAddressBlockReason: String?
+        get() {
+            val quest = selectedQuest ?: return "Quest を一覧から選択してください"
+            if (quest.adb != AdbState.CONNECTED) return "adb 接続中だけ使えます（HMD の状態欄の「adb 接続」でつないでください）"
+            val installed = quest.installed ?: return "インストール済みのアプリを確認中です"
+            return if (DeviceAddressFile.targets(installed).isEmpty()) "この HMD に既知のデモが入っていません" else null
+        }
+
+    /** Reads the selected HMD's address files again (the Hub settings screen opens). */
+    fun readDeviceAddress() {
+        val quest = selectedQuest ?: return
+        if (quest.adb != AdbState.CONNECTED) return
+        viewModelScope.launch { refreshDeviceAddress(quest.ip) }
+    }
+
+    /** `cat` of every installed known demo's file into the Quest entry; stops (keeps the old value) when adb is lost. */
+    private suspend fun refreshDeviceAddress(ip: String) {
+        val installed = quests.firstOrNull { it.ip == ip }?.installed ?: return
+        val reads = DeviceAddressFile.targets(installed).map { app ->
+            val response = adbShell(ip, DeviceAddressFile.readCommand(app.packageName)) ?: return
+            app.packageName to DeviceAddressFile.parse(response.exitCode, response.allOutput)
+        }
+        updateQuest(ip) { it.copy(address = DeviceAddressFile.summarize(reads)) }
+    }
+
+    /**
+     * Writes [address] to every installed known demo (Hub included) of the selected HMD, as install-demos.ps1 does:
+     * `mkdir -p`, write, then `cat` to check. No dialog. Each demo reads it at its next start.
+     */
+    fun writeDeviceAddress(address: DeviceAddress) {
+        val quest = selectedQuest ?: return
+        if (deviceAddressWriting || deviceAddressBlockReason != null) return
+        if (!DeviceAddressFile.isValid(address.player) || !DeviceAddressFile.isValid(address.group)) return
+        val ip = quest.ip
+        val targets = DeviceAddressFile.targets(quest.installed.orEmpty())
+        deviceAddressWriting = true
+        deviceAddressStatus = "書き込み中…" to LogState.SENT
+        viewModelScope.launch {
+            try {
+                val content = "Hapbeat 宛先 プレイヤー ${DeviceAddressFile.axisText(address.player)}・グループ ${DeviceAddressFile.axisText(address.group)}"
+                val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
+                val failed = mutableListOf<String>()
+                for (app in targets) {
+                    val ok = writeAddressFile(ip, app.packageName, address)
+                    if (ok == null) {
+                        updateLog(logId) { it.copy(state = LogState.ERROR, detail = "adb 接続が切れました") }
+                        if (ip == selectedIp) deviceAddressStatus = "adb 接続が切れました" to LogState.ERROR
+                        return@launch
+                    }
+                    if (!ok) failed += app.label
+                }
+                val result = DeviceAddressFile.resultText(targets.size - failed.size, failed)
+                val state = if (failed.isEmpty()) LogState.READY else LogState.FAILED
+                updateLog(logId) { it.copy(state = state, detail = result) }
+                refreshDeviceAddress(ip)
+                if (ip == selectedIp) deviceAddressStatus = result to state
+            } finally {
+                deviceAddressWriting = false
+            }
+        }
+    }
+
+    /** One demo's file: true when the read-back holds [address], false otherwise, null when adb was lost. */
+    private suspend fun writeAddressFile(ip: String, packageName: String, address: DeviceAddress): Boolean? {
+        val mkdir = adbShell(ip, DeviceAddressFile.mkdirCommand(packageName)) ?: return null
+        val write = adbShell(ip, DeviceAddressFile.writeCommand(packageName, address)) ?: return null
+        val check = adbShell(ip, DeviceAddressFile.readCommand(packageName)) ?: return null
+        val read = DeviceAddressFile.parse(check.exitCode, check.allOutput)
+        val ok = mkdir.exitCode == 0 && write.exitCode == 0 && DeviceAddressFile.verified(address, read)
+        if (!ok) fileLog("$ip $packageName 宛先の書き込み失敗: mkdir ${mkdir.exitCode} / 書き込み ${write.exitCode} / ${check.allOutput.trim().take(120)}")
+        return ok
     }
 
     /** Keeps connected Quests' Wi-Fi awake with a short shell command; a failure marks the connection lost ([adbShell]). */
@@ -2207,7 +2294,30 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 「前面のアプリを再起動」: force-stops the demo in front (and the other demos) and starts it again (the Hub: the Hub). */
     fun restartFrontApp() {
-        val front = portFront ?: return
+        restartApp(portFront ?: return)
+    }
+
+    /**
+     * 「前面のアプリを再起動」 without a diagnosis (after writing the device address): finds the known demo in front over adb,
+     * then runs the same restart. The progress shows in [portStatus].
+     */
+    fun restartFrontAppByAdb() {
+        val quest = selectedQuest ?: return
+        if (portActionRunning || quest.adb != AdbState.CONNECTED) return
+        val ip = quest.ip
+        viewModelScope.launch {
+            val top = adbShell(ip, PortDiagnosis.TOP_ACTIVITY_COMMAND)?.output ?: return@launch
+            if (ip != selectedIp) return@launch
+            val front = PortDiagnosis.frontDemo(top)
+            if (front == null) {
+                portStatus = "前面は既知のデモではありません" to false
+                return@launch
+            }
+            restartApp(front)
+        }
+    }
+
+    private fun restartApp(front: DemoApp) {
         runPortAction("${front.label} を再起動", DemoCatalog.restartCommand(front), front,
             "${front.label} を再起動しました。応答を待っています…", PORT_RESTART_WAIT_MS,
             "再起動しても ${front.label} が応答しません")
@@ -2242,6 +2352,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     portAction = PortAction.NONE
                     portStatus = "${DemoCatalog.labelFor(answered)} が応答しました" to false
                     addLog(quest.label, "Demo Switch の応答が戻りました（${DemoCatalog.labelFor(answered)}）", null, LogState.INFO)
+                    // A restarted Hub has read its device address file again: its HUB_SETTINGS player / group may have changed.
+                    if (answered == DemoCatalog.HUB_ID) readHubSettings()
                 } else {
                     portStatus = noAnswer to true
                     portAction = PortAction.RESTART_FRONT

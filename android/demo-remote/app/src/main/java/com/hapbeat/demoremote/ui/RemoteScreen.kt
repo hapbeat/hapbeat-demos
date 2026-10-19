@@ -66,6 +66,7 @@ import com.hapbeat.demoremote.PortAction
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.adb.BoundaryState
+import com.hapbeat.demoremote.adb.DeviceAddressFile
 import com.hapbeat.demoremote.adb.QuestBoundary
 import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPresets
@@ -242,6 +243,9 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
             // Fixed width: "なし / あり / 不明" never moves the items on its left.
             val boundary = if (quest.adb == AdbState.CONNECTED) quest.boundary else BoundaryState.UNKNOWN
             Text("境界: ${QuestBoundary.label(boundary)}", maxLines = 1, modifier = Modifier.width(80.dp))
+            // Fixed width as well: "グループ 指定なし" is the longest text.
+            val address = if (quest.adb == AdbState.CONNECTED) quest.address else null
+            Text(DeviceAddressFile.groupStatus(address), maxLines = 1, modifier = Modifier.width(128.dp))
         }
         // Read-only state from adb (developer mode / adb / uptime / build); one fixed line.
         Text(
