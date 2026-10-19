@@ -192,13 +192,19 @@ namespace Hapbeat.DemoSwitch
 
         /// <summary>
         /// The active `scope: device` options of <paramref name="descriptor"/> for a launch without a ticket: the stored value
-        /// when it is still one of the option's values, else the default. `when` is resolved with the other options' defaults.
+        /// when it is still one of the option's values, else the default (with a warning when a stored value no longer is).
+        /// `when` is resolved with the other options' defaults.
         /// </summary>
         internal static Dictionary<string, string> LoadDeviceOptions(DemoSessionDescriptor descriptor, IDemoDeviceOptionStore store)
         {
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var option in descriptor.Options)
-                values[option.Id] = option.IsDevice && store.TryGet(descriptor.DemoId, option.Id, out var stored) && option.HasValue(stored) ? stored : option.Default;
+            {
+                values[option.Id] = option.Default;
+                if (!option.IsDevice || !store.TryGet(descriptor.DemoId, option.Id, out var stored)) continue;
+                if (option.HasValue(stored)) values[option.Id] = stored;
+                else Debug.LogWarning("[Demo Session] Stored device option " + option.Id + "=" + stored + " is not one of its values; using the default " + option.Default + ".");
+            }
             var result = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var option in descriptor.Options)
                 if (option.IsDevice && descriptor.IsActive(option, values)) result[option.Id] = values[option.Id];

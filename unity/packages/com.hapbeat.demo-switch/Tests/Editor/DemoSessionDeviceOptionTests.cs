@@ -117,6 +117,7 @@ namespace Hapbeat.DemoSwitch.Tests
         public void AStoredValueTheDescriptorNoLongerHasFallsBackToTheDefault()
         {
             _store.Set("boxing", "haptics_db", "12");
+            LogAssert.Expect(LogType.Warning, new Regex("haptics_db=12 is not one of its values; using the default 2"));
             Launch(null);
             Assert.That(DemoSession.GetOption("haptics_db"), Is.EqualTo("2"));
         }
