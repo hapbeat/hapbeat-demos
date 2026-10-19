@@ -682,7 +682,7 @@ private fun DemoTab(vm: RemoteViewModel, onOpenDemoSettings: (String) -> Unit) {
     val quest = vm.selectedQuest
     val hubDemos = vm.selectedHubDemos
     Text(
-        "デモを押すと、この Quest でのデモごとの設定を開きます（Hub に保存。プリセット・タイル・リモコンのどこから起動しても使われます）。" +
+        "デモを押すと、この Quest でのデモごとの設定を開きます（Hub に保存。タイルとリモコンの起動で使われ、「この Quest の設定」はプリセットでも使われます）。" +
             "長押しすると、保存済みの設定でそのまま起動します",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -705,7 +705,8 @@ private fun DemoTab(vm: RemoteViewModel, onOpenDemoSettings: (String) -> Unit) {
             } else {
                 longPressNote = "${app.label} を起動します"
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                vm.startSession(app.demoId)
+                // An unwritten change is written first; a failed write starts nothing (the result line below the list).
+                vm.startDemo(app.demoId, onScreen = false)
             }
         }) { onOpenDemoSettings(app.demoId) }
     }

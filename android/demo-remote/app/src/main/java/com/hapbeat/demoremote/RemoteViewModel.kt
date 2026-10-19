@@ -1836,16 +1836,17 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「起動」 on the settings screen: an unwritten change of [demoId] is written first (DEMO_SETTINGS_SET); only after READY
-     * the demo starts through the Hub with its saved settings ([startSession]). A failed write starts nothing.
+     * 「起動」 on the settings screen (and a long press on the デモ tab, [onScreen] false): an unwritten change of [demoId] is
+     * written first (DEMO_SETTINGS_SET); only after READY the demo starts through the Hub with its saved settings
+     * ([startSession]). A failed write starts nothing and says why on that screen's result line.
      */
-    fun startDemo(demoId: String) {
+    fun startDemo(demoId: String, onScreen: Boolean = true) {
         if (sessionStarting || demoSettingsSaving) return
         if (demoSettingsEntry(demoId)?.unwritten.orEmpty().isEmpty()) {
             startSession(demoId)
             return
         }
-        writeDemoSettings(demoId, onScreen = true) { startSession(demoId) }
+        writeDemoSettings(demoId, onScreen) { startSession(demoId) }
     }
 
     private suspend fun sendDemoSettings(
