@@ -47,7 +47,7 @@ object DemoCatalog {
         )),
         DemoOption("tutorial", "チュートリアル", "on", listOf(OptionValue("on", "あり"), OptionValue("off", "なし")),
             whenValues = mapOf("scene" to setOf("block", "receive"))),
-        DemoOption("points", "点数", "3", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取")),
+        DemoOption("points", "点数", "4", listOf(OptionValue("3", "3点先取"), OptionValue("4", "4点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取")),
             whenValues = mapOf("scene" to setOf("block", "receive", "match"))),
     )
     private val BOXING_OPTIONS = listOf(

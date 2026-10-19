@@ -9,7 +9,7 @@ class DemoCatalogOptionsTest {
     @Test
     fun missingKeyShowsTheDescriptorDefault() {
         val points = option(DemoCatalog.VOLLEY_ID, "points")
-        assertEquals("3", DemoCatalog.chosenValue(points, emptyMap()))
+        assertEquals("4", DemoCatalog.chosenValue(points, emptyMap()))
         assertEquals("5", DemoCatalog.chosenValue(points, mapOf("points" to "5")))
         // An existing preset step without the key opens with the default chosen.
         val tutorial = option(DemoCatalog.ENERGY_DUEL_ID, "tutorial")
@@ -20,10 +20,10 @@ class DemoCatalogOptionsTest {
     fun choosingTheDefaultLeavesTheKeyOut() {
         val points = option(DemoCatalog.VOLLEY_ID, "points")
         assertEquals(mapOf("points" to "5"), DemoCatalog.withChoice(emptyMap(), points, "5"))
-        assertEquals(emptyMap<String, String>(), DemoCatalog.withChoice(mapOf("points" to "5"), points, "3"))
-        assertEquals(emptyMap<String, String>(), DemoCatalog.withChoice(emptyMap(), points, "3"))
+        assertEquals(emptyMap<String, String>(), DemoCatalog.withChoice(mapOf("points" to "5"), points, "4"))
+        assertEquals(emptyMap<String, String>(), DemoCatalog.withChoice(emptyMap(), points, "4"))
         // Nothing to summarize while everything is the default.
-        assertEquals("", DemoCatalog.optionSummary(DemoCatalog.VOLLEY_ID, DemoCatalog.withChoice(emptyMap(), points, "3")))
+        assertEquals("", DemoCatalog.optionSummary(DemoCatalog.VOLLEY_ID, DemoCatalog.withChoice(emptyMap(), points, "4")))
     }
 
     @Test

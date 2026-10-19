@@ -65,11 +65,11 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.HapticsUi, Is.True);
             Assert.That(parsed.Steps.Count, Is.EqualTo(1));
             Assert.That(parsed.Steps[0].DemoId, Is.EqualTo("volley"));
-            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "3" }), "Descriptor defaults, active only.");
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "4" }), "Descriptor defaults, active only.");
             Assert.That(parsed.Steps[0].Retry, Is.True);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.Finish.ActivityName, Is.EqualTo(HubIdentity.ActivityName));
-            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 3点先取"));
+            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 4点先取"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
             Assert.That(parsed.RecenterUi, Is.False);
             var shown = HubPlan.Single(_volley).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true, null);
@@ -814,9 +814,9 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter", "volley" }));
-            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["tutorial"] = "on", ["points"] = "3" }),
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["tutorial"] = "on", ["points"] = "4" }),
                 "Given value kept, unknown option dropped, defaults for the rest, active options only.");
-            Assert.That(parsed.Steps[2].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "3" }));
+            Assert.That(parsed.Steps[2].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "4" }));
             Assert.That(parsed.Steps.Select(s => s.Retry), Is.EqualTo(new[] { true, false, true }));
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.HapticsUi, Is.True);
@@ -871,7 +871,7 @@ namespace Hapbeat.DemoHub.Tests
             ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, out error);
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out error), Is.True, error);
             Assert.That(parsed.Steps.Count, Is.EqualTo(1));
-            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "match", ["points"] = "3" }),
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "match", ["points"] = "4" }),
                 "Given value kept, unknown value and option replaced by the defaults, inactive options left out.");
             Assert.That(parsed.Steps[0].Retry, Is.True);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
@@ -943,7 +943,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(controller.HasInstalledStep(2), Is.True);
                 Assert.That(store.LoadSettings().VisiblePresets, Has.Member(2), "visible is the saved top-screen choice.");
                 Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
-                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nVolley レシーブ あり 3点先取"), "The top screen is refreshed.");
+                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nVolley レシーブ あり 4点先取"), "The top screen is refreshed.");
 
                 var read = controller.ReadPreset(2);
                 Assert.That(read.Visible, Is.True);
