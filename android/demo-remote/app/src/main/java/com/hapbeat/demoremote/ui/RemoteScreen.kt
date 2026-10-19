@@ -72,6 +72,10 @@ import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.delay
 
 /**
  * [tab]: the selected tab (起動 / 切替 / 操作 / デモ), kept by the caller so that it survives opening another screen.
@@ -678,13 +682,40 @@ private fun DemoTab(vm: RemoteViewModel, onOpenDemoSettings: (String) -> Unit) {
     val quest = vm.selectedQuest
     val hubDemos = vm.selectedHubDemos
     Text(
-        "デモを押すと、この Quest でのデモごとの設定を開きます（Hub に保存。プリセット・タイル・リモコンのどこから起動しても使われます）",
+        "デモを押すと、この Quest でのデモごとの設定を開きます（Hub に保存。プリセット・タイル・リモコンのどこから起動しても使われます）。" +
+            "長押しすると、保存済みの設定でそのまま起動します",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ButtonGrid(DemoCatalog.sessionCandidates(hubDemos), columns = 3) { app, modifier ->
-        DemoTile(app, enabled = quest != null, modifier = modifier, outlined = true) { onOpenDemoSettings(app.demoId) }
+    // Why a long press did not start, or that it started (shown for a few seconds in the fixed line below the grid).
+    var longPressNote by remember { mutableStateOf("") }
+    LaunchedEffect(longPressNote) {
+        if (longPressNote.isNotEmpty()) {
+            delay(LONG_PRESS_NOTE_MS)
+            longPressNote = ""
+        }
     }
+    val haptic = LocalHapticFeedback.current
+    ButtonGrid(DemoCatalog.sessionCandidates(hubDemos), columns = 3) { app, modifier ->
+        // Long press: the same start as 起動 in the demo's settings (one demo through the Hub with its saved settings).
+        DemoTile(app, enabled = quest != null, modifier = modifier, outlined = true, onLongPress = {
+            val blocked = if (vm.sessionStarting) "起動中…" else vm.sessionStartBlockReason(app)
+            if (blocked != null) {
+                longPressNote = "長押しで起動できません: $blocked"
+            } else {
+                longPressNote = "${app.label} を起動します"
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                vm.startSession(app.demoId)
+            }
+        }) { onOpenDemoSettings(app.demoId) }
+    }
+    Text(
+        longPressNote.ifEmpty { " " },
+        style = MaterialTheme.typography.bodySmall,
+        color = if (longPressNote.startsWith("長押しで起動できません")) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
     UnwrittenDemoSettingsSection(vm, hubDemos, onOpenDemoSettings)
 }
 
@@ -840,3 +871,6 @@ private fun AuthChoiceDialog(vm: RemoteViewModel) {
         },
     )
 }
+
+/** How long the long-press note under the デモ tab grid stays. */
+private const val LONG_PRESS_NOTE_MS = 4_000L
