@@ -3,7 +3,7 @@
 # imported on the next editor open or build). Requires the AivisSpeech engine on 127.0.0.1:10101 (see README.md).
 # Every line is normalized to -20 LUFS (ffmpeg); -NormalizeOnly re-normalizes the existing WAVs without the engine.
 # Close the Unreal editors of these projects first. Nothing is played.
-#   powershell -File tools/tts/generate-all-voices.ps1 [-Only trex,safetymill,handdemo,energyduel] [-SkipImport] [-NormalizeOnly]
+#   powershell -File tools/tts/generate-all-voices.ps1 [-Only trex,safetymill,handdemo,energyduel,boxing] [-SkipImport] [-NormalizeOnly]
 param([string[]]$Only = @(), [switch]$SkipImport, [switch]$NormalizeOnly, [string]$EngineRoot = $(if ($env:UE_ROOT) { $env:UE_ROOT } else { 'M:\GameEngine\UnrealEngine\UE_5.6' }))
 $ErrorActionPreference = 'Continue'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -12,6 +12,7 @@ $demos = [ordered]@{
     safetymill = @{ Dir = 'unreal/safety-mill-vr'; Out = 'Voice/wav'; Project = 'SafetyMillVR.uproject'; Import = 'Scripts/import_voice.py' }
     handdemo   = @{ Dir = 'unity/handdemo';        Out = 'Assets/HandDemo/Resources/HandDemoVoice' }
     energyduel = @{ Dir = 'unity/energy-duel';     Out = 'Assets/EnergyDuel/Audio/Narration/ja' }
+    boxing     = @{ Dir = 'unity/boxing-vr';       Out = 'Assets/Boxing/Audio/Tutorial' }
 }
 $keys = if ($Only.Count) { $Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $demos.Keys }
 $env:PYTHONIOENCODING = 'utf-8'
