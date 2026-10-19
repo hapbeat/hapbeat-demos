@@ -13,7 +13,7 @@ import org.junit.Test
 class DemoSettingsStoreTest {
     private val hub = "5c1e0a9b7d3f2468"
     private val otherHub = "0123456789abcdef"
-    private val read = mapOf("round" to "55", "haptics_db" to "2")
+    private val read = mapOf("round" to "55", "haptics_db" to "3")
 
     @Test
     fun saveWithoutTheHubKeepsOnlyTheChangedOptionAcrossARestart() {
@@ -41,7 +41,7 @@ class DemoSettingsStoreTest {
         var book = DemoSettingsStore.onRead(emptyMap(), hub, "boxing", read)
         book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6"))
         // Meanwhile staff change the round on the Hub's manage screen; the next read brings it.
-        book = DemoSettingsStore.onRead(book, hub, "boxing", mapOf("round" to "30", "haptics_db" to "2"))
+        book = DemoSettingsStore.onRead(book, hub, "boxing", mapOf("round" to "30", "haptics_db" to "3"))
         val entry = DemoSettingsStore.entry(book, hub, "boxing")!!
         assertEquals("The write carries only haptics_db.", mapOf("haptics_db" to "6"), entry.unwritten)
         assertEquals(mapOf("round" to "30", "haptics_db" to "6"), entry.values)
@@ -58,7 +58,7 @@ class DemoSettingsStoreTest {
         book = DemoSettingsStore.onRead(book, hub, "boxing", mapOf("round" to "30", "haptics_db" to "6"))
         assertTrue(DemoSettingsStore.unwritten(book, hub).isEmpty())
         // A change back to the Hub's value cancels the unwritten one.
-        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "4"))
+        book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "12"))
         book = DemoSettingsStore.save(book, hub, "boxing", mapOf("haptics_db" to "6"))
         assertTrue(DemoSettingsStore.entry(book, hub, "boxing")!!.unwritten.isEmpty())
     }
@@ -79,6 +79,12 @@ class DemoSettingsStoreTest {
     fun presetsDropDeviceOptions() {
         val trim = DemoCatalog.optionsFor("boxing").first { it.id == "haptics_db" }
         assertTrue(trim.device)
+        assertEquals("3", trim.default)
+        assertEquals(listOf("0", "3", "6", "9", "12", "15", "18", "24"), trim.values.map { it.value })
+        assertEquals(listOf("0 dB", "-3 dB", "-6 dB", "-9 dB", "-12 dB", "-15 dB", "-18 dB", "-24 dB"), trim.values.map { it.label })
+        // A copy kept from before the 3 dB steps (-2 dB): the value is dropped, so the screen shows the default.
+        val old = DemoSettingsStore.decode("""{"version":2,"hubs":{"$hub":{"boxing":{"hub":{"haptics_db":"2","round":"30"},"unwritten":{"haptics_db":"4"}}}}}""")
+        assertEquals(DemoSettingsEntry(mapOf("round" to "30")), DemoSettingsStore.entry(old, hub, "boxing"))
         assertEquals(listOf("round"), DemoCatalog.stepOptionsFor("boxing", emptyMap()).map { it.id })
         assertEquals(mapOf("round" to "30"), DemoCatalog.applicableOptions("boxing", mapOf("round" to "30", "haptics_db" to "6")))
         assertEquals(listOf(PresetStep("boxing", mapOf("round" to "30"))),

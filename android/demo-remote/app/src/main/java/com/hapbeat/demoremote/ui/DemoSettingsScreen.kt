@@ -158,7 +158,7 @@ fun DemoSettingsScreen(vm: RemoteViewModel, demoId: String, onDone: () -> Unit) 
     }
 }
 
-/** "触覚の強さ: -4 dB、ラウンド: 30秒" for [settings] of [demoId] (labels from this app's table). */
+/** "触覚の強さ: -6 dB、ラウンド: 30秒" for [settings] of [demoId] (labels from this app's table). */
 fun demoSettingsSummary(demoId: String, settings: Map<String, String>): String =
     DemoCatalog.optionsFor(demoId).filter { it.id in settings }.joinToString("、") { option ->
         "${option.label}: ${option.values.firstOrNull { it.value == settings[option.id] }?.label ?: settings[option.id]}"
