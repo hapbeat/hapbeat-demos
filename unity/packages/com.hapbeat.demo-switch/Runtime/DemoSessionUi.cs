@@ -670,13 +670,22 @@ namespace Hapbeat.DemoSwitch
 
         internal DemoSessionPanel Panel => _panel;
         internal DemoSessionButton RetryButton { get; private set; }
+        /// <summary>The demo's own buttons (<see cref="IDemoSessionCompletionActions"/>), between もう一度 and the forward button.</summary>
+        internal IReadOnlyList<DemoSessionButton> ActionButtons => _actionButtons;
+        private readonly List<DemoSessionButton> _actionButtons = new List<DemoSessionButton>();
         internal DemoSessionButton ForwardButton { get; private set; }
         internal string ErrorText => _error.text;
 
-        public static DemoSessionCompletionPanel Create(DemoSessionTicket ticket, DemoSessionNext next)
+        public static DemoSessionCompletionPanel Create(DemoSessionTicket ticket, DemoSessionNext next,
+            IReadOnlyList<DemoSessionCompletionAction> actions = null)
         {
             var step = ticket.Steps[ticket.Index];
-            var buttons = step.Retry ? 2 : 1;
+            // The demo's own buttons only where もう一度 is offered (a step with retry), and only usable ones.
+            var own = new List<DemoSessionCompletionAction>();
+            if (step.Retry && actions != null)
+                foreach (var action in actions)
+                    if (!string.IsNullOrEmpty(action.Label) && action.Run != null) own.Add(action);
+            var buttons = (step.Retry ? 2 : 1) + own.Count;
             // Fixed slots: heading, progress, buttons, and a reserved error line (no layout shift).
             var height = 28f + HeadingHeight + 34f + 18f + buttons * (ButtonHeight + ButtonGap) + 52f + 16f;
             var panel = DemoSessionPanel.Create("Hapbeat Demo Session Completion", new Vector2(Width, height));
@@ -691,6 +700,12 @@ namespace Hapbeat.DemoSwitch
             if (step.Retry)
             {
                 completion.RetryButton = panel.AddButton(new Vector2(0, y), size, "もう一度", 24, DemoSession.RetryFromCompletion);
+                y -= ButtonHeight + ButtonGap;
+            }
+            foreach (var action in own)
+            {
+                var run = action;
+                completion._actionButtons.Add(panel.AddButton(new Vector2(0, y), size, run.Label, 24, () => DemoSession.RunCompletionAction(run)));
                 y -= ButtonHeight + ButtonGap;
             }
             var forward = next.IsFinish ? "デモを終了" : "次へ：" + next.Step.Title;

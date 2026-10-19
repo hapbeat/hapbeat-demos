@@ -61,6 +61,18 @@ namespace Hapbeat.DemoSwitch.Tests
             public void SetGameplayPaused(bool paused) => Paused = paused;
         }
 
+        sealed class ActionsHost : IDemoSessionHost, IDemoSessionCompletionActions
+        {
+            public int Restarts, Runs;
+            public bool? Paused;
+            public readonly List<DemoSessionCompletionAction> Actions = new List<DemoSessionCompletionAction>();
+            public IReadOnlyList<DemoSessionCompletionAction> CompletionActions => Actions;
+            public void ApplyOptions(IReadOnlyDictionary<string, string> options) { }
+            public void Restart() => Restarts++;
+            public void SetHapticsEnabled(bool enabled) { }
+            public void SetGameplayPaused(bool paused) => Paused = paused;
+        }
+
         sealed class RecenterHost : IDemoSessionHost, IDemoSessionRecenter
         {
             public int Recenters;
@@ -498,6 +510,63 @@ namespace Hapbeat.DemoSwitch.Tests
             var panel = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
             Assert.That(panel.RetryButton, Is.Null);
             Assert.That(panel.ForwardButton.Label, Is.EqualTo("デモを終了"));
+        }
+
+        [Test]
+        public void TheDemosOwnCompletionButtonsComeBetweenRetryAndForward()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var host = new ActionsHost();
+            host.Actions.Add(new DemoSessionCompletionAction("レシーブへ", () => host.Runs++));
+            DemoSession.RegisterHost(host);
+            int closed = 0;
+            DemoSession.Closed += () => closed++;
+            DemoSession.ShowCompletion();
+            var panel = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+            Assert.That(panel.ActionButtons.Count, Is.EqualTo(1));
+            Assert.That(panel.ActionButtons[0].Label, Is.EqualTo("レシーブへ"));
+            float retry = panel.RetryButton.Rect.anchoredPosition.y, own = panel.ActionButtons[0].Rect.anchoredPosition.y;
+            Assert.That(retry, Is.GreaterThan(own), "Below もう一度...");
+            Assert.That(own, Is.GreaterThan(panel.ForwardButton.Rect.anchoredPosition.y), "...above 次へ.");
+
+            panel.ActionButtons[0].Press();
+            Assert.That(host.Runs, Is.EqualTo(1));
+            Assert.That(host.Restarts, Is.Zero, "Not a retry.");
+            Assert.That(host.Paused, Is.False, "Gameplay resumed.");
+            Assert.That(closed, Is.EqualTo(1));
+            Assert.That(DemoSession.IsCompletionShown, Is.False);
+        }
+
+        [Test]
+        public void WithoutTheDemosOwnButtonsTheCompletionPanelIsAsBefore()
+        {
+            Assert.That(DemoSession.TryBegin(AtIndex(0), "volley", Volley(), out var error), Is.True, error);
+            var plainHost = new Host();
+            DemoSession.RegisterHost(plainHost);
+            DemoSession.ShowCompletion();
+            var plain = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+            Assert.That(plain.ActionButtons, Is.Empty);
+            var size = plain.Panel.Size;
+            DemoSession.DismissCompletion();
+            DemoSession.UnregisterHost(plainHost);
+            DemoSession.RegisterHost(new ActionsHost()); // offers none
+            DemoSession.ShowCompletion();
+            var none = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+            Assert.That(none.ActionButtons, Is.Empty);
+            Assert.That(none.Panel.Size, Is.EqualTo(size));
+        }
+
+        [Test]
+        public void TheDemosOwnButtonsNeedRetryLikeRetryItself()
+        {
+            Assert.That(DemoSession.TryBegin(Ticket, "trex-encounter", null, out var error), Is.True, error);
+            var host = new ActionsHost();
+            host.Actions.Add(new DemoSessionCompletionAction("Another mode", () => host.Runs++));
+            DemoSession.RegisterHost(host);
+            DemoSession.ShowCompletion();
+            var panel = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
+            Assert.That(panel.RetryButton, Is.Null);
+            Assert.That(panel.ActionButtons, Is.Empty);
         }
 
         [Test]

@@ -229,7 +229,7 @@ namespace Hapbeat.DemoSwitch
             }
             if (_completion != null) return true;
             DemoPause.Resume();
-            _completion = DemoSessionCompletionPanel.Create(Ticket, Next);
+            _completion = DemoSessionCompletionPanel.Create(Ticket, Next, (Host as IDemoSessionCompletionActions)?.CompletionActions);
             Host?.SetGameplayPaused(true);
             CompletionShown?.Invoke();
             return true;
@@ -269,6 +269,14 @@ namespace Hapbeat.DemoSwitch
             DemoPause.Resume();
             CloseCompletion();
             Host?.Restart();
+        }
+
+        /// <summary>One of the demo's own completion buttons (<see cref="IDemoSessionCompletionActions"/>): close the panel, then run it.</summary>
+        internal static void RunCompletionAction(DemoSessionCompletionAction action)
+        {
+            DemoPause.Resume();
+            CloseCompletion();
+            action.Run?.Invoke();
         }
 
         /// <summary>
