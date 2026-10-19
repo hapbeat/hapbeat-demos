@@ -144,7 +144,7 @@ private fun StepRow(
             TextButton(onClick = onRemove, modifier = Modifier.width(56.dp)) { Text("削除") }
         }
         OptionChooser(DemoCatalog.activeOptionsFor(step.demoId, step.options), step.options) {
-            // Drop values of options that no longer apply (e.g. Volley balls after switching away from receive).
+            // Drop values of options that no longer apply (e.g. Volley's tutorial after switching to the match).
             onChange(step.copy(options = DemoCatalog.applicableOptions(step.demoId, it)))
         }
         Row(Modifier.fillMaxWidth().clickable { onChange(step.copy(retry = !step.retry)) }, verticalAlignment = Alignment.CenterVertically) {

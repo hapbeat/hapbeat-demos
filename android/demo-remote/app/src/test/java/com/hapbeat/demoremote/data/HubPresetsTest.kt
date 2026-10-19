@@ -132,14 +132,15 @@ class HubPresetsTest {
 
     @Test
     fun inactiveOptionsAreLeftOut() {
-        // Volley: points applies to scene block / match only, balls to receive only (descriptor `when`).
+        // Volley: the tutorial applies to scene block / receive only, not to the match (descriptor `when`).
         assertEquals(
-            listOf(PresetStep("volley", mapOf("scene" to "receive", "balls" to "20"))),
-            HubPresets.normalize(listOf(PresetStep("volley", mapOf("scene" to "receive", "points" to "3", "balls" to "20")))),
+            listOf(PresetStep("volley", mapOf("scene" to "match", "points" to "5"))),
+            HubPresets.normalize(listOf(PresetStep("volley", mapOf("scene" to "match", "tutorial" to "off", "points" to "5")))),
         )
+        // A key the descriptor no longer has (the old receive drill's ball count) is left out too.
         assertEquals(
-            listOf(PresetStep("volley", mapOf("points" to "3"), retry = false)),
-            HubPresets.normalize(listOf(PresetStep("volley", mapOf("points" to "3", "balls" to "20"), retry = false))),
+            listOf(PresetStep("volley", mapOf("scene" to "receive", "tutorial" to "off"), retry = false)),
+            HubPresets.normalize(listOf(PresetStep("volley", mapOf("scene" to "receive", "tutorial" to "off", "balls" to "20"), retry = false))),
         )
     }
 

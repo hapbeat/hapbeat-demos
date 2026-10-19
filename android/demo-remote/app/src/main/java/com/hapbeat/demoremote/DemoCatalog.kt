@@ -45,10 +45,10 @@ object DemoCatalog {
         DemoOption("scene", "モード", "block", listOf(
             OptionValue("block", "スパイク＋ブロック"), OptionValue("match", "6人制の試合"), OptionValue("receive", "レシーブ"),
         )),
-        DemoOption("points", "点数", "7", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取")),
-            whenValues = mapOf("scene" to setOf("block", "match"))),
-        DemoOption("balls", "球数", "10", listOf(OptionValue("10", "10球"), OptionValue("20", "20球")),
-            whenValues = mapOf("scene" to setOf("receive"))),
+        DemoOption("tutorial", "チュートリアル", "on", listOf(OptionValue("on", "あり"), OptionValue("off", "なし")),
+            whenValues = mapOf("scene" to setOf("block", "receive"))),
+        DemoOption("points", "点数", "3", listOf(OptionValue("3", "3点先取"), OptionValue("5", "5点先取"), OptionValue("7", "7点先取")),
+            whenValues = mapOf("scene" to setOf("block", "receive", "match"))),
     )
     private val BOXING_OPTIONS = listOf(
         DemoOption("round", "ラウンド", "90", listOf(OptionValue("60", "60秒"), OptionValue("90", "90秒"))),

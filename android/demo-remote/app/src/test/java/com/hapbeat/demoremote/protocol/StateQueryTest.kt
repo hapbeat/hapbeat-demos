@@ -105,11 +105,11 @@ class StateQueryTest {
 
     @Test
     fun hubSessionLeavesInactiveOptionsOut() {
-        // Volley: points applies to scene block / match only, balls to receive only (descriptor `when`).
+        // Volley: the tutorial applies to scene block / receive only, not to the match (descriptor `when`).
         val prefix = "am start -n jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity --es com.hapbeat.demo_hub.start "
         assertEquals(
-            prefix + """'{"version":1,"demo_id":"volley","options":{"scene":"receive","balls":"20"}}'""",
-            DemoCatalog.hubSessionCommand(demoId = "volley", options = mapOf("scene" to "receive", "points" to "3", "balls" to "20")),
+            prefix + """'{"version":1,"demo_id":"volley","options":{"scene":"match","points":"5"}}'""",
+            DemoCatalog.hubSessionCommand(demoId = "volley", options = mapOf("scene" to "match", "tutorial" to "off", "points" to "5")),
         )
     }
 

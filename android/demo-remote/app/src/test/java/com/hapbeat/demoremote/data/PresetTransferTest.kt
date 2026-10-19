@@ -99,9 +99,9 @@ class PresetTransferTest {
     @Test
     fun optionsMustBeInTheDescriptorTable() {
         fun payload(demo: String, options: String) = """{"version":1,"presets":[{"name":"a","steps":[{"demo_id":"$demo","options":$options}]}]}"""
-        assertTrue(PresetTransfer.parsePayload(payload("volley", """{"scene":"receive","balls":"20"}""")) is TransferResult.Accepted)
+        assertTrue(PresetTransfer.parsePayload(payload("volley", """{"scene":"receive","points":"5","tutorial":"off"}""")) is TransferResult.Accepted)
+        assertTrue(PresetTransfer.parsePayload(payload("volley", """{"scene":"receive","balls":"20"}""")) is TransferResult.Rejected)
         assertTrue(PresetTransfer.parsePayload(payload("volley", """{"scene":"tutorial"}""")) is TransferResult.Rejected)
-        assertTrue(PresetTransfer.parsePayload(payload("volley", """{"tutorial":"on"}""")) is TransferResult.Rejected)
         assertTrue(PresetTransfer.parsePayload(payload("handdemo", """{"tutorial":"on"}""")) is TransferResult.Rejected)
         assertTrue(PresetTransfer.parsePayload(payload("boxing", """{"round":60}""")) is TransferResult.Rejected)
         assertTrue(PresetTransfer.parsePayload(payload("boxing", "{}")) is TransferResult.Accepted)

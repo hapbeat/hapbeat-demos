@@ -9,7 +9,8 @@ namespace Hapbeat.DemoSwitch.Tests
 {
     public sealed class DemoSessionTests
     {
-        // Equivalent to hapbeat-contracts fixtures/sample-demo-session.json (descriptor_volley, ticket).
+        // A `when` example modelled on an older Volley descriptor (points by scene block, balls by scene receive) and the
+        // ticket of hapbeat-contracts fixtures/sample-demo-session.json; the current Volley options are in that fixture.
         const string VolleyDescriptor = @"{""version"":1,""demo_id"":""volley"",""title"":{""ja"":""バレーボール"",""en"":""Volleyball""},""minutes"":3,
  ""supports"":{""haptics_toggle"":true},
  ""options"":[

@@ -36,7 +36,7 @@ namespace Hapbeat.DemoHub.Tests
         {
             var plan = new HubPlan();
             Assert.That(plan.Add(_volley) && plan.Add(_boxing) && plan.Add(_trex), Is.True);
-            Assert.That(plan.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["points"] = "7", ["balls"] = "10" }));
+            Assert.That(plan.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "3" }));
             Assert.That(plan.Steps.All(s => s.Retry), Is.True, "New steps offer retry by default.");
             Assert.That(plan.MoveUp(0), Is.False);
             Assert.That(plan.MoveDown(2), Is.False);
@@ -62,16 +62,17 @@ namespace Hapbeat.DemoHub.Tests
             var plan = new HubPlan();
             plan.Add(_volley);
             var step = plan.Steps[0];
-            Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "points" }));
+            Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "tutorial", "points" }));
             Assert.That(plan.CycleOption(0, _volley, "points"), Is.True);
-            Assert.That(step.Options["points"], Is.EqualTo("3"), "7 wraps to 3.");
-            Assert.That(plan.CycleOption(0, _volley, "balls"), Is.False, "Inactive option cannot be cycled.");
+            Assert.That(step.Options["points"], Is.EqualTo("5"), "3 cycles to 5.");
+            Assert.That(plan.CycleOption(0, _volley, "tutorial"), Is.True);
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
-            Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "balls" }));
+            Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "points" }), "The match has no tutorial.");
+            Assert.That(plan.CycleOption(0, _volley, "tutorial"), Is.False, "Inactive option cannot be cycled.");
             var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
-            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley レシーブ 10球"));
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley 6人制の試合 5点先取"));
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
-            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley ブロック 3点先取"), "Hidden choices are remembered.");
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley レシーブ なし 5点先取"), "Hidden choices are remembered.");
             plan.ToggleRetry(0);
             Assert.That(step.Retry, Is.False);
             Assert.That(HubPlan.Truncate(new string('あ', 50), 40).Length, Is.EqualTo(40));
@@ -85,7 +86,8 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(store.LoadPreset(1).Steps, Is.Empty);
             var plan = new HubPlan();
             plan.Add(_volley);
-            plan.CycleOption(0, _volley, "scene");
+            plan.CycleOption(0, _volley, "scene"); // block -> match
+            plan.CycleOption(0, _volley, "scene"); // -> receive
             plan.ToggleRetry(0);
             plan.Add(_trex);
             for (var number = 1; number <= HubPlanStore.PresetCount; number++)
@@ -145,7 +147,7 @@ namespace Hapbeat.DemoHub.Tests
         [Test]
         public void PresetCheckReportsTheFirstOffendingDemo()
         {
-            Assert.That(HubPlan.Check(new[] { Step("volley", ("scene", "receive"), ("balls", "20")), Step("trex-encounter") }, _catalog, out var demoId),
+            Assert.That(HubPlan.Check(new[] { Step("volley", ("scene", "receive"), ("points", "5")), Step("trex-encounter") }, _catalog, out var demoId),
                 Is.EqualTo(DemoSwitchPresetCheck.Ok));
             Assert.That(demoId, Is.Null);
             Assert.That(HubPlan.Check(new DemoSwitchPresetStep[0], _catalog, out _), Is.EqualTo(DemoSwitchPresetCheck.Ok), "An empty list clears the preset.");
@@ -188,8 +190,8 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.False);
             Assert.That(parsed.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "boxing", "trex-encounter" }));
-            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["points"] = "3" }), "Only active options.");
-            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley ブロック 3点先取"), "Application name, then option values.");
+            Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "5" }), "Only active options.");
+            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 5点先取"), "Application name, then option values.");
             Assert.That(parsed.Steps[2].Title, Is.EqualTo("T-Rex Encounter"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
             Assert.That(parsed.Steps[0].PackageName, Is.EqualTo("jp.hapbeat.volley"));
@@ -215,7 +217,7 @@ namespace Hapbeat.DemoHub.Tests
             var plan = new HubPlan();
             plan.Add(_volley);
             Assert.That(HubPlan.Title(plan.Steps[0], longName).Length, Is.EqualTo(HubPlan.TitleMaxLength), "Step titles keep the 40-character limit.");
-            Assert.That(plan.Summary(_catalog), Is.EqualTo("Volley ブロック 7点先取"));
+            Assert.That(plan.Summary(_catalog), Is.EqualTo("Volley スパイク＋ブロック あり 3点先取"));
         }
 
         [Test]
