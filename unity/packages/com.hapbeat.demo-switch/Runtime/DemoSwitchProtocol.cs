@@ -313,6 +313,89 @@ namespace Hapbeat.DemoSwitch
         public string Auth { get; }
     }
 
+    /// <summary>DEMO_SETTINGS_GET: read the per-demo settings of <see cref="Target"/> (contracts: Demo settings).</summary>
+    internal sealed class DemoSwitchDemoSettingsGet
+    {
+        public DemoSwitchDemoSettingsGet(string controllerId, string nonce, string target, string auth)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            Target = target;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        /// <summary>The demo's `demo_id`.</summary>
+        public string Target { get; }
+        public string Auth { get; }
+    }
+
+    /// <summary>DEMO_SETTINGS: the answer to a <see cref="DemoSwitchDemoSettingsGet"/>.</summary>
+    internal sealed class DemoSwitchDemoSettingsReply
+    {
+        public DemoSwitchDemoSettingsReply(string controllerId, string nonce, string target, DemoSwitchDemoSettings settings)
+        {
+            ControllerId = controllerId;
+            Nonce = nonce;
+            Target = target;
+            Settings = settings;
+        }
+
+        public string ControllerId { get; }
+        public string Nonce { get; }
+        public string Target { get; }
+        public DemoSwitchDemoSettings Settings { get; }
+    }
+
+    /// <summary>DEMO_SETTINGS_SET: 1-8 options of one demo; follows the HUB_SETTINGS_SET rules.</summary>
+    internal sealed class DemoSwitchDemoSettingsCommand
+    {
+        public DemoSwitchDemoSettingsCommand(string controllerId, long sequence, string demoId, string target,
+            IReadOnlyDictionary<string, string> settings, string auth)
+        {
+            ControllerId = controllerId;
+            Sequence = sequence;
+            DemoId = demoId;
+            Target = target;
+            Settings = settings;
+            Auth = auth ?? string.Empty;
+        }
+
+        public string ControllerId { get; }
+        public long Sequence { get; }
+        public string DemoId { get; }
+        public string Target { get; }
+        public IReadOnlyDictionary<string, string> Settings { get; }
+        public string Auth { get; }
+    }
+
+    internal readonly struct DemoSettingsGetParseResult
+    {
+        public DemoSettingsGetParseResult(DemoSwitchDemoSettingsGet request, string errorMessage)
+        {
+            Request = request;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Request != null;
+        public DemoSwitchDemoSettingsGet Request { get; }
+        public string ErrorMessage { get; }
+    }
+
+    internal readonly struct DemoSettingsCommandParseResult
+    {
+        public DemoSettingsCommandParseResult(DemoSwitchDemoSettingsCommand command, string errorMessage)
+        {
+            Command = command;
+            ErrorMessage = errorMessage;
+        }
+
+        public bool Success => Command != null;
+        public DemoSwitchDemoSettingsCommand Command { get; }
+        public string ErrorMessage { get; }
+    }
+
     internal readonly struct HubSettingsGetParseResult
     {
         public HubSettingsGetParseResult(DemoSwitchHubSettingsGet request, string errorMessage)
@@ -483,6 +566,8 @@ namespace Hapbeat.DemoSwitch
             "version", "type", "controller_id", "seq", "demo_id", "haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "visible_demos", "auth"
         };
         private static readonly string[] HubStartFields = { "version", "type", "controller_id", "seq", "demo_id", "steps", "auth" };
+        private static readonly string[] DemoSettingsGetFields = { "version", "type", "controller_id", "nonce", "target", "auth" };
+        private static readonly string[] DemoSettingsSetFields = { "version", "type", "controller_id", "seq", "demo_id", "target", "settings", "auth" };
         private static readonly string[] PresetGetFields = { "version", "type", "controller_id", "nonce", "preset", "from", "auth" };
         private static readonly string[] PresetSetFields = { "version", "type", "controller_id", "seq", "demo_id", "preset", "name", "visible", "steps", "auth" };
         private static readonly string[] PresetStartFields = { "version", "type", "controller_id", "seq", "demo_id", "preset", "auth" };
@@ -1180,6 +1265,120 @@ namespace Hapbeat.DemoSwitch
             return value.ToString(Formatting.None);
         }
 
+        public static DemoSettingsGetParseResult ParseDemoSettingsGet(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new DemoSettingsGetParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !DemoSettingsGetFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new DemoSettingsGetParseResult(null, "DEMO_SETTINGS_GET contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "DEMO_SETTINGS_GET" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryString(value, "nonce", out var nonce) || !IsNonce(nonce) ||
+                    !TryString(value, "target", out var target) || !IsIdentifier(target))
+                    return new DemoSettingsGetParseResult(null, "DEMO_SETTINGS_GET is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new DemoSettingsGetParseResult(null, "DEMO_SETTINGS_GET auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new DemoSettingsGetParseResult(null, "DEMO_SETTINGS_GET auth is invalid.");
+                }
+                return new DemoSettingsGetParseResult(new DemoSwitchDemoSettingsGet(controllerId, nonce, target, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new DemoSettingsGetParseResult(null, exception.Message);
+            }
+        }
+
+        /// <summary>DEMO_SETTINGS_SET; `demo_id` must be `demo_hub` (schema const), `settings` 1-8 option IDs with option values.</summary>
+        public static DemoSettingsCommandParseResult ParseDemoSettingsSet(string json)
+        {
+            if (string.IsNullOrEmpty(json) || Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                return new DemoSettingsCommandParseResult(null, "Payload is empty or exceeds 1024 bytes.");
+
+            try
+            {
+                var value = ParseStrictObject(json);
+                if (value.Properties().Any(p => !DemoSettingsSetFields.Contains(p.Name, StringComparer.Ordinal)))
+                    return new DemoSettingsCommandParseResult(null, "DEMO_SETTINGS_SET contains an unknown field.");
+                if (!TryInteger(value, "version", out var version) || version != 1 ||
+                    !TryString(value, "type", out var type) || type != "DEMO_SETTINGS_SET" ||
+                    !TryString(value, "controller_id", out var controllerId) || !IsIdentifier(controllerId) ||
+                    !TryInteger(value, "seq", out var sequence) || sequence < 1 || sequence > MaxSequence ||
+                    !TryString(value, "demo_id", out var demoId) || demoId != DemoSwitchSettings.HubDemoId ||
+                    !TryString(value, "target", out var target) || !IsIdentifier(target) ||
+                    !TryParseDemoSettingsValues(value["settings"], 1, out var settings))
+                    return new DemoSettingsCommandParseResult(null, "DEMO_SETTINGS_SET is incomplete or invalid.");
+
+                var auth = string.Empty;
+                if (value.TryGetValue("auth", StringComparison.Ordinal, out var token))
+                {
+                    if (token.Type != JTokenType.String) return new DemoSettingsCommandParseResult(null, "DEMO_SETTINGS_SET auth must be a string.");
+                    auth = token.Value<string>();
+                    if (!IsLowerHexMac(auth)) return new DemoSettingsCommandParseResult(null, "DEMO_SETTINGS_SET auth is invalid.");
+                }
+                return new DemoSettingsCommandParseResult(new DemoSwitchDemoSettingsCommand(controllerId, sequence, demoId, target, settings, auth), null);
+            }
+            catch (Exception exception) when (exception is JsonException || exception is OverflowException || exception is FormatException)
+            {
+                return new DemoSettingsCommandParseResult(null, exception.Message);
+            }
+        }
+
+        /// <summary>A `settings` object: <paramref name="minimum"/>..8 identifier keys with option-value strings.</summary>
+        private static bool TryParseDemoSettingsValues(JToken token, int minimum, out Dictionary<string, string> settings)
+        {
+            settings = null;
+            if (!(token is JObject value) || value.Count < minimum || value.Count > DemoSwitchHub.MaxDemoSettings) return false;
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var property in value.Properties())
+            {
+                if (!IsIdentifier(property.Name) || property.Value.Type != JTokenType.String) return false;
+                var optionValue = property.Value.Value<string>();
+                if (!DemoSessionJson.IsValue(optionValue)) return false;
+                result[property.Name] = optionValue;
+            }
+            settings = result;
+            return true;
+        }
+
+        /// <summary>DEMO_SETTINGS answering <paramref name="request"/>; throws when it does not fit in 1024 bytes.</summary>
+        public static string SerializeDemoSettings(DemoSwitchDemoSettingsGet request, DemoSwitchDemoSettings settings, string secret)
+        {
+            if (request == null || settings == null || !IsIdentifier(request.ControllerId) || !IsNonce(request.Nonce) ||
+                !IsIdentifier(request.Target) || settings.Revision < 0 || settings.Revision > MaxSequence ||
+                settings.Settings.Count > DemoSwitchHub.MaxDemoSettings || (!settings.Installed && settings.Settings.Count > 0) ||
+                !settings.Settings.All(p => IsIdentifier(p.Key) && DemoSessionJson.IsValue(p.Value)))
+                throw new ArgumentException("DEMO_SETTINGS fields do not satisfy the Demo Switch contract.", nameof(settings));
+
+            var reply = new DemoSwitchDemoSettingsReply(request.ControllerId, request.Nonce, request.Target, settings);
+            var values = new JObject();
+            foreach (var pair in settings.Settings.OrderBy(p => p.Key, StringComparer.Ordinal)) values[pair.Key] = pair.Value;
+            var value = new JObject
+            {
+                ["version"] = 1,
+                ["type"] = "DEMO_SETTINGS",
+                ["controller_id"] = reply.ControllerId,
+                ["nonce"] = reply.Nonce,
+                ["revision"] = settings.Revision,
+                ["target"] = reply.Target,
+                ["installed"] = settings.Installed,
+                ["settings"] = values
+            };
+            if (!string.IsNullOrEmpty(secret)) value["auth"] = ComputeAuth(reply, secret);
+            var json = value.ToString(Formatting.None);
+            if (Encoding.UTF8.GetByteCount(json) > MaxPayloadBytes)
+                throw new InvalidOperationException("DEMO_SETTINGS fields exceed the 1024-byte payload limit.");
+            return json;
+        }
+
         /// <summary>The device address axes: -1 (not specified) or 1..99.</summary>
         private static bool IsAddressAxis(int value) => value == -1 || (value >= 1 && value <= 99);
 
@@ -1322,6 +1521,29 @@ namespace Hapbeat.DemoSwitch
             Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", command.DemoId) +
             Field("steps", CanonicalSteps(command.Steps));
 
+        public static string Canonicalize(DemoSwitchDemoSettingsGet request) =>
+            "HAPBEAT-DEMO-SWITCH/1\nDEMO_SETTINGS_GET\n" +
+            Field("version", "1") + Field("type", "DEMO_SETTINGS_GET") + Field("controller_id", request.ControllerId) +
+            Field("nonce", request.Nonce) + Field("target", request.Target);
+
+        public static string Canonicalize(DemoSwitchDemoSettingsReply reply) =>
+            "HAPBEAT-DEMO-SWITCH/1\nDEMO_SETTINGS\n" +
+            Field("version", "1") + Field("type", "DEMO_SETTINGS") + Field("controller_id", reply.ControllerId) +
+            Field("nonce", reply.Nonce) + Field("revision", reply.Settings.Revision.ToString(CultureInfo.InvariantCulture)) +
+            Field("target", reply.Target) + Field("installed", BooleanText(reply.Settings.Installed)) +
+            Field("settings", CanonicalDemoSettings(reply.Settings.Settings));
+
+        /// <summary>DEMO_SETTINGS_SET uses the COMMAND header.</summary>
+        public static string Canonicalize(DemoSwitchDemoSettingsCommand command) =>
+            "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\n" +
+            Field("version", "1") + Field("type", "DEMO_SETTINGS_SET") + Field("controller_id", command.ControllerId) +
+            Field("seq", command.Sequence.ToString(CultureInfo.InvariantCulture)) + Field("demo_id", command.DemoId) +
+            Field("target", command.Target) + Field("settings", CanonicalDemoSettings(command.Settings));
+
+        /// <summary>The signed `settings` value: `id=value` entries sorted by option ID (ordinal) and joined with `|`.</summary>
+        public static string CanonicalDemoSettings(IReadOnlyDictionary<string, string> settings) =>
+            string.Join("|", settings.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value));
+
         /// <summary>
         /// The signed `demos` value: demos joined with `|`, each `demo_id;visible;N:title` with visible `1` / `0` and N the
         /// title's UTF-8 byte count.
@@ -1363,6 +1585,11 @@ namespace Hapbeat.DemoSwitch
                 ";" + (step.Retry ? "1" : "0")));
 
         public static string ComputeAuth(DemoSwitchHubSettingsGet request, string secret) => ComputeMac(Canonicalize(request), secret);
+        public static string ComputeAuth(DemoSwitchDemoSettingsGet request, string secret) => ComputeMac(Canonicalize(request), secret);
+        public static string ComputeAuth(DemoSwitchDemoSettingsReply reply, string secret) => ComputeMac(Canonicalize(reply), secret);
+        public static string ComputeAuth(DemoSwitchDemoSettingsCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
+        public static bool Authenticate(DemoSwitchDemoSettingsGet request, string secret) => ConstantTimeMacEquals(request.Auth, ComputeAuth(request, secret));
+        public static bool Authenticate(DemoSwitchDemoSettingsCommand command, string secret) => ConstantTimeMacEquals(command.Auth, ComputeAuth(command, secret));
         public static string ComputeAuth(DemoSwitchHubSettingsPage page, string secret) => ComputeMac(Canonicalize(page), secret);
         public static string ComputeAuth(DemoSwitchHubSettingsCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
         public static string ComputeAuth(DemoSwitchHubStartCommand command, string secret) => ComputeMac(Canonicalize(command), secret);
@@ -1614,6 +1841,33 @@ namespace Hapbeat.DemoSwitch
             var settings = read();
             if (settings == null) return new DiscoveryHandleResult(null, "invalid_payload");
             return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeHubSettings(request, settings, sharedSecret), null);
+        }
+    }
+
+    /// <summary>DEMO_SETTINGS_GET → DEMO_SETTINGS: answered like HUB_SETTINGS_GET (same authentication policy, also while not foreground).</summary>
+    internal static class DemoSwitchDemoSettingsGetHandler
+    {
+        /// <param name="read">The per-demo settings of a target; called only after authentication.</param>
+        public static DiscoveryHandleResult Handle(string json, Func<string, DemoSwitchDemoSettings> read, string sharedSecret,
+            bool allowUnsignedOnIsolatedLan)
+        {
+            var parsed = DemoSwitchProtocol.ParseDemoSettingsGet(json);
+            if (!parsed.Success) return new DiscoveryHandleResult(null, "invalid_payload");
+
+            var request = parsed.Request;
+            if (!string.IsNullOrEmpty(sharedSecret))
+            {
+                if (!DemoSwitchProtocol.Authenticate(request, sharedSecret))
+                    return new DiscoveryHandleResult(null, "invalid_auth");
+            }
+            else if (!allowUnsignedOnIsolatedLan)
+            {
+                return new DiscoveryHandleResult(null, "unsigned_disabled");
+            }
+
+            var settings = read(request.Target);
+            if (settings == null) return new DiscoveryHandleResult(null, "invalid_payload");
+            return new DiscoveryHandleResult(DemoSwitchProtocol.SerializeDemoSettings(request, settings, sharedSecret), null);
         }
     }
 }

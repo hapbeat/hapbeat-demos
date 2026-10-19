@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Hapbeat.DemoSwitch
 {
@@ -53,15 +54,33 @@ namespace Hapbeat.DemoSwitch
         public IReadOnlyList<DemoSwitchHubDemo> Demos { get; }
     }
 
+    /// <summary>One demo's per-demo settings as DEMO_SETTINGS carries them (contracts demo-switch-control.md "Demo settings").</summary>
+    public sealed class DemoSwitchDemoSettings
+    {
+        public DemoSwitchDemoSettings(long revision, bool installed, IReadOnlyDictionary<string, string> settings)
+        {
+            Revision = revision;
+            Installed = installed;
+            Settings = settings ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        /// <summary>The <see cref="DemoSwitchHubSettings.Revision"/> counter (also increased by every per-demo settings save).</summary>
+        public long Revision { get; }
+        /// <summary>False when the target is not a Hub catalog entry; <see cref="Settings"/> is then empty.</summary>
+        public bool Installed { get; }
+        /// <summary>Every option of the target's descriptor (both scopes, also those inactive by `when`) with its stored value.</summary>
+        public IReadOnlyDictionary<string, string> Settings { get; }
+    }
+
     /// <summary>
-    /// The Hub's side of the Hub presets, Hub settings, Hub start and the Hub's CONTROL actions (`hub_top`, `hub_replay`,
+    /// The Hub's side of the Hub presets, Hub settings, Demo settings, Hub start and the Hub's CONTROL actions (`hub_top`, `hub_replay`,
     /// `hand_style_*`, `haptics_test`). Only the Hub registers one (<see cref="DemoSwitchHub.RegisterHost"/>); without a host the receiver drops
-    /// PRESET_* / HUB_* messages without a reply and refuses `hub_top` / `hub_replay` / `haptics_test`. The receiver owns authentication,
+    /// PRESET_* / HUB_* / DEMO_SETTINGS_* messages without a reply and refuses `hub_top` / `hub_replay` / `haptics_test`. The receiver owns authentication,
     /// foreground, sequence and status; the host only reads, checks, stores and starts.
     /// </summary>
     public interface IDemoSwitchHubHost
     {
-        /// <summary>True while staff edit on the manage screen: PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START are refused.</summary>
+        /// <summary>True while staff edit on the manage screen: PRESET_SET / PRESET_START / HUB_SETTINGS_SET / DEMO_SETTINGS_SET / HUB_START are refused.</summary>
         bool IsBusy { get; }
 
         /// <summary>STATE `screen`: <see cref="DemoSwitchScreens.Main"/>, `completion` (finish screen) or `manage`.</summary>
@@ -97,6 +116,18 @@ namespace Hapbeat.DemoSwitch
         /// </summary>
         bool TryStoreSettings(bool hapticsUi, bool recenterUi, DemoHandStyle handStyle, int narrationVolume, bool staffWaiting,
             IReadOnlyList<string> visibleDemos, out string error);
+
+        /// <summary>DEMO_SETTINGS: the per-demo settings of <paramref name="demoId"/> (not installed: `installed` false, no settings).</summary>
+        DemoSwitchDemoSettings ReadDemoSettings(string demoId);
+
+        /// <summary>
+        /// DEMO_SETTINGS_SET validation: <see cref="DemoSwitchPresetCheck.NotInstalled"/> (<paramref name="offending"/> = the target)
+        /// or <see cref="DemoSwitchPresetCheck.UnknownOption"/> (<paramref name="offending"/> = the first unknown option ID).
+        /// </summary>
+        DemoSwitchPresetCheck CheckDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string offending);
+
+        /// <summary>Stores the given options of <paramref name="demoId"/> (the others keep their values), increasing the revision; false with the storage error.</summary>
+        bool TryStoreDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string error);
 
         /// <summary>CONTROL `hand_style_*` on the Hub: changes, applies and stores the Hub-wide hand style; false with the storage error.</summary>
         bool TrySetHandStyle(DemoHandStyle style, out string error);
@@ -141,6 +172,8 @@ namespace Hapbeat.DemoSwitch
     {
         /// <summary>Schema bound of `demo_count` / `demos` / `visible_demos` (`from` is below it).</summary>
         public const int MaxDemos = 64;
+        /// <summary>DEMO_SETTINGS_SET carries 1..8 options (a descriptor has at most 8).</summary>
+        public const int MaxDemoSettings = 8;
 
         internal static IDemoSwitchHubHost Host { get; private set; }
 
@@ -149,6 +182,29 @@ namespace Hapbeat.DemoSwitch
         public static void UnregisterHost(IDemoSwitchHubHost host)
         {
             if (ReferenceEquals(Host, host)) Host = null;
+        }
+
+        /// <summary>
+        /// Whether every DEMO_SETTINGS of <paramref name="descriptor"/> fits in 1024 bytes: the longest value of every option, the
+        /// longest controller ID, the largest revision and `auth`. A descriptor that does not fit is kept out of the Hub's
+        /// per-demo settings (contracts: Demo settings).
+        /// </summary>
+        public static bool FitsDemoSettings(DemoSessionDescriptor descriptor)
+        {
+            if (descriptor == null || descriptor.Options.Count > MaxDemoSettings) return false;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var option in descriptor.Options)
+                settings[option.Id] = option.Values.OrderByDescending(v => System.Text.Encoding.UTF8.GetByteCount(v.Value)).First().Value;
+            var request = new DemoSwitchDemoSettingsGet(new string('a', 64), "0123456789abcdef", descriptor.DemoId, null);
+            try
+            {
+                DemoSwitchProtocol.SerializeDemoSettings(request, new DemoSwitchDemoSettings(DemoSwitchProtocol.MaxSequence, true, settings), "x");
+                return true;
+            }
+            catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+            {
+                return false;
+            }
         }
 
         /// <summary>A HUB_SETTINGS title: the preset name rules without the empty name (1-40 code points, a non-space character).</summary>

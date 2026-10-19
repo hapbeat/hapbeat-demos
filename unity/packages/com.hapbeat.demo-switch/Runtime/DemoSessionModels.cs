@@ -34,10 +34,18 @@ namespace Hapbeat.DemoSwitch
         public DemoSessionLabel Label { get; }
     }
 
+    /// <summary>
+    /// Descriptor option `scope` (contracts demo-session.md "デモごとの設定"): <see cref="Session"/> (default) is chosen per
+    /// experience (presets, plan steps); <see cref="Device"/> is this headset's per-demo adjustment, set only from the Hub's
+    /// per-demo settings and kept by the runtime for launches without a ticket.
+    /// </summary>
+    public enum DemoSessionOptionScope { Session, Device }
+
     public sealed class DemoSessionOption
     {
         public DemoSessionOption(string id, DemoSessionLabel label, IReadOnlyList<DemoSessionOptionValue> values,
-            string defaultValue, string whenOptionId = null, IReadOnlyList<string> whenValues = null)
+            string defaultValue, string whenOptionId = null, IReadOnlyList<string> whenValues = null,
+            DemoSessionOptionScope scope = DemoSessionOptionScope.Session)
         {
             Id = id;
             Label = label;
@@ -45,6 +53,7 @@ namespace Hapbeat.DemoSwitch
             Default = defaultValue;
             WhenOptionId = whenOptionId;
             WhenValues = whenValues ?? Array.Empty<string>();
+            Scope = scope;
         }
 
         public string Id { get; }
@@ -54,6 +63,9 @@ namespace Hapbeat.DemoSwitch
         /// <summary>Null when the option is always active.</summary>
         public string WhenOptionId { get; }
         public IReadOnlyList<string> WhenValues { get; }
+        public DemoSessionOptionScope Scope { get; }
+        /// <summary>`scope: device`: never part of a preset or plan step.</summary>
+        public bool IsDevice => Scope == DemoSessionOptionScope.Device;
 
         public bool HasValue(string value) => Values.Any(v => string.Equals(v.Value, value, StringComparison.Ordinal));
         public DemoSessionOptionValue Find(string value) => Values.FirstOrDefault(v => string.Equals(v.Value, value, StringComparison.Ordinal));
@@ -173,7 +185,7 @@ namespace Hapbeat.DemoSwitch
         private static bool TryParseOption(JToken token, out DemoSessionOption option, out string error)
         {
             option = null;
-            if (!(token is JObject value) || !DemoSessionJson.OnlyFields(value, "id", "label", "values", "default", "when")) return Fail("Option is not an object with known fields.", out error);
+            if (!(token is JObject value) || !DemoSessionJson.OnlyFields(value, "id", "label", "values", "default", "scope", "when")) return Fail("Option is not an object with known fields.", out error);
             if (!DemoSessionJson.TryString(value, "id", out var id) || !DemoSwitchProtocol.IsIdentifier(id)) return Fail("Option id is invalid.", out error);
             if (!DemoSessionJson.TryLabel(value["label"], out var label)) return Fail("Option '" + id + "' label is invalid.", out error);
             if (!(value["values"] is JArray valueArray) || valueArray.Count < 1 || valueArray.Count > 8) return Fail("Option '" + id + "' values must have 1..8 items.", out error);
@@ -189,6 +201,13 @@ namespace Hapbeat.DemoSwitch
             if (!DemoSessionJson.TryString(value, "default", out var defaultValue) || !DemoSessionJson.IsValue(defaultValue)) return Fail("Option '" + id + "' default is invalid.", out error);
             // Stricter than the schema: a default outside `values` could never be shown or cycled to.
             if (values.All(x => x.Value != defaultValue)) return Fail("Option '" + id + "' default is not one of its values.", out error);
+            var scope = DemoSessionOptionScope.Session;
+            if (value.ContainsKey("scope"))
+            {
+                if (!DemoSessionJson.TryString(value, "scope", out var scopeText) || (scopeText != "session" && scopeText != "device"))
+                    return Fail("Option '" + id + "' scope must be \"session\" or \"device\".", out error);
+                if (scopeText == "device") scope = DemoSessionOptionScope.Device;
+            }
             string whenId = null;
             List<string> whenValues = null;
             if (value.TryGetValue("when", StringComparison.Ordinal, out var whenToken))
@@ -204,7 +223,7 @@ namespace Hapbeat.DemoSwitch
                 }
                 whenId = property.Name;
             }
-            option = new DemoSessionOption(id, label, values, defaultValue, whenId, whenValues);
+            option = new DemoSessionOption(id, label, values, defaultValue, whenId, whenValues, scope);
             error = null;
             return true;
         }

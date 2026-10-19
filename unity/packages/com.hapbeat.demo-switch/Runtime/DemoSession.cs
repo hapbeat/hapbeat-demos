@@ -27,6 +27,7 @@ namespace Hapbeat.DemoSwitch
         public const string TicketExtra = "com.hapbeat.demo_session.ticket";
 
         private static IDemoSessionPlatform _platform = new SafeDemoSessionPlatform();
+        private static IDemoDeviceOptionStore _deviceOptionStore = new PlayerPrefsDemoDeviceOptionStore();
         private static string _currentDemoId = string.Empty;
         private static Dictionary<string, string> _options = new Dictionary<string, string>(StringComparer.Ordinal);
         private static IDemoSessionHost _host;
@@ -47,6 +48,10 @@ namespace Hapbeat.DemoSwitch
         /// <summary>This APK's descriptor, or null when absent/invalid/for another demo ID.</summary>
         public static DemoSessionDescriptor Descriptor { get; private set; }
         public static bool SupportsHapticsToggle => Descriptor != null && Descriptor.SupportsHapticsToggle;
+        /// <summary>
+        /// In session mode the step's active options. Outside it (no ticket: Quest's app list, Demo Switch `SWITCH`) the active
+        /// `scope: device` options, each the value the last ticket brought (kept on this headset), else the descriptor default.
+        /// </summary>
         public static IReadOnlyDictionary<string, string> Options => _options;
         public static bool HapticsEnabled { get; private set; } = true;
         public static bool HapticsUiVisible { get; private set; }
@@ -86,6 +91,7 @@ namespace Hapbeat.DemoSwitch
             Descriptor = LoadOwnDescriptor(_platform, _currentDemoId);
             if (_platform.TryTakeStringExtra(TicketExtra, out var json) && !TryBegin(json, _currentDemoId, Descriptor, out var error))
                 Debug.LogWarning("[Demo Session] Ticket ignored; starting normally. " + error);
+            if (!IsActive && Descriptor != null) _options = LoadDeviceOptions(Descriptor, _deviceOptionStore);
         }
 
         private static DemoSessionDescriptor LoadOwnDescriptor(IDemoSessionPlatform platform, string currentDemoId)
@@ -135,7 +141,11 @@ namespace Hapbeat.DemoSwitch
             }
 
             var warnings = new List<string>();
-            if (descriptor != null) _options = descriptor.Normalize(step.Options, warnings);
+            if (descriptor != null)
+            {
+                _options = descriptor.Normalize(step.Options, warnings);
+                StoreDeviceOptions(descriptor, step.Options, _deviceOptionStore);
+            }
             else
             {
                 _options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -153,12 +163,15 @@ namespace Hapbeat.DemoSwitch
             return true;
         }
 
-        internal static void ResetForTests(IDemoSessionPlatform platform = null, string currentDemoId = "", DemoSessionDescriptor descriptor = null)
+        /// <param name="deviceOptions">The `scope: device` store; null is an empty memory store (tests never touch PlayerPrefs).</param>
+        internal static void ResetForTests(IDemoSessionPlatform platform = null, string currentDemoId = "", DemoSessionDescriptor descriptor = null,
+            IDemoDeviceOptionStore deviceOptions = null)
         {
             CloseCompletion(false);
             DemoPause.ResetForTests();
             DemoAppHandoff.ResetForTests();
             _platform = platform ?? new SafeDemoSessionPlatform();
+            _deviceOptionStore = deviceOptions ?? new MemoryDemoDeviceOptionStore();
             _currentDemoId = currentDemoId;
             Descriptor = descriptor;
             Ticket = null;
@@ -175,6 +188,29 @@ namespace Hapbeat.DemoSwitch
             RecenterUiVisibleChanged = null;
             DemoRecenter.ResetForTests();
             DemoNarration.ResetForTests();
+        }
+
+        /// <summary>
+        /// The active `scope: device` options of <paramref name="descriptor"/> for a launch without a ticket: the stored value
+        /// when it is still one of the option's values, else the default. `when` is resolved with the other options' defaults.
+        /// </summary>
+        internal static Dictionary<string, string> LoadDeviceOptions(DemoSessionDescriptor descriptor, IDemoDeviceOptionStore store)
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var option in descriptor.Options)
+                values[option.Id] = option.IsDevice && store.TryGet(descriptor.DemoId, option.Id, out var stored) && option.HasValue(stored) ? stored : option.Default;
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var option in descriptor.Options)
+                if (option.IsDevice && descriptor.IsActive(option, values)) result[option.Id] = values[option.Id];
+            return result;
+        }
+
+        /// <summary>Keeps the `scope: device` values a ticket brought (valid ones only); session options are never kept.</summary>
+        internal static void StoreDeviceOptions(DemoSessionDescriptor descriptor, IReadOnlyDictionary<string, string> received, IDemoDeviceOptionStore store)
+        {
+            foreach (var option in descriptor.Options)
+                if (option.IsDevice && received.TryGetValue(option.Id, out var value) && option.HasValue(value))
+                    store.Set(descriptor.DemoId, option.Id, value);
         }
 
         public static void RegisterHost(IDemoSessionHost host)
@@ -405,5 +441,44 @@ namespace Hapbeat.DemoSwitch
                 yield break;
             }
         }
+    }
+
+    /// <summary>Where a runtime keeps its `scope: device` option values between launches.</summary>
+    internal interface IDemoDeviceOptionStore
+    {
+        bool TryGet(string demoId, string optionId, out string value);
+        void Set(string demoId, string optionId, string value);
+    }
+
+    /// <summary>PlayerPrefs (the application's own storage), one key per demo and option.</summary>
+    internal sealed class PlayerPrefsDemoDeviceOptionStore : IDemoDeviceOptionStore
+    {
+        /// <summary>`/` cannot appear in a demo or option ID, so the key is unambiguous.</summary>
+        public static string Key(string demoId, string optionId) => "hapbeat.demo_session.device_option/" + demoId + "/" + optionId;
+
+        public bool TryGet(string demoId, string optionId, out string value)
+        {
+            var key = Key(demoId, optionId);
+            value = PlayerPrefs.HasKey(key) ? PlayerPrefs.GetString(key) : null;
+            return value != null;
+        }
+
+        public void Set(string demoId, string optionId, string value)
+        {
+            var key = Key(demoId, optionId);
+            if (PlayerPrefs.HasKey(key) && PlayerPrefs.GetString(key) == value) return;
+            PlayerPrefs.SetString(key, value);
+            PlayerPrefs.Save();
+        }
+    }
+
+    internal sealed class MemoryDemoDeviceOptionStore : IDemoDeviceOptionStore
+    {
+        private readonly Dictionary<string, string> _values = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        public bool TryGet(string demoId, string optionId, out string value) =>
+            _values.TryGetValue(PlayerPrefsDemoDeviceOptionStore.Key(demoId, optionId), out value);
+
+        public void Set(string demoId, string optionId, string value) => _values[PlayerPrefsDemoDeviceOptionStore.Key(demoId, optionId)] = value;
     }
 }

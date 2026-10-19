@@ -30,6 +30,11 @@ namespace Hapbeat.DemoSwitch.Tests
         static string HubStart(long seq, string demoId = "volley") =>
             "{\"version\":1,\"type\":\"HUB_START\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"steps\":[{\"demo_id\":\"" + demoId + "\"},{\"demo_id\":\"fps\"}]}";
 
+        const string DemoSettingsGet = "{\"version\":1,\"type\":\"DEMO_SETTINGS_GET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"target\":\"boxing\"}";
+
+        static string DemoSettingsSet(long seq, string target = "boxing", string settings = "{\"haptics_db\":\"4\"}") =>
+            "{\"version\":1,\"type\":\"DEMO_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"demo_hub\",\"target\":\"" + target + "\",\"settings\":" + settings + "}";
+
         static string Control(long seq, string action, string demoId = DemoSwitchSettings.HubDemoId) =>
             "{\"version\":1,\"type\":\"CONTROL\",\"controller_id\":\"remote-pixel\",\"seq\":" + seq + ",\"demo_id\":\"" + demoId + "\",\"action\":\"" + action + "\",\"scene_id\":\"\"}";
 
@@ -37,7 +42,8 @@ namespace Hapbeat.DemoSwitch.Tests
         {
             public bool Busy, Stores = true, Installed = true, Starts = true, HapticsSdk = true;
             public DemoSwitchPresetCheck Check = DemoSwitchPresetCheck.Ok;
-            public int Stored, Started, SettingsStored, TopShown, Replayed, HapticsTests;
+            public int Stored, Started, SettingsStored, TopShown, Replayed, HapticsTests, DemoSettingsStored;
+            public IReadOnlyDictionary<string, string> StoredDemoSettings;
             public string StoredName;
             public string Screen = DemoSwitchScreens.Main;
             public IReadOnlyList<string> StoredVisible;
@@ -47,6 +53,20 @@ namespace Hapbeat.DemoSwitch.Tests
             public bool IsBusy => Busy;
             public string CurrentScreen => Screen;
             public DemoSwitchHubSettings ReadSettings() => DemoSwitchHubProtocolTests.ExampleSettings();
+            public DemoSwitchDemoSettings ReadDemoSettings(string demoId) =>
+                demoId == "boxing" ? DemoSwitchDemoSettingsProtocolTests.ExampleSettings() : new DemoSwitchDemoSettings(4, false, null);
+            public DemoSwitchPresetCheck CheckDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string offending)
+            {
+                offending = demoId != "boxing" ? demoId : settings.Keys.FirstOrDefault(id => id != "round" && id != "haptics_db");
+                return demoId != "boxing" ? DemoSwitchPresetCheck.NotInstalled
+                    : offending != null ? DemoSwitchPresetCheck.UnknownOption : DemoSwitchPresetCheck.Ok;
+            }
+            public bool TryStoreDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string error)
+            {
+                error = Stores ? null : "disk full";
+                if (Stores) { DemoSettingsStored++; StoredDemoSettings = settings; }
+                return Stores;
+            }
             public DemoSwitchPresetCheck CheckVisibleDemos(IReadOnlyList<string> demoIds, out string demoId)
             {
                 demoId = demoIds.FirstOrDefault(id => id != "volley" && id != "fps");
@@ -419,6 +439,66 @@ namespace Hapbeat.DemoSwitch.Tests
 
             host.Stores = false;
             Send(HubSettingsSet(4));
+            ExpectStatus("ACK", "ok");
+            ExpectStatus("FAILED", "launch_failed", "disk full");
+        }
+
+        [Test]
+        public void WithoutAHostDemoSettingsAreDroppedWithoutAReply()
+        {
+            foreach (var json in new[] { DemoSettingsGet, DemoSettingsSet(1) })
+            {
+                LogAssert.Expect(LogType.Warning, new Regex("Rejected"));
+                Send(json);
+                Assert.That(NothingReceived(), Is.True, json);
+            }
+        }
+
+        [Test]
+        public void OutOfForegroundDemoSettingsGetIsAnsweredButSetIsRefused()
+        {
+            var host = new FakeHost();
+            DemoSwitchHub.RegisterHost(host);
+            typeof(DemoSwitchRuntime).GetField("_foreground", Private).SetValue(_runtime, false);
+
+            Send(DemoSettingsGet);
+            var reply = JObject.Parse(Receive());
+            Assert.That(reply.Value<string>("type"), Is.EqualTo("DEMO_SETTINGS"));
+            Assert.That(reply["settings"].Value<string>("haptics_db"), Is.EqualTo("2"));
+            Send(DemoSettingsGet.Replace("boxing", "handdemo"));
+            Assert.That(JObject.Parse(Receive()).Value<bool>("installed"), Is.False);
+            Send(DemoSettingsSet(1));
+            ExpectStatus("FAILED", "not_allowed", DemoSwitchRuntime.NotForegroundMessage);
+            Assert.That(host.DemoSettingsStored, Is.Zero);
+        }
+
+        [Test]
+        public void DemoSettingsSetIsValidatedBeforeAckThenStoredAndReady()
+        {
+            var host = new FakeHost();
+            DemoSwitchHub.RegisterHost(host);
+
+            host.Busy = true;
+            Send(DemoSettingsSet(1));
+            ExpectStatus("FAILED", "not_allowed", "The Hub's manage screen is open.");
+            host.Busy = false;
+
+            Send(DemoSettingsSet(2, "handdemo"));
+            ExpectStatus("FAILED", "not_allowed", "handdemo");
+            Send(DemoSettingsSet(3, settings: "{\"haptics_db\":\"4\",\"speed\":\"fast\"}"));
+            ExpectStatus("FAILED", "invalid_payload", "speed");
+            Assert.That(host.DemoSettingsStored, Is.Zero, "Nothing is stored when validation fails.");
+
+            Send(DemoSettingsSet(4));
+            ExpectStatus("ACK", "ok");
+            ExpectStatus("READY", "ok");
+            Assert.That(host.StoredDemoSettings, Is.EquivalentTo(new Dictionary<string, string> { ["haptics_db"] = "4" }));
+            Send(DemoSettingsSet(4));
+            ExpectStatus("FAILED", "replay");
+            Assert.That(host.DemoSettingsStored, Is.EqualTo(1));
+
+            host.Stores = false;
+            Send(DemoSettingsSet(5));
             ExpectStatus("ACK", "ok");
             ExpectStatus("FAILED", "launch_failed", "disk full");
         }

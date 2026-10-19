@@ -142,6 +142,8 @@ namespace Hapbeat.DemoSwitch
                 else if (messageType == "HUB_SETTINGS_GET") HandleHubSettingsGet(json, datagram.Source, host);
                 else if (messageType == "HUB_SETTINGS_SET") HandleHubSettingsSet(json, datagram.Source, host);
                 else if (messageType == "HUB_START") HandleHubStart(json, datagram.Source, host);
+                else if (messageType == "DEMO_SETTINGS_GET") HandleDemoSettingsGet(json, datagram.Source, host);
+                else if (messageType == "DEMO_SETTINGS_SET") HandleDemoSettingsSet(json, datagram.Source, host);
                 else HandlePresetCommand(json, datagram.Source, host);
                 return;
             }
@@ -301,7 +303,8 @@ namespace Hapbeat.DemoSwitch
             || action == "session_retry" || action == "hub_top" || action == "haptics_test";
 
         private static bool IsHubMessage(string type) => type == "PRESET_GET" || type == "PRESET_SET" || type == "PRESET_START"
-            || type == "HUB_SETTINGS_GET" || type == "HUB_SETTINGS_SET" || type == "HUB_START";
+            || type == "HUB_SETTINGS_GET" || type == "HUB_SETTINGS_SET" || type == "HUB_START"
+            || type == "DEMO_SETTINGS_GET" || type == "DEMO_SETTINGS_SET";
 
         private void HandleControl(DemoSwitchCommand command, IPEndPoint source)
         {
@@ -520,6 +523,68 @@ namespace Hapbeat.DemoSwitch
             else SendFailure(source, command.ControllerId, command.Sequence, command.DemoId, "launch_failed", error);
         }
 
+        private void HandleDemoSettingsGet(string json, IPEndPoint source, IDemoSwitchHubHost host)
+        {
+            DiscoveryHandleResult result;
+            try
+            {
+                result = DemoSwitchDemoSettingsGetHandler.Handle(json, host.ReadDemoSettings, _settings.SharedSecret, _settings.AllowUnsignedOnIsolatedLan);
+            }
+            catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+            {
+                Debug.LogWarning("[Demo Switch] DEMO_SETTINGS could not be built: " + exception.Message);
+                return;
+            }
+            if (!result.ShouldReply)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected DEMO_SETTINGS_GET payload: " + result.ErrorCode);
+                return;
+            }
+
+            try
+            {
+                _transport.Send(result.ResponseJson, source);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Demo Switch] DEMO_SETTINGS send failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// DEMO_SETTINGS_SET with the HUB_SETTINGS_SET rules: refused while the manage screen is open; a target that is not
+        /// installed is FAILED/not_allowed, an unknown option or value FAILED/invalid_payload (nothing stored); after ACK the Hub
+        /// stores the given options.
+        /// </summary>
+        private void HandleDemoSettingsSet(string json, IPEndPoint source, IDemoSwitchHubHost host)
+        {
+            var parsed = DemoSwitchProtocol.ParseDemoSettingsSet(json);
+            if (!parsed.Success)
+            {
+                Debug.LogWarning("[Demo Switch] Rejected DEMO_SETTINGS_SET payload: " + parsed.ErrorMessage);
+                return;
+            }
+
+            var command = parsed.Command;
+            if (RefuseHubCommand(source, command.ControllerId, command.Sequence, command.DemoId,
+                    string.IsNullOrEmpty(_settings.SharedSecret) || DemoSwitchProtocol.Authenticate(command, _settings.SharedSecret), host))
+                return;
+            var check = host.CheckDemoSettings(command.Target, command.Settings, out var offending);
+            if (check != DemoSwitchPresetCheck.Ok)
+            {
+                SendFailure(source, command.ControllerId, command.Sequence, command.DemoId,
+                    check == DemoSwitchPresetCheck.UnknownOption ? "invalid_payload" : "not_allowed", offending);
+                return;
+            }
+            if (!_sequenceGuard.TryAccept(command.ControllerId, command.Sequence))
+            { SendFailure(source, command.ControllerId, command.Sequence, command.DemoId, "replay", "seq was already accepted or is older."); return; }
+
+            SendStatus(source, new DemoSwitchStatus("ACK", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+            if (host.TryStoreDemoSettings(command.Target, command.Settings, out var error))
+                SendStatus(source, new DemoSwitchStatus("READY", command.ControllerId, command.Sequence, command.DemoId, _settings.CurrentDemoId, "ok", ""));
+            else SendFailure(source, command.ControllerId, command.Sequence, command.DemoId, "launch_failed", error);
+        }
+
         /// <summary>
         /// HUB_START with the PRESET_SET validation and the PRESET_START ending: READY names the first demo once the Hub has
         /// left the foreground, or FAILED/launch_failed.
@@ -560,7 +625,7 @@ namespace Hapbeat.DemoSwitch
         }
 
         /// <summary>
-        /// The checks every Hub command (PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START) passes before its own
+        /// The checks every Hub command (PRESET_SET / PRESET_START / HUB_SETTINGS_SET / DEMO_SETTINGS_SET / HUB_START) passes before its own
         /// validation: authentication, unsigned mode, foreground, one operation at a time, the manage screen, current demo.
         /// True when a FAILED was sent.
         /// </summary>
