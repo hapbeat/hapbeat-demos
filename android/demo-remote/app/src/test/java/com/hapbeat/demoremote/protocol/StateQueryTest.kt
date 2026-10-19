@@ -98,8 +98,8 @@ class StateQueryTest {
         val prefix = "am start -n jp.hapbeat.demohub/com.unity3d.player.UnityPlayerGameActivity --es com.hapbeat.demo_hub.start "
         assertEquals(prefix + """'{"version":1,"demo_id":"handdemo"}'""", DemoCatalog.hubSessionCommand(demoId = "handdemo"))
         assertEquals(
-            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"60"}}'""",
-            DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "60")),
+            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"30"}}'""",
+            DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "30")),
         )
     }
 

@@ -51,7 +51,7 @@ object DemoCatalog {
             whenValues = mapOf("scene" to setOf("block", "receive", "match"))),
     )
     private val BOXING_OPTIONS = listOf(
-        DemoOption("round", "ラウンド", "90", listOf(OptionValue("60", "60秒"), OptionValue("90", "90秒"))),
+        DemoOption("round", "ラウンド", "55", listOf(OptionValue("30", "30秒"), OptionValue("55", "55秒"))),
     )
 
     val apps: List<DemoApp> = listOf(

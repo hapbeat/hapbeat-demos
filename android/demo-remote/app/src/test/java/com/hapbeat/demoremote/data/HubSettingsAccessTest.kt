@@ -125,7 +125,7 @@ class HubSettingsAccessTest {
         // A known demo the Hub does not have.
         assertTrue(HubPresets.problem(id, 1, preset(listOf(PresetStep("fps"))), hub)!!.contains("Hub に入っていません"))
         // Known demos still use their option table.
-        assertNull(HubPresets.problem(id, 1, preset(listOf(PresetStep("boxing", mapOf("round" to "60")))), hub))
+        assertNull(HubPresets.problem(id, 1, preset(listOf(PresetStep("boxing", mapOf("round" to "30")))), hub))
         assertEquals("Boxing にない設定があります", HubPresets.problem(id, 1, preset(listOf(PresetStep("boxing", mapOf("round" to "120")))), hub))
         // The Hub names an installed demo unknown to this app in its FAILED message.
         assertEquals("Glove Ball が HMD にインストールされていません", HubPresets.failureText("not_allowed", "gloveball", hub))

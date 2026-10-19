@@ -28,7 +28,7 @@ namespace Hapbeat.DemoHub
                {""id"":""points"",""label"":{""ja"":""点数""},""default"":""3"",""when"":{""scene"":[""block"",""receive"",""match""]},""values"":[{""value"":""3"",""label"":{""ja"":""3点先取""}},{""value"":""5"",""label"":{""ja"":""5点先取""}},{""value"":""7"",""label"":{""ja"":""7点先取""}}]}]}",
              "jp.hapbeat.volley", UnityActivity, "Volley"),
             (@"{""version"":1,""demo_id"":""boxing"",""title"":{""ja"":""ボクシング"",""en"":""Boxing""},""minutes"":2,""supports"":{""haptics_toggle"":true},
-               ""options"":[{""id"":""round"",""label"":{""ja"":""ラウンド""},""default"":""90"",""values"":[{""value"":""60"",""label"":{""ja"":""60秒""}},{""value"":""90"",""label"":{""ja"":""90秒""}}]}]}",
+               ""options"":[{""id"":""round"",""label"":{""ja"":""ラウンド""},""default"":""55"",""values"":[{""value"":""30"",""label"":{""ja"":""30秒""}},{""value"":""55"",""label"":{""ja"":""55秒""}}]}]}",
              "com.hapbeat.boxing", UnityActivity, "Boxing"),
             (@"{""version"":1,""demo_id"":""trex-encounter"",""title"":{""ja"":""T-Rex エンカウンター"",""en"":""T-Rex Encounter""},""minutes"":3,""supports"":{""haptics_toggle"":true},""options"":[]}",
              "com.hapbeat.trexencounter", "com.epicgames.unreal.GameActivity", "T-Rex Encounter"),

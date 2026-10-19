@@ -151,10 +151,10 @@ namespace Hapbeat.DemoHub.Tests
                 Is.EqualTo(DemoSwitchPresetCheck.Ok));
             Assert.That(demoId, Is.Null);
             Assert.That(HubPlan.Check(new DemoSwitchPresetStep[0], _catalog, out _), Is.EqualTo(DemoSwitchPresetCheck.Ok), "An empty list clears the preset.");
-            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("handdemo"), Step("boxing", ("round", "30")) }, _catalog, out demoId),
+            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("handdemo"), Step("boxing", ("round", "120")) }, _catalog, out demoId),
                 Is.EqualTo(DemoSwitchPresetCheck.NotInstalled));
             Assert.That(demoId, Is.EqualTo("handdemo"));
-            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("boxing", ("round", "30")), Step("handdemo") }, _catalog, out demoId),
+            Assert.That(HubPlan.Check(new[] { Step("volley"), Step("boxing", ("round", "120")), Step("handdemo") }, _catalog, out demoId),
                 Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
             Assert.That(demoId, Is.EqualTo("boxing"));
             Assert.That(HubPlan.Check(new[] { Step("trex-encounter", ("tutorial", "on")) }, _catalog, out demoId), Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
