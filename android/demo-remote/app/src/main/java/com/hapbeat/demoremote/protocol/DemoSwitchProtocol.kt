@@ -92,6 +92,25 @@ sealed interface DemoSwitchMessage {
     data class HubStart(
         override val controllerId: String, val seq: Long, val demoId: String, val steps: List<PresetStep>, override val auth: String?,
     ) : DemoSwitchMessage
+
+    /** Reads the Hub's per-demo settings of demo [target]. Answered like HUB_SETTINGS_GET (no sequence). */
+    data class DemoSettingsGet(override val controllerId: String, val nonce: String, val target: String, override val auth: String?) : DemoSwitchMessage
+
+    /**
+     * The Hub's per-demo settings of [target] (demo-switch-control.md「Demo settings」): every option of its descriptor with
+     * the stored value; [installed] false (and no [settings]) when the Hub does not have the demo. [revision] is the
+     * HUB_SETTINGS counter.
+     */
+    data class DemoSettings(
+        override val controllerId: String, val nonce: String, val revision: Long, val target: String, val installed: Boolean,
+        val settings: Map<String, String>, override val auth: String?,
+    ) : DemoSwitchMessage
+
+    /** Changes 1..8 options of [target]'s per-demo settings (the others keep theirs); HUB_SETTINGS_SET rules. */
+    data class DemoSettingsSet(
+        override val controllerId: String, val seq: Long, val demoId: String, val target: String, val settings: Map<String, String>,
+        override val auth: String?,
+    ) : DemoSwitchMessage
 }
 
 /** Authentication policy of this controller. [secret] null/empty means unsigned mode (only if [allowUnsigned]). */
@@ -111,6 +130,8 @@ object DemoSwitchProtocol {
     const val HUB_DEMO_ID = "demo_hub"
     const val MAX_PRESET_STEPS = 32
     const val MAX_PRESET_OPTIONS = 8
+    /** Options of DEMO_SETTINGS / DEMO_SETTINGS_SET (a descriptor has at most 8). */
+    const val MAX_DEMO_SETTINGS = 8
     val PRESET_NUMBERS = 1..3
     /** Range of PRESET_GET / PRESET `from`. */
     val PRESET_FROM = 0..31
@@ -260,6 +281,32 @@ object DemoSwitchProtocol {
         field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "steps", canonicalSteps(steps))
     }.toString()
 
+    fun canonicalDemoSettingsGet(controllerId: String, nonce: String, target: String): String =
+        StringBuilder(HEADER + "DEMO_SETTINGS_GET\n").apply {
+            field(this, "version", "1"); field(this, "type", "DEMO_SETTINGS_GET"); field(this, "controller_id", controllerId)
+            field(this, "nonce", nonce); field(this, "target", target)
+        }.toString()
+
+    fun canonicalDemoSettings(m: DemoSwitchMessage.DemoSettings): String = StringBuilder(HEADER + "DEMO_SETTINGS\n").apply {
+        field(this, "version", "1"); field(this, "type", "DEMO_SETTINGS"); field(this, "controller_id", m.controllerId)
+        field(this, "nonce", m.nonce); field(this, "revision", m.revision.toString()); field(this, "target", m.target)
+        field(this, "installed", m.installed.toString()); field(this, "settings", canonicalDemoSettingsValues(m.settings))
+    }.toString()
+
+    fun canonicalDemoSettingsSet(controllerId: String, seq: Long, target: String, settings: Map<String, String>): String =
+        StringBuilder(HEADER + "COMMAND\n").apply {
+            field(this, "version", "1"); field(this, "type", "DEMO_SETTINGS_SET"); field(this, "controller_id", controllerId)
+            field(this, "seq", seq.toString()); field(this, "demo_id", HUB_DEMO_ID); field(this, "target", target)
+            field(this, "settings", canonicalDemoSettingsValues(settings))
+        }.toString()
+
+    /**
+     * Signed value of `settings`: `<id>=<value>` sorted by option ID (ordinal) and joined with `|` (identifiers and option
+     * values contain neither `|` nor `=`).
+     */
+    fun canonicalDemoSettingsValues(settings: Map<String, String>): String =
+        settings.entries.sortedBy { it.key }.joinToString("|") { "${it.key}=${it.value}" }
+
     /**
      * Signed value of HUB_SETTINGS `demos`: `<demo_id>;<1|0>;<N>:<title>` joined with `|`, where N is the title's UTF-8
      * byte count (a title may contain any character, so it is length-prefixed).
@@ -299,6 +346,9 @@ object DemoSwitchProtocol {
             message.staffWaiting, message.visibleDemos,
         )
         is DemoSwitchMessage.HubStart -> canonicalHubStart(message.controllerId, message.seq, message.steps)
+        is DemoSwitchMessage.DemoSettingsGet -> canonicalDemoSettingsGet(message.controllerId, message.nonce, message.target)
+        is DemoSwitchMessage.DemoSettings -> canonicalDemoSettings(message)
+        is DemoSwitchMessage.DemoSettingsSet -> canonicalDemoSettingsSet(message.controllerId, message.seq, message.target, message.settings)
     }
 
     fun hmacHex(secret: String, canonical: String): String {
@@ -396,6 +446,20 @@ object DemoSwitchProtocol {
             "steps" to stepsJson(steps),
         ),
         config, canonicalHubStart(controllerId, seq, steps),
+    )
+
+    fun buildDemoSettingsGet(controllerId: String, nonce: String, target: String, config: AuthConfig): String = withAuth(
+        linkedMapOf("version" to 1, "type" to "DEMO_SETTINGS_GET", "controller_id" to controllerId, "nonce" to nonce, "target" to target),
+        config, canonicalDemoSettingsGet(controllerId, nonce, target),
+    )
+
+    /** DEMO_SETTINGS_SET with [settings] as given (callers pass 1..8 options checked against the demo's table). */
+    fun buildDemoSettingsSet(controllerId: String, seq: Long, target: String, settings: Map<String, String>, config: AuthConfig): String = withAuth(
+        linkedMapOf(
+            "version" to 1, "type" to "DEMO_SETTINGS_SET", "controller_id" to controllerId, "seq" to seq, "demo_id" to HUB_DEMO_ID,
+            "target" to target, "settings" to LinkedHashMap(settings.toSortedMap()),
+        ),
+        config, canonicalDemoSettingsSet(controllerId, seq, target, settings),
     )
 
     /** `steps` of PRESET_SET / HUB_START: `options` left out when empty and `retry` when true (signs the same). */
@@ -581,6 +645,36 @@ object DemoSwitchProtocol {
                     presetStepsField(obj)?.takeIf { it.isNotEmpty() } ?: return null, auth,
                 )
             }
+            "DEMO_SETTINGS_GET" -> {
+                if (!onlyFields(obj, DEMO_SETTINGS_GET_FIELDS)) return null
+                DemoSwitchMessage.DemoSettingsGet(controllerId, nonceField(obj) ?: return null, identifierField(obj, "target") ?: return null, auth)
+            }
+            "DEMO_SETTINGS" -> {
+                if (!onlyFields(obj, DEMO_SETTINGS_FIELDS)) return null
+                val installed = boolField(obj, "installed") ?: return null
+                val settings = demoSettingsField(obj) ?: return null
+                if (!installed && settings.isNotEmpty()) return null
+                DemoSwitchMessage.DemoSettings(
+                    controllerId = controllerId,
+                    nonce = nonceField(obj) ?: return null,
+                    revision = intField(obj, "revision")?.takeIf { it in 0..MAX_SEQ } ?: return null,
+                    target = identifierField(obj, "target") ?: return null,
+                    installed = installed,
+                    settings = settings,
+                    auth = auth,
+                )
+            }
+            "DEMO_SETTINGS_SET" -> {
+                if (!onlyFields(obj, DEMO_SETTINGS_SET_FIELDS)) return null
+                DemoSwitchMessage.DemoSettingsSet(
+                    controllerId = controllerId,
+                    seq = seqField(obj) ?: return null,
+                    demoId = stringField(obj, "demo_id")?.takeIf { it == HUB_DEMO_ID } ?: return null,
+                    target = identifierField(obj, "target") ?: return null,
+                    settings = demoSettingsField(obj)?.takeIf { it.isNotEmpty() } ?: return null,
+                    auth = auth,
+                )
+            }
             else -> null
         }
     }
@@ -624,6 +718,17 @@ object DemoSwitchProtocol {
                 stringField(f, "title")?.takeIf { PresetTransfer.isValidName(it) } ?: return null,
                 boolField(f, "visible") ?: return null,
             )
+        }
+    }
+
+    /** `settings` of DEMO_SETTINGS / DEMO_SETTINGS_SET: at most 8 identifier keys with option-value strings. */
+    private fun demoSettingsField(obj: Map<String, JsonValue>): Map<String, String>? {
+        val fields = (obj["settings"] as? JsonObject)?.fields ?: return null
+        if (fields.size > MAX_DEMO_SETTINGS) return null
+        return fields.mapValues { (key, v) ->
+            val value = (v as? JsonString)?.value ?: return null
+            if (!isIdentifier(key) || !OPTION_VALUE.matches(value)) return null
+            value
         }
     }
 
@@ -673,6 +778,9 @@ object DemoSwitchProtocol {
     )
     private val HUB_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("haptics_ui", "recenter_ui", "hand_style", "narration_volume", "staff_waiting", "visible_demos")
     private val HUB_START_FIELDS = SWITCH_FIELDS + "steps"
+    private val DEMO_SETTINGS_GET_FIELDS = DISCOVER_FIELDS + "target"
+    private val DEMO_SETTINGS_FIELDS = DEMO_SETTINGS_GET_FIELDS + setOf("revision", "installed", "settings")
+    private val DEMO_SETTINGS_SET_FIELDS = SWITCH_FIELDS + setOf("target", "settings")
 
     /** Required fields present and no field other than those, [optional] ones and auth. */
     private fun onlyFields(obj: Map<String, JsonValue>, required: Set<String>, optional: Set<String> = emptySet()): Boolean =
@@ -745,6 +853,16 @@ object DemoSwitchProtocol {
     /** HUB_SETTINGS acceptance: from the Quest the HUB_SETTINGS_GET went to, own controller ID, that request's nonce, auth rule. */
     fun acceptHubSettings(
         message: DemoSwitchMessage.HubSettings, source: String, controllerId: String, requestTarget: (nonce: String) -> String?,
+        config: AuthConfig,
+    ): Boolean {
+        if (message.controllerId != controllerId) return false
+        if (requestTarget(message.nonce) != source) return false
+        return authAccepted(message, config)
+    }
+
+    /** DEMO_SETTINGS acceptance: from the Quest the DEMO_SETTINGS_GET went to, own controller ID, that request's nonce, auth rule. */
+    fun acceptDemoSettings(
+        message: DemoSwitchMessage.DemoSettings, source: String, controllerId: String, requestTarget: (nonce: String) -> String?,
         config: AuthConfig,
     ): Boolean {
         if (message.controllerId != controllerId) return false

@@ -101,9 +101,9 @@ class StateQueryTest {
             prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"30"}}'""",
             DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "30")),
         )
-        // Boxing's haptics trim: the cut in dB as a plain number.
+        // Boxing's haptics trim is this headset's per-demo setting (scope device): a step never carries it, the Hub adds it.
         assertEquals(
-            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"55","haptics_db":"6"}}'""",
+            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"55"}}'""",
             DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "55", "haptics_db" to "6")),
         )
     }

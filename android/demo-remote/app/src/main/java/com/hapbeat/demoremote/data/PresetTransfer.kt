@@ -19,7 +19,11 @@ import java.util.Base64
 
 /** Outcome of reading a preset transfer token. [Rejected.message] is shown to the user as-is. */
 sealed interface TransferResult {
-    data class Accepted(val presets: List<RemotePreset>) : TransferResult
+    /**
+     * [presets] without the per-demo (`scope: device`) options a preset never holds; [droppedDeviceOptions] names the
+     * ones taken out ("Boxing の触覚の強さ"), shown in the confirmation.
+     */
+    data class Accepted(val presets: List<RemotePreset>, val droppedDeviceOptions: List<String> = emptyList()) : TransferResult
     data class Rejected(val message: String) : TransferResult
 }
 
@@ -94,7 +98,10 @@ object PresetTransfer {
         return checkDemos(presets)
     }
 
-    /** Schema passed: the device allow list (Hub-startable demos) and each demo's descriptor options. */
+    /**
+     * Schema passed: the device allow list (Hub-startable demos) and each demo's descriptor options. `scope: device`
+     * options (this headset's per-demo settings) are valid but taken out (demo-session.md「デモごとの設定」).
+     */
     fun checkDemos(presets: List<RemotePreset>): TransferResult {
         val unknown = presets.flatMap { p -> p.steps.map { it.demoId } }.filter { id -> DemoCatalog.sessionApps.none { it.demoId == id } }
         if (unknown.isNotEmpty()) return TransferResult.Rejected(ERROR_UNKNOWN_DEMO + unknown.distinct().joinToString(", "))
@@ -105,7 +112,14 @@ object PresetTransfer {
                 return TransferResult.Rejected("${DemoCatalog.labelFor(step.demoId)} にない設定です: ${bad.key}=${bad.value}")
             }
         }
-        return TransferResult.Accepted(presets)
+        val dropped = presets.flatMap { p -> p.steps.flatMap { DemoCatalog.deviceOptionLabels(it.demoId, it.options) } }.distinct()
+        val kept = presets.map { p -> p.copy(steps = p.steps.map { step -> step.copy(options = withoutDeviceOptions(step.demoId, step.options)) }) }
+        return TransferResult.Accepted(kept, dropped)
+    }
+
+    private fun withoutDeviceOptions(demoId: String, options: Map<String, String>): Map<String, String> {
+        val device = DemoCatalog.optionsFor(demoId).filter { it.device }.map { it.id }.toSet()
+        return options.filterKeys { it !in device }
     }
 
     // ---- schema (demo-remote-preset.schema.json); null = invalid ----

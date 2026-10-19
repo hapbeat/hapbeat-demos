@@ -58,7 +58,10 @@ object HubPresets {
         }
     }
 
-    /** The steps sent to the Hub: values of options that do not apply (descriptor `when`) are left out. */
+    /**
+     * The steps sent to the Hub: values of options that do not apply (descriptor `when`) and per-demo (`scope: device`)
+     * options, which a step never holds, are left out.
+     */
     fun normalize(steps: List<PresetStep>): List<PresetStep> =
         steps.map { it.copy(options = DemoCatalog.applicableOptions(it.demoId, it.options)) }
 
@@ -108,7 +111,7 @@ object HubPresets {
     }
 
     /**
-     * FAILED of PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START in words; [message] names the first offending
+     * FAILED of PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START / DEMO_SETTINGS_SET in words; [message] names the first offending
      * demo_id where the Hub gives one (a demo of this app or of [hubDemos]).
      */
     fun failureText(code: String, message: String, hubDemos: List<HubDemo>? = null): String {

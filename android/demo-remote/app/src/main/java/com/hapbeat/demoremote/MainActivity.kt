@@ -18,12 +18,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.hapbeat.demoremote.ui.AppTheme
+import com.hapbeat.demoremote.ui.DemoSettingsScreen
 import com.hapbeat.demoremote.ui.HubSettingsScreen
 import com.hapbeat.demoremote.ui.LicenseScreen
 import com.hapbeat.demoremote.ui.PresetEditScreen
@@ -32,7 +34,7 @@ import com.hapbeat.demoremote.ui.RemoteScreen
 import com.hapbeat.demoremote.ui.SettingsScreen
 import com.hapbeat.demoremote.ui.UsbAdbDialog
 
-enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET, HUB_SETTINGS }
+enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET, HUB_SETTINGS, DEMO_SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RemoteViewModel by viewModels()
@@ -49,6 +51,9 @@ class MainActivity : ComponentActivity() {
             AppTheme {
                 var screen by rememberSaveable { mutableStateOf(Screen.REMOTE) }
                 var editingPreset by rememberSaveable { mutableStateOf<Int?>(null) }
+                var demoSettingsId by rememberSaveable { mutableStateOf<String?>(null) }
+                // The main screen's tab stays when another screen is opened and closed.
+                var remoteTab by rememberSaveable { mutableIntStateOf(0) }
                 LaunchedEffect(viewModel.keepScreenOn) {
                     if (viewModel.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -65,9 +70,13 @@ class MainActivity : ComponentActivity() {
                                 onOpenSettings = { screen = Screen.SETTINGS },
                                 onEditPreset = { editingPreset = it; screen = Screen.PRESET },
                                 onOpenHubSettings = { screen = Screen.HUB_SETTINGS },
+                                tab = remoteTab,
+                                onTab = { remoteTab = it },
+                                onOpenDemoSettings = { demoSettingsId = it; screen = Screen.DEMO_SETTINGS },
                             )
                             Screen.PRESET -> PresetEditScreen(viewModel, editingPreset ?: 1, onDone = { screen = Screen.REMOTE })
                             Screen.HUB_SETTINGS -> HubSettingsScreen(viewModel, onDone = { screen = Screen.REMOTE })
+                            Screen.DEMO_SETTINGS -> DemoSettingsScreen(viewModel, demoSettingsId ?: "", onDone = { screen = Screen.REMOTE })
                             Screen.SETTINGS -> SettingsScreen(
                                 viewModel,
                                 onBack = { screen = Screen.REMOTE },

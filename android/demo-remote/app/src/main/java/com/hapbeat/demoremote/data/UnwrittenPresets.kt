@@ -36,8 +36,9 @@ object UnwrittenPresets {
             val f = (item as? JsonObject)?.fields ?: continue
             val id = (f["id"] as? JsonNumber)?.longOrNull() ?: continue
             val slot = (f["slot"] as? JsonNumber)?.longOrNull()?.toInt()?.takeIf { it in HubPresets.NUMBERS } ?: continue
-            val preset = f["preset"]?.let(PresetTransfer::readPreset) ?: continue
-            if (PresetTransfer.checkDemos(listOf(preset)) !is TransferResult.Accepted) continue
+            val read = f["preset"]?.let(PresetTransfer::readPreset) ?: continue
+            // Checked again; per-demo (device) options are taken out like an import.
+            val preset = (PresetTransfer.checkDemos(listOf(read)) as? TransferResult.Accepted)?.presets?.single() ?: continue
             if (result.any { it.id == id }) continue
             result += UnwrittenPreset(id, preset, slot)
         }

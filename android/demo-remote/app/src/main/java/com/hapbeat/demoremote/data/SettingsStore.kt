@@ -113,6 +113,11 @@ class SettingsStore(context: Context) : SequenceStore {
         get() = prefs.getString(KEY_UNWRITTEN_PRESETS, null) ?: ""
         set(value) { prefs.edit().putString(KEY_UNWRITTEN_PRESETS, value).apply() }
 
+    /** The phone's copy of each Quest's per-demo settings with unwritten changes ([DemoSettingsStore] JSON; "" = none). */
+    var demoSettings: String
+        get() = prefs.getString(KEY_DEMO_SETTINGS, null) ?: ""
+        set(value) { prefs.edit().putString(KEY_DEMO_SETTINGS, value).apply() }
+
     private companion object {
         const val KEY_CONTROLLER_ID = "controller_id"
         const val KEY_NEXT_SEQ = "next_seq"
@@ -129,6 +134,7 @@ class SettingsStore(context: Context) : SequenceStore {
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         const val KEY_SHOW_EDITORS = "show_editors"
         const val KEY_UNWRITTEN_PRESETS = "unwritten_presets"
+        const val KEY_DEMO_SETTINGS = "demo_settings"
         const val KEY_PAUSE_BOUNDARY_ON_CONNECT = "pause_boundary_on_connect"
     }
 }

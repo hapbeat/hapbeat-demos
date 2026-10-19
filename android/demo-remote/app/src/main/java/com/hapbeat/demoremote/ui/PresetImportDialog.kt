@@ -62,6 +62,13 @@ fun PresetImportDialog(vm: RemoteViewModel) {
                             "${vm.selectedQuest?.label ?: "-"} の Hub のプリセットに書き込みます。書き込むだけで、セッションは始まりません",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // Fixed for this import: per-demo (device) options a preset never holds were taken out.
+                        if (pending.droppedDeviceOptions.isNotEmpty()) {
+                            Text(
+                                "${pending.droppedDeviceOptions.joinToString("、")}は Quest ごとの設定のため、プリセットから外しました（デモタブで設定）",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         pending.presets.forEachIndexed { i, preset ->
                             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp)) {
                                 Text(preset.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)

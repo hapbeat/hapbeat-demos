@@ -10,11 +10,12 @@ data class OptionValue(val value: String, val label: String)
 /**
  * One option of a demo's descriptor (`options[]`): [id], Japanese [label], [default] and the allowed [values].
  * [whenValues] mirrors the descriptor's `when`: the option applies only while each referenced option has one of
- * the listed values (demo-session.md: otherwise it is left out of the ticket).
+ * the listed values (demo-session.md: otherwise it is left out of the ticket). [device] mirrors `"scope": "device"`:
+ * this headset's per-demo adjustment, set only in the Hub's per-demo settings (デモタブ), never in a preset or plan step.
  */
 data class DemoOption(
     val id: String, val label: String, val default: String, val values: List<OptionValue>,
-    val whenValues: Map<String, Set<String>> = emptyMap(),
+    val whenValues: Map<String, Set<String>> = emptyMap(), val device: Boolean = false,
 )
 
 /**
@@ -52,8 +53,9 @@ object DemoCatalog {
     )
     private val BOXING_OPTIONS = listOf(
         DemoOption("round", "ラウンド", "55", listOf(OptionValue("30", "30秒"), OptionValue("55", "55秒"))),
-        // The cut in dB as a non-negative number ("2" = -2 dB): option values cannot start with "-".
-        DemoOption("haptics_db", "触覚の強さ", "2", listOf(OptionValue("0", "0 dB"), OptionValue("2", "-2 dB"), OptionValue("4", "-4 dB"), OptionValue("6", "-6 dB"), OptionValue("9", "-9 dB"), OptionValue("12", "-12 dB"))),
+        // The cut in dB as a non-negative number ("2" = -2 dB): option values cannot start with "-". scope device.
+        DemoOption("haptics_db", "触覚の強さ", "2", listOf(OptionValue("0", "0 dB"), OptionValue("2", "-2 dB"), OptionValue("4", "-4 dB"), OptionValue("6", "-6 dB"), OptionValue("9", "-9 dB"), OptionValue("12", "-12 dB")),
+            device = true),
     )
 
     val apps: List<DemoApp> = listOf(
@@ -99,6 +101,10 @@ object DemoCatalog {
     fun activeOptionsFor(demoId: String, values: Map<String, String>): List<DemoOption> =
         optionsFor(demoId).filter { isActive(demoId, it, values) }
 
+    /** The options a preset or plan step offers: those that apply, without the [DemoOption.device] ones. */
+    fun stepOptionsFor(demoId: String, values: Map<String, String>): List<DemoOption> =
+        activeOptionsFor(demoId, values).filter { !it.device }
+
     /** The value shown as chosen for [option]: the one in [values], else the descriptor default. */
     fun chosenValue(option: DemoOption, values: Map<String, String>): String = values[option.id] ?: option.default
 
@@ -109,11 +115,18 @@ object DemoCatalog {
     fun withChoice(values: Map<String, String>, option: DemoOption, value: String): Map<String, String> =
         if (value == option.default) values - option.id else values + (option.id to value)
 
-    /** [values] without keys whose option does not apply; this is what goes to the Hub. */
+    /**
+     * [values] of a step without keys whose option does not apply and without [DemoOption.device] options (a step never
+     * holds them, demo-session.md「デモごとの設定」); this is what goes to the Hub in a step.
+     */
     fun applicableOptions(demoId: String, values: Map<String, String>): Map<String, String> {
-        val active = activeOptionsFor(demoId, values).map { it.id }.toSet()
+        val active = stepOptionsFor(demoId, values).map { it.id }.toSet()
         return values.filterKeys { it in active }
     }
+
+    /** "Boxing の触覚の強さ" for each [DemoOption.device] option in [options] of [demoId] (what a preset drops). */
+    fun deviceOptionLabels(demoId: String, options: Map<String, String>): List<String> =
+        optionsFor(demoId).filter { it.device && it.id in options }.map { "${labelFor(demoId)} の${it.label}" }
 
     /** "チュートリアル: なし、モード: 試合" for the options that are set (empty when all are the descriptor default). */
     fun optionSummary(demoId: String, options: Map<String, String>): String = activeOptionsFor(demoId, options).mapNotNull { option ->

@@ -40,20 +40,15 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -77,11 +72,15 @@ import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import kotlinx.coroutines.delay
 
+/**
+ * [tab]: the selected tab (起動 / 切替 / 操作 / デモ), kept by the caller so that it survives opening another screen.
+ * [onOpenDemoSettings]: a tile of the デモ tab opens that demo's per-demo settings.
+ */
 @Composable
 fun RemoteScreen(
     vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}, onOpenHubSettings: () -> Unit = {},
+    tab: Int = 0, onTab: (Int) -> Unit = {}, onOpenDemoSettings: (String) -> Unit = {},
 ) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
     if (vm.sleepHintIp != null) SleepHintDialog(vm)
@@ -97,7 +96,8 @@ fun RemoteScreen(
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ControlColumn(vm, onOpenSettings, onEditPreset, onOpenHubSettings)
+                    QuestBar(vm, onOpenSettings)
+                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings)
                 }
             }
         } else {
@@ -112,7 +112,7 @@ fun RemoteScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     QuestBar(vm, onOpenSettings)
-                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings)
+                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings)
                 }
             }
         }
@@ -120,13 +120,10 @@ fun RemoteScreen(
 }
 
 @Composable
-private fun ControlColumn(vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit) {
-    QuestBar(vm, onOpenSettings)
-    ActionsAndLog(vm, onEditPreset, onOpenHubSettings)
-}
-
-@Composable
-private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit) {
+private fun ActionsAndLog(
+    vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit, tab: Int, onTab: (Int) -> Unit,
+    onOpenDemoSettings: (String) -> Unit,
+) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
     // The two most urgent actions stay one tap away: back to the Hub, and pause (shared pause panel).
@@ -143,10 +140,9 @@ private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOp
         ) { vm.sendControl(ControlCatalog.menuOpen) }
     }
     NoticeArea(vm)
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     TabRow(selectedTabIndex = tab) {
-        listOf("デモ開始", "切替", "操作", "直接起動").forEachIndexed { i, title ->
-            Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+        listOf("起動", "切替", "操作", "デモ").forEachIndexed { i, title ->
+            Tab(selected = tab == i, onClick = { onTab(i) }, text = { Text(title) })
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,7 +150,7 @@ private fun ActionsAndLog(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOp
             0 -> SessionTab(vm, onEditPreset, onOpenHubSettings)
             1 -> SwitchTab(vm)
             2 -> ControlTab(vm)
-            else -> LaunchTab(vm)
+            else -> DemoTab(vm, onOpenDemoSettings)
         }
     }
     Text("結果ログ", style = MaterialTheme.typography.titleSmall)
@@ -498,63 +494,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
             dismissButton = { TextButton(onClick = { confirmStart = null }) { Text("やめる") } },
         )
     }
-    Text("デモ 1 本で始める", style = MaterialTheme.typography.titleSmall)
-    Text(
-        "Hub 経由でセッション（チュートリアル・完了画面付き）として始めます。Hub が前面ならそのまま、ほかのデモが前面なら" +
-            " adb で（adb が無ければ Hub に切り替えてから）始めます",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    // Pick a demo, then its descriptor options (same table as the preset editor), then start. The Hub's own list of
-    // installed demos is used once read.
-    val candidates = DemoCatalog.sessionCandidates(hubDemos)
-    var chosen by rememberSaveable { mutableStateOf(DemoCatalog.sessionApps.first().demoId) }
-    var options by remember(chosen) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    // Why a long press did not start (shown for a few seconds in the fixed line below).
-    var longPressNote by remember { mutableStateOf("") }
-    LaunchedEffect(longPressNote) {
-        if (longPressNote.isNotEmpty()) {
-            delay(LONG_PRESS_NOTE_MS)
-            longPressNote = ""
-        }
-    }
-    val haptic = LocalHapticFeedback.current
-    ButtonGrid(candidates, columns = 3) { app, modifier ->
-        // Long press: choose it and start at once with the options shown (another demo's: its defaults), like the button.
-        DemoTile(app, enabled = true, modifier = modifier, outlined = chosen != app.demoId, onLongPress = {
-            val chosenOptions = if (chosen == app.demoId) options else emptyMap()
-            chosen = app.demoId
-            val blocked = if (vm.sessionStarting) "開始中…" else vm.sessionStartBlockReason(app)
-            if (blocked != null) {
-                longPressNote = "長押しで開始できません: $blocked"
-            } else {
-                longPressNote = ""
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                vm.startSession(demoId = app.demoId, options = chosenOptions)
-            }
-        }) {
-            chosen = app.demoId
-            longPressNote = ""
-        }
-    }
-    val app = candidates.firstOrNull { it.demoId == chosen }
-    OptionChooser(DemoCatalog.activeOptionsFor(chosen, options), options) { options = DemoCatalog.applicableOptions(chosen, it) }
-    val reason = when {
-        app == null -> "上からデモを選んでください"
-        vm.sessionStarting -> "開始中…"
-        else -> vm.sessionStartBlockReason(app)
-    }
-    // Fixed one line: why the button is gray, or why a long press did not start.
-    Text(
-        longPressNote.ifEmpty { reason ?: " " },
-        style = MaterialTheme.typography.bodySmall,
-        color = if (longPressNote.isNotEmpty()) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-    ActionButton("このデモで始める", enabled = reason == null, modifier = Modifier.fillMaxWidth()) {
-        vm.startSession(demoId = chosen, options = options)
-    }
+    // One demo alone starts from the デモ tab (its settings screen's 「起動」).
     // At the end of the tab: rows added or removed here never move anything above.
     UnwrittenPresetSection(vm, block, hubDemos)
 }
@@ -631,9 +571,6 @@ private fun UnwrittenPresetSection(vm: RemoteViewModel, block: String?, hubDemos
         )
     }
 }
-
-/** How long the fixed line of the single-demo start shows why a long press did not start. */
-private const val LONG_PRESS_NOTE_MS = 4_000L
 
 /**
  * A user-started Wi-Fi adb connect gets no answer (the Quest's Wi-Fi is likely in power save). The connect keeps trying
@@ -732,18 +669,64 @@ private fun QrImportButton(vm: RemoteViewModel, modifier: Modifier) {
     ) { Text("QR から Hub に取り込む") }
 }
 
+/**
+ * The selected HMD's demos (the Hub's installed ones once read); a tile opens that demo's per-demo settings (保存 / 起動).
+ * Below, the changes saved on the phone that the Hub does not have yet, each with 書き込み.
+ */
 @Composable
-private fun LaunchTab(vm: RemoteViewModel) {
+private fun DemoTab(vm: RemoteViewModel, onOpenDemoSettings: (String) -> Unit) {
     val quest = vm.selectedQuest
-    val connected = quest?.adb == AdbState.CONNECTED
+    val hubDemos = vm.selectedHubDemos
     Text(
-        if (connected) "Quest のアプリ一覧から起動するのと同じです。前面アプリに関係なく使えます（未インストールは無効）" else "adb 接続後に使えます",
+        "デモを押すと、この Quest でのデモごとの設定を開きます（Hub に保存。プリセット・タイル・リモコンのどこから起動しても使われます）",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ButtonGrid(DemoCatalog.apps, columns = 3) { app, modifier ->
-        val installed = quest?.installed?.contains(app.packageName) == true
-        DemoTile(app, enabled = connected && installed, modifier = modifier, outlined = true) { vm.launchApp(app) }
+    ButtonGrid(DemoCatalog.sessionCandidates(hubDemos), columns = 3) { app, modifier ->
+        DemoTile(app, enabled = quest != null, modifier = modifier, outlined = true) { onOpenDemoSettings(app.demoId) }
+    }
+    UnwrittenDemoSettingsSection(vm, hubDemos, onOpenDemoSettings)
+}
+
+/** The selected HMD's unwritten per-demo changes: the heading and the status line are always there. */
+@Composable
+private fun UnwrittenDemoSettingsSection(vm: RemoteViewModel, hubDemos: List<HubDemo>?, onOpenDemoSettings: (String) -> Unit) {
+    val items = vm.selectedUnwrittenDemoSettings
+    val block = vm.hubPresetBlockReason
+    Text("未書き込みのデモの設定（${items.size} 件）", style = MaterialTheme.typography.titleSmall)
+    val save = vm.demoSettingsSaveStatus
+    Text(
+        when {
+            save != null -> save.first
+            items.isEmpty() -> "Hub が前面でないときに保存した設定が、ここに残ります"
+            block != null -> "Hub に書き込めません: $block"
+            else -> " "
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = when (save?.second) {
+            null, LogState.SENT, LogState.ACK -> MaterialTheme.colorScheme.onSurfaceVariant
+            LogState.READY -> StatusGreen
+            else -> StatusRed
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    items.forEach { item ->
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                Text(DemoCatalog.labelFor(item.demoId, hubDemos), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(demoSettingsSummary(item.demoId, item.settings), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = { onOpenDemoSettings(item.demoId) }, modifier = Modifier.width(56.dp)) { Text("確認") }
+            ActionButton(
+                if (vm.demoSettingsSaving) "書込中" else "Hub に書き込む",
+                enabled = block == null && !vm.demoSettingsSaving,
+                modifier = Modifier.width(112.dp),
+            ) { vm.writeDemoSettings(item.demoId) }
+        }
     }
 }
 

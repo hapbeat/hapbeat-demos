@@ -52,7 +52,12 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
     val original = vm.selectedHubPresets.getOrNull(number - 1)?.preset
     var name by remember { mutableStateOf(original?.name ?: "") }
     var visible by remember { mutableStateOf(original?.visible ?: true) }
-    val steps = remember { (original?.steps ?: emptyList()).toMutableStateList() }
+    // A preset never holds per-demo (device) options: a preset read with them (written before) drops them here.
+    val dropped = remember { original?.steps.orEmpty().flatMap { DemoCatalog.deviceOptionLabels(it.demoId, it.options) }.distinct() }
+    val steps = remember {
+        (original?.steps ?: emptyList()).map { it.copy(options = it.options.filterKeys { id -> DemoCatalog.optionsFor(it.demoId).none { o -> o.id == id && o.device } }) }
+            .toMutableStateList()
+    }
     val draft = HubPreset(name.trim(), visible, steps.toList())
     // A change after a save makes its result stale.
     LaunchedEffect(draft) { if (!vm.presetSaving) vm.clearPresetSaveStatus() }
@@ -111,6 +116,8 @@ fun PresetEditScreen(vm: RemoteViewModel, number: Int, onDone: () -> Unit) {
                 }
                 problem != null -> problem to StatusRed
                 block != null -> block to StatusRed
+                dropped.isNotEmpty() -> "${dropped.joinToString("、")}は Quest ごとの設定のため、保存するとプリセットから外れます" to
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 else -> " " to MaterialTheme.colorScheme.onSurfaceVariant
             }
             Column(Modifier.fillMaxWidth().height(40.dp)) {
@@ -143,7 +150,7 @@ private fun StepRow(
             TextButton(onClick = onDown, modifier = Modifier.width(48.dp)) { Text("↓") }
             TextButton(onClick = onRemove, modifier = Modifier.width(56.dp)) { Text("削除") }
         }
-        OptionChooser(DemoCatalog.activeOptionsFor(step.demoId, step.options), step.options) {
+        OptionChooser(DemoCatalog.stepOptionsFor(step.demoId, step.options), step.options) {
             // Drop values of options that no longer apply (e.g. Volley's tutorial after switching to the match).
             onChange(step.copy(options = DemoCatalog.applicableOptions(step.demoId, it)))
         }
@@ -156,7 +163,7 @@ private fun StepRow(
 
 /**
  * One row per descriptor option of a demo, one chip per value; a missing key shows its descriptor default as chosen
- * ([DemoCatalog.chosenValue], [DemoCatalog.withChoice]). Shared by the preset editor and the single-demo start. Demos
+ * ([DemoCatalog.chosenValue], [DemoCatalog.withChoice]). Shared by the preset editor and the per-demo settings. Demos
  * without options show nothing.
  */
 @Composable
