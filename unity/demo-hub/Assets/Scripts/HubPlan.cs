@@ -46,18 +46,19 @@ namespace Hapbeat.DemoHub
         /// <summary>Increased on every save of the preset (<see cref="HubPlanStore.SavePreset"/>), by the editor or PRESET_SET.</summary>
         public long Revision { get; set; }
 
-        /// <summary>One-step plan for a demo tile: descriptor default options, retry offered.</summary>
+        /// <summary>One-step plan for a demo tile: no options of its own (the per-demo settings decide them), retry offered.</summary>
         public static HubPlan Single(DemoSessionDescriptor descriptor)
         {
             var plan = new HubPlan();
-            plan.Add(descriptor);
+            plan.Steps.Add(new HubPlanStep(descriptor.DemoId, null, true));
             return plan;
         }
 
+        /// <summary>Appends a step with the descriptor defaults of its session options (a preset never holds `scope: device` ones).</summary>
         public bool Add(DemoSessionDescriptor descriptor)
         {
             if (Steps.Count >= MaxSteps) return false;
-            var options = descriptor.Options.ToDictionary(o => o.Id, o => o.Default, StringComparer.Ordinal);
+            var options = descriptor.Options.Where(o => !o.IsDevice).ToDictionary(o => o.Id, o => o.Default, StringComparer.Ordinal);
             Steps.Add(new HubPlanStep(descriptor.DemoId, options, true));
             return true;
         }
@@ -95,12 +96,12 @@ namespace Hapbeat.DemoHub
 
         public void ToggleRetry(int index) => Steps[index].Retry = !Steps[index].Retry;
 
-        /// <summary>Advances an active option to its next value, wrapping around.</summary>
+        /// <summary>Advances an active session option to its next value, wrapping around (a preset holds no device option).</summary>
         public bool CycleOption(int index, DemoSessionDescriptor descriptor, string optionId)
         {
             var step = Steps[index];
             var option = descriptor.FindOption(optionId);
-            if (option == null || !descriptor.IsActive(option, step.Options)) return false;
+            if (option == null || option.IsDevice || !descriptor.IsActive(option, step.Options)) return false;
             var current = Value(step, option);
             var position = option.Values.ToList().FindIndex(v => v.Value == current);
             step.Options[option.Id] = option.Values[(position + 1) % option.Values.Count].Value;
@@ -110,9 +111,12 @@ namespace Hapbeat.DemoHub
         public static string Value(HubPlanStep step, DemoSessionOption option) =>
             step.Options.TryGetValue(option.Id, out var value) && option.HasValue(value) ? value : option.Default;
 
-        /// <summary>Options shown as chips: active under the step's current values. Inactive ones are hidden.</summary>
+        /// <summary>
+        /// Options shown as chips: the session options active under the step's current values. Inactive ones are hidden, and
+        /// `scope: device` ones belong to the per-demo settings, not to a step.
+        /// </summary>
         public static IReadOnlyList<DemoSessionOption> VisibleOptions(HubPlanStep step, DemoSessionDescriptor descriptor) =>
-            descriptor.Options.Where(o => descriptor.IsActive(o, step.Options)).ToList();
+            descriptor.Options.Where(o => !o.IsDevice && descriptor.IsActive(o, step.Options)).ToList();
 
         /// <summary>
         /// "Volley ブロック 3点先取": the application name (<see cref="DemoSessionCatalogEntry.DisplayName"/>)
@@ -154,34 +158,64 @@ namespace Hapbeat.DemoHub
             catalog.FirstOrDefault(e => e.Descriptor.DemoId == demoId);
 
         /// <summary>
-        /// Ticket at index 0 for the installed steps. Options contain exactly the active options
-        /// (contract). <paramref name="narrationVolume"/> null omits `narration_volume` (<see cref="HubSettings.TicketNarrationVolume"/>).
+        /// Ticket at index 0 for the installed steps. Options contain exactly the active options (contract), resolved with
+        /// <paramref name="demoSettings"/> (contracts "デモごとの設定"): a `scope: device` option always has the per-demo value (a
+        /// step's own value is ignored with a warning); a session option has the step's value, else the per-demo value.
+        /// <paramref name="narrationVolume"/> null omits `narration_volume` (<see cref="HubSettings.TicketNarrationVolume"/>).
         /// Returns null when no step is installed.
         /// </summary>
         public DemoSessionTicket BuildTicket(IReadOnlyList<DemoSessionCatalogEntry> catalog, DemoSessionComponent finish, string sessionId, bool hapticsUi,
-            DemoHandStyle handStyle, bool recenterUi, int? narrationVolume)
+            DemoHandStyle handStyle, bool recenterUi, int? narrationVolume, HubDemoSettings demoSettings)
         {
             var steps = new List<DemoSessionStep>();
             foreach (var step in Steps)
             {
                 var entry = Find(catalog, step.DemoId);
                 if (entry == null) continue;
-                var options = entry.Descriptor.Normalize(step.Options.Where(p => entry.Descriptor.FindOption(p.Key) != null)
-                    .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), null);
-                steps.Add(new DemoSessionStep(step.DemoId, Title(step, entry), entry.PackageName, entry.ActivityName, options, step.Retry));
+                var resolved = new HubPlanStep(step.DemoId, ResolveOptions(step, entry.Descriptor, demoSettings), step.Retry);
+                var options = entry.Descriptor.Normalize(resolved.Options, null);
+                steps.Add(new DemoSessionStep(step.DemoId, Title(resolved, entry), entry.PackageName, entry.ActivityName, options, step.Retry));
             }
             return steps.Count == 0 ? null : new DemoSessionTicket(sessionId, 0, hapticsUi, steps, finish, handStyle, recenterUi, narrationVolume);
         }
 
         /// <summary>
-        /// A preset written by PRESET_SET: the steps with their options as given (checked by <see cref="Check"/>) and the
-        /// name; the revision is set by the caller.
+        /// Every option of <paramref name="descriptor"/> for one launch of <paramref name="step"/>: device options from the per-demo
+        /// settings, session options from the step when it holds a valid value, else from the per-demo settings.
         /// </summary>
-        public static HubPlan FromPreset(string name, IReadOnlyList<DemoSwitchPresetStep> steps)
+        public static Dictionary<string, string> ResolveOptions(HubPlanStep step, DemoSessionDescriptor descriptor, HubDemoSettings demoSettings)
+        {
+            var saved = demoSettings.Values(descriptor);
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var option in descriptor.Options)
+            {
+                var held = step.Options.TryGetValue(option.Id, out var value);
+                if (option.IsDevice)
+                {
+                    if (held) Debug.LogWarning("[Demo Hub] " + step.DemoId + ": " + option.Id + " is this headset's per-demo setting; the step's value " + value + " is ignored.");
+                    result[option.Id] = saved[option.Id];
+                }
+                else result[option.Id] = held && option.HasValue(value) ? value : saved[option.Id];
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// A preset written by PRESET_SET: the steps with their options as given (checked by <see cref="Check"/>) except the
+        /// `scope: device` ones, which a preset never holds; the name; the revision is set by the caller.
+        /// </summary>
+        public static HubPlan FromPreset(string name, IReadOnlyList<DemoSwitchPresetStep> steps, IReadOnlyList<DemoSessionCatalogEntry> catalog)
         {
             var plan = new HubPlan { Name = name ?? string.Empty };
             foreach (var step in steps.Take(MaxSteps))
-                plan.Steps.Add(new HubPlanStep(step.DemoId, step.Options.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), step.Retry));
+            {
+                var descriptor = Find(catalog, step.DemoId)?.Descriptor;
+                var options = step.Options.Where(p => descriptor?.FindOption(p.Key)?.IsDevice != true)
+                    .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+                if (options.Count < step.Options.Count)
+                    Debug.LogWarning("[Demo Hub] PRESET_SET: per-demo settings of " + step.DemoId + " are not stored in a preset.");
+                plan.Steps.Add(new HubPlanStep(step.DemoId, options, step.Retry));
+            }
             return plan;
         }
 
@@ -267,6 +301,8 @@ namespace Hapbeat.DemoHub
     {
         public const int PresetCount = 3;
         public const string SettingsSlot = "hub-settings";
+        /// <summary>The per-demo settings (<see cref="HubDemoSettings"/>), next to the Hub settings.</summary>
+        public const string DemoSettingsSlot = "demo-settings";
         /// <summary>The planner Hub's auto-saved plan; moved to preset 1 once, when the launcher first runs.</summary>
         public const string LegacyLastSlot = "last";
         private readonly string _directory;
@@ -325,6 +361,17 @@ namespace Hapbeat.DemoHub
             SaveSettings(settings);
             return settings;
         }
+
+        /// <summary>Saved per-demo settings, or none (every demo at its descriptor defaults).</summary>
+        public HubDemoSettings LoadDemoSettings() =>
+            TryRead(DemoSettingsSlot, out var text) && HubDemoSettings.TryFromJson(text, out var demoSettings) ? demoSettings : new HubDemoSettings();
+
+        /// <summary>
+        /// Saves the per-demo settings, then the Hub settings with their revision increased (the counter DEMO_SETTINGS and
+        /// HUB_SETTINGS share); false when either write failed.
+        /// </summary>
+        public bool SaveDemoSettings(HubDemoSettings demoSettings, HubSettings settings) =>
+            Write(DemoSettingsSlot, demoSettings.ToJson()) && SaveSettings(settings);
 
         public bool Exists(string slot) => File.Exists(PathFor(slot));
 

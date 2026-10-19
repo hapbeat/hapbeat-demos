@@ -90,6 +90,114 @@ namespace Hapbeat.DemoHub
         }
     }
 
+    /// <summary>
+    /// The per-demo settings (contracts demo-session.md "デモごとの設定"): for each demo, the value of every descriptor option
+    /// (both scopes), used by every launch of that demo from this Hub. Changed on the manage screen's デモのタイル tab and with
+    /// DEMO_SETTINGS_SET; stored as demo-settings.json. A value the descriptor no longer has is the default again, with a
+    /// warning; a demo whose DEMO_SETTINGS could exceed 1024 bytes (<see cref="DemoSwitchHub.FitsDemoSettings"/>) is kept out
+    /// and always launches with its descriptor defaults. Values of demos that are not installed are kept.
+    /// </summary>
+    public sealed class HubDemoSettings
+    {
+        private readonly Dictionary<string, Dictionary<string, string>> _values =
+            new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Every option of <paramref name="descriptor"/>: the stored value when it is one of the option's values, else the
+        /// default (only defaults for a descriptor kept out of the per-demo settings).
+        /// </summary>
+        public Dictionary<string, string> Values(DemoSessionDescriptor descriptor)
+        {
+            var stored = DemoSwitchHub.FitsDemoSettings(descriptor) && _values.TryGetValue(descriptor.DemoId, out var held) ? held : null;
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var option in descriptor.Options)
+                result[option.Id] = stored != null && stored.TryGetValue(option.Id, out var value) && option.HasValue(value) ? value : option.Default;
+            return result;
+        }
+
+        /// <summary>Stores the given values of one demo; its other options keep theirs.</summary>
+        public void Set(string demoId, IReadOnlyDictionary<string, string> values)
+        {
+            if (!_values.TryGetValue(demoId, out var stored)) _values[demoId] = stored = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var pair in values) stored[pair.Key] = pair.Value;
+        }
+
+        /// <summary>A copy, to restore when a save fails.</summary>
+        public HubDemoSettings Clone()
+        {
+            var copy = new HubDemoSettings();
+            foreach (var pair in _values) copy.Set(pair.Key, pair.Value);
+            return copy;
+        }
+
+        /// <summary>
+        /// Once the catalog is known: logs and drops stored values that the installed descriptors no longer have (an unknown
+        /// option or value is the default again), and warns about every descriptor kept out of the per-demo settings.
+        /// </summary>
+        public void Check(IReadOnlyList<DemoSessionCatalogEntry> catalog)
+        {
+            foreach (var entry in catalog)
+            {
+                var descriptor = entry.Descriptor;
+                if (!DemoSwitchHub.FitsDemoSettings(descriptor))
+                {
+                    Debug.LogWarning("[Demo Hub] " + descriptor.DemoId + ": its DEMO_SETTINGS could exceed 1024 bytes (long option IDs or values); " +
+                        "it has no per-demo settings and launches with its descriptor defaults.");
+                    continue;
+                }
+                if (!_values.TryGetValue(descriptor.DemoId, out var stored)) continue;
+                foreach (var pair in stored.ToList())
+                {
+                    var option = descriptor.FindOption(pair.Key);
+                    if (option != null && option.HasValue(pair.Value)) continue;
+                    Debug.LogWarning("[Demo Hub] " + descriptor.DemoId + ": the saved setting " + pair.Key + "=" + pair.Value +
+                        " is not in its descriptor; " + (option == null ? "it is dropped." : "the default " + option.Default + " is used."));
+                    stored.Remove(pair.Key);
+                }
+            }
+        }
+
+        private static bool IsIdentifier(string value) =>
+            value != null && System.Text.RegularExpressions.Regex.IsMatch(value, @"^[a-z0-9][a-z0-9._-]{0,63}\z");
+
+        public string ToJson()
+        {
+            var demos = new JObject();
+            foreach (var demo in _values.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                var options = new JObject();
+                foreach (var pair in demo.Value.OrderBy(p => p.Key, StringComparer.Ordinal)) options[pair.Key] = pair.Value;
+                demos[demo.Key] = options;
+            }
+            return new JObject { ["version"] = 1, ["demos"] = demos }.ToString(Formatting.Indented);
+        }
+
+        public static bool TryFromJson(string json, out HubDemoSettings demoSettings)
+        {
+            demoSettings = null;
+            try
+            {
+                var root = JObject.Parse(json);
+                if (root.Value<int?>("version") != 1 || !(root["demos"] is JObject demos)) return false;
+                var result = new HubDemoSettings();
+                foreach (var demo in demos.Properties())
+                {
+                    if (!IsIdentifier(demo.Name) || !(demo.Value is JObject options)) continue;
+                    var values = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var option in options.Properties())
+                        if (IsIdentifier(option.Name) && option.Value.Type == JTokenType.String) values[option.Name] = option.Value.Value<string>();
+                    result.Set(demo.Name, values);
+                }
+                demoSettings = result;
+                return true;
+            }
+            catch (Exception exception) when (exception is JsonException || exception is InvalidCastException || exception is FormatException)
+            {
+                return false;
+            }
+        }
+    }
+
     /// <summary>What the top screen offers: shown presets (1-based numbers) and demo tiles, in display order.</summary>
     public sealed class HubTopItems
     {
@@ -309,12 +417,13 @@ namespace Hapbeat.DemoHub
         /// <summary>
         /// The session's ticket, as the top screen would start it: a preset's installed steps, one step of
         /// <see cref="DemoId"/> with the given options and retry on, or the external plan's <see cref="Steps"/> with their
-        /// options and retry (unknown options and values become the descriptor defaults, with a warning); finish = this Hub,
+        /// options and retry (options not given, and unknown options and values with a warning, come from the per-demo
+        /// settings <paramref name="demoSettings"/>, which also decide every `scope: device` option); finish = this Hub,
         /// and the manage screen's haptics UI, 視線をリセット, hand style and narration volume. Null with <paramref name="error"/> (shown on the
         /// top screen) when nothing installed can start, or when any external plan step is not installed.
         /// </summary>
         public DemoSessionTicket BuildTicket(IReadOnlyList<HubPlan> presets, IReadOnlyList<DemoSessionCatalogEntry> catalog,
-            DemoSessionComponent finish, string sessionId, HubSettings settings, out string error)
+            DemoSessionComponent finish, string sessionId, HubSettings settings, HubDemoSettings demoSettings, out string error)
         {
             HubPlan plan;
             if (Steps != null)
@@ -329,10 +438,9 @@ namespace Hapbeat.DemoHub
                         error = StepPrefix(index) + HubText.StartNotInstalled + given.DemoId;
                         return null;
                     }
-                    plan.Add(entry.Descriptor);
-                    var step = plan.Steps[index];
+                    var step = new HubPlanStep(given.DemoId, null, given.Retry);
+                    plan.Steps.Add(step);
                     ApplyOptions(step, entry.Descriptor, given.Options);
-                    step.Retry = given.Retry;
                 }
                 error = null;
             }
@@ -354,12 +462,12 @@ namespace Hapbeat.DemoHub
                 error = HubText.StartNotInstalled + DemoId;
             }
             var ticket = plan.BuildTicket(catalog, finish, sessionId, settings.HapticsUi, settings.HandStyle, settings.RecenterUi,
-                settings.TicketNarrationVolume);
+                settings.TicketNarrationVolume, demoSettings);
             if (ticket != null) error = null;
             return ticket;
         }
 
-        /// <summary>Sets the given options on <paramref name="step"/>; an unknown option or value keeps the default, with a warning.</summary>
+        /// <summary>Sets the given options on <paramref name="step"/>; an unknown option or value is left to the per-demo settings, with a warning.</summary>
         private static void ApplyOptions(HubPlanStep step, DemoSessionDescriptor descriptor, IReadOnlyDictionary<string, string> options)
         {
             foreach (var pair in options)
@@ -367,7 +475,7 @@ namespace Hapbeat.DemoHub
                 var option = descriptor.FindOption(pair.Key);
                 if (option == null || !option.HasValue(pair.Value))
                 {
-                    Debug.LogWarning("[Demo Hub] External start: option " + pair.Key + "=" + pair.Value + " is unknown for " + step.DemoId + "; the default is used.");
+                    Debug.LogWarning("[Demo Hub] External start: option " + pair.Key + "=" + pair.Value + " is unknown for " + step.DemoId + "; the per-demo setting is used.");
                     continue;
                 }
                 step.Options[pair.Key] = pair.Value;

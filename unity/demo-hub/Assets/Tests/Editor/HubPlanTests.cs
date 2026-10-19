@@ -167,7 +167,7 @@ namespace Hapbeat.DemoHub.Tests
         [Test]
         public void PresetStepsKeepTheStoredOptionsIncludingUninstalledDemos()
         {
-            var plan = HubPlan.FromPreset("A", new[] { Step("handdemo", ("tutorial", "on")), new DemoSwitchPresetStep("volley", null, false) });
+            var plan = HubPlan.FromPreset("A", new[] { Step("handdemo", ("tutorial", "on")), new DemoSwitchPresetStep("volley", null, false) }, _catalog);
             plan.Steps[1].Options["Bad Key"] = "x";
             var steps = plan.PresetSteps();
             Assert.That(plan.Name, Is.EqualTo("A"));
@@ -188,7 +188,7 @@ namespace Hapbeat.DemoHub.Tests
             plan.ToggleRetry(2);
             plan.Add(_trex);
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
-            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Skin, false, null);
+            var ticket = plan.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Skin, false, null, new HubDemoSettings());
             Assert.That(DemoSessionTicket.TryParse(ticket.ToJson(), out var parsed, out var error), Is.True, error);
             Assert.That(parsed.Index, Is.Zero);
             Assert.That(parsed.HapticsUi, Is.False);
@@ -206,7 +206,7 @@ namespace Hapbeat.DemoHub.Tests
 
             var empty = new HubPlan();
             empty.Steps.Add(new HubPlanStep("not-installed", null, true));
-            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null), Is.Null);
+            Assert.That(empty.BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, new HubDemoSettings()), Is.Null);
         }
 
         [Test]

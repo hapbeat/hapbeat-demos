@@ -30,6 +30,11 @@ namespace Hapbeat.DemoHub
         public const string ShowOnTopOff = "トップに表示：しない";
         public const string TileOn = "表示する";
         public const string TileOff = "表示しない";
+        public const string DemoSettingsHeading = "デモの設定";
+        public const string DemoSettingsHint = "デモの名前を押すと、そのデモの設定をここで変えられます。どこから起動しても、この設定で始まります。";
+        public const string DeviceSettings = "この Quest の設定";
+        public const string NoOptions = "設定できる項目がありません";
+        public const string DemoSettingsUnavailable = "このデモの設定は変えられません（項目の名前が長すぎます）";
         public const string Catalog = "カタログ（タップで追加）";
         public const string PlanHeading = "プラン（{0} / {1}）";
         public const string EmptyPlan = "プランが空です。左のカタログからデモを追加してください。";
@@ -150,6 +155,8 @@ namespace Hapbeat.DemoHub
         private IReadOnlyList<DemoSessionCatalogEntry> _catalog;
         private int _tab;
         private int _selectedStep = -1;
+        private int _selectedDemo = -1;
+        private HubDemoSettings _demoSettings = new HubDemoSettings();
         private int _flashStep = -1;
         private string _status = string.Empty;
         private bool _placed;
@@ -173,6 +180,10 @@ namespace Hapbeat.DemoHub
         internal int Tab => _tab;
         /// <summary>Plan row whose options the manage screen edits (-1: none).</summary>
         internal int SelectedStep => _selectedStep;
+        /// <summary>Catalog index whose per-demo settings the デモのタイル tab edits (-1: none).</summary>
+        internal int SelectedDemo => _selectedDemo;
+        /// <summary>The per-demo settings every launch uses (contracts "デモごとの設定").</summary>
+        internal HubDemoSettings DemoSettings => _demoSettings;
         /// <summary>The panel has its final place (head tracking was valid); it moves again only on 視線をリセット or a system recenter.</summary>
         internal bool Placed => _placed;
 
@@ -220,7 +231,7 @@ namespace Hapbeat.DemoHub
                 ShowTopWithStatus(HubText.StartRejected + error);
                 return;
             }
-            var ticket = request.BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, out error);
+            var ticket = request.BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, _demoSettings, out error);
             if (ticket == null)
             {
                 Debug.LogWarning("[Demo Hub] External start rejected: " + error);
@@ -244,6 +255,8 @@ namespace Hapbeat.DemoHub
             _store = store;
             Settings = _store.LoadSettings();
             for (var number = 1; number <= HubPlanStore.PresetCount; number++) _presets[number - 1] = _store.LoadPreset(number);
+            _demoSettings = _store.LoadDemoSettings();
+            _demoSettings.Check(_catalog);
             ApplyHandStyle();
             ApplyRecenterUi();
         }
@@ -460,10 +473,10 @@ namespace Hapbeat.DemoHub
 
         internal void StartPreset(int number) => TryStartPreset(number, null, out _);
 
-        /// <summary>A demo tile is a one-step session: descriptor defaults, retry, finish = this Hub.</summary>
+        /// <summary>A demo tile is a one-step session: the per-demo settings, retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
             Launch(HubPlan.Single(entry.Descriptor).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
-                Settings.TicketNarrationVolume));
+                Settings.TicketNarrationVolume, _demoSettings));
 
         private static DemoSessionComponent Finish() =>
             DemoSessionCatalog.TryGetOwnComponent(out var finish) ? finish : new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
@@ -514,7 +527,7 @@ namespace Hapbeat.DemoHub
         internal Vector2 ManageSize => new Vector2(
             Mathf.Max(Margin + CatalogColumns * (CatalogWidth + ColumnGap) + PlanColumns * PlanColumnWidth + (PlanColumns - 1) * ColumnGap + ColumnGap + EditorWidth + Margin,
                 Margin + 4f * (FooterButtonWidth + FooterGap) + HapticsTestWidth + FooterGap + DoneWidth + Margin,
-                Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + Margin),
+                Margin + CatalogColumns * TilesColumnWidth - 2f * ColumnGap + ColumnGap + EditorWidth + Margin),
             Margin + BarHeight + 8f + HeadingHeight + GridHeight(GridRows) + 8f + BarHeight + FooterGap + BarHeight + 4f + StatusHeight + 4f + StatusHeight + Margin);
 
         /// <summary>Rows of the current tab: its longest column.</summary>
@@ -523,7 +536,7 @@ namespace Hapbeat.DemoHub
             get
             {
                 var catalogRows = Mathf.Min(_catalog.Count, RowsPerColumn);
-                if (_tab == TilesTab) return Mathf.Max(1, catalogRows);
+                if (_tab == TilesTab) return Mathf.Max(Mathf.Max(1, catalogRows), DemoSettingsRows);
                 var plan = EditedPlan;
                 var editorRows = HintRows;
                 if (_selectedStep >= 0 && _selectedStep < plan.Steps.Count)
@@ -536,6 +549,27 @@ namespace Hapbeat.DemoHub
         }
 
         private const float TilesColumnWidth = TileLabelWidth + ButtonGap + TileToggleWidth + 2f * ColumnGap;
+
+        /// <summary>Rows of the デモのタイル tab's settings column: the demo's name, its session options, then the device ones under their heading.</summary>
+        private int DemoSettingsRows
+        {
+            get
+            {
+                if (_selectedDemo < 0 || _selectedDemo >= _catalog.Count) return HintRows;
+                var descriptor = _catalog[_selectedDemo].Descriptor;
+                if (!DemoSwitchHub.FitsDemoSettings(descriptor)) return 1 + HintRows;
+                var shown = ShownDemoOptions(descriptor);
+                var device = shown.Count(o => o.IsDevice);
+                return shown.Count == 0 ? 2 : 1 + shown.Count + (device > 0 ? 1 : 0);
+            }
+        }
+
+        /// <summary>The options of the デモのタイル tab: active under the saved values, session options first, then device options.</summary>
+        private List<DemoSessionOption> ShownDemoOptions(DemoSessionDescriptor descriptor)
+        {
+            var values = _demoSettings.Values(descriptor);
+            return descriptor.Options.Where(o => descriptor.IsActive(o, values)).OrderBy(o => o.IsDevice ? 1 : 0).ToList();
+        }
 
         private static float GridHeight(int rows) => rows * (RowHeight + RowGap) - RowGap;
 
@@ -634,6 +668,7 @@ namespace Hapbeat.DemoHub
         {
             _tab = Mathf.Clamp(tab, 0, TilesTab);
             _selectedStep = -1;
+            _selectedDemo = -1;
             _status = string.Empty;
             Rebuild();
         }
@@ -831,24 +866,33 @@ namespace Hapbeat.DemoHub
                 () => { plan.ToggleRetry(i); PlanChanged(); }).Highlighted = step.Retry;
         }
 
-        /// <summary>Every installed demo with its top-screen toggle, in columns of 16 rows.</summary>
+        /// <summary>
+        /// Every installed demo with its top-screen toggle, in columns of 16 rows; pressing a demo's name shows its per-demo
+        /// settings in the column on the right (each press changes and saves at once).
+        /// </summary>
         private void BuildTilesTab(Vector2 size)
         {
             var left = -size.x * 0.5f + Margin;
             var headingY = size.y * 0.5f - Margin - BarHeight - 8f - HeadingHeight * 0.5f;
-            _panel.AddText(new Vector2(0, headingY), new Vector2(size.x - 2f * Margin, HeadingHeight), HubText.TilesHeading, 16, Muted, TextAnchor.MiddleLeft);
+            var tilesWidth = CatalogColumns * TilesColumnWidth - 2f * ColumnGap;
+            _panel.AddText(new Vector2(left + tilesWidth * 0.5f, headingY), new Vector2(tilesWidth, HeadingHeight), HubText.TilesHeading, 16, Muted, TextAnchor.MiddleLeft);
+            var editorX = left + tilesWidth + ColumnGap + EditorWidth * 0.5f;
+            _panel.AddText(new Vector2(editorX, headingY), new Vector2(EditorWidth, HeadingHeight), HubText.DemoSettingsHeading, 16, Muted, TextAnchor.MiddleLeft);
             if (_catalog.Count == 0)
             {
-                _panel.AddText(new Vector2(0, GridTop - RowHeight * 0.5f), new Vector2(size.x - 2f * Margin, RowHeight), HubText.NoDemos, 19, Color.white);
+                _panel.AddText(new Vector2(left + tilesWidth * 0.5f, GridTop - RowHeight * 0.5f), new Vector2(tilesWidth, RowHeight), HubText.NoDemos, 19, Color.white);
                 return;
             }
             const float columnWidth = TileLabelWidth + ButtonGap + TileToggleWidth + 2f * ColumnGap;
             for (var index = 0; index < _catalog.Count; index++)
             {
                 var entry = _catalog[index];
+                var i = index;
                 var columnLeft = left + (index / RowsPerColumn) * columnWidth;
                 var y = RowCentreY(GridTop, index % RowsPerColumn);
-                _panel.AddText(new Vector2(columnLeft + TileLabelWidth * 0.5f, y), new Vector2(TileLabelWidth, RowHeight), entry.DisplayName, 17, Color.white, TextAnchor.MiddleLeft);
+                var name = _panel.AddButton(new Vector2(columnLeft + TileLabelWidth * 0.5f, y), new Vector2(TileLabelWidth, RowHeight), entry.DisplayName, 17, () => SelectDemo(i));
+                name.Text.alignment = TextAnchor.MiddleLeft;
+                name.Highlighted = index == _selectedDemo;
                 var visible = Settings.VisibleDemos.Contains(entry.Descriptor.DemoId);
                 _panel.AddButton(new Vector2(columnLeft + TileLabelWidth + ButtonGap + TileToggleWidth * 0.5f, y), new Vector2(TileToggleWidth, RowHeight),
                     visible ? HubText.TileOn : HubText.TileOff, 17, () =>
@@ -857,6 +901,58 @@ namespace Hapbeat.DemoHub
                         SettingsChanged();
                     }).Highlighted = visible;
             }
+            BuildDemoSettings(editorX, GridTop);
+        }
+
+        internal void SelectDemo(int index)
+        {
+            _selectedDemo = index >= 0 && index < _catalog.Count && index != _selectedDemo ? index : -1;
+            Rebuild();
+        }
+
+        /// <summary>The selected demo's name, its session options, then under 「この Quest の設定」 its `scope: device` options.</summary>
+        private void BuildDemoSettings(float x, float gridTop)
+        {
+            if (_selectedDemo < 0 || _selectedDemo >= _catalog.Count)
+            {
+                _panel.AddText(new Vector2(x, gridTop - 60f), new Vector2(EditorWidth, 120), HubText.DemoSettingsHint, 15, Muted, TextAnchor.UpperLeft);
+                return;
+            }
+            var entry = _catalog[_selectedDemo];
+            var descriptor = entry.Descriptor;
+            _panel.AddText(new Vector2(x, RowCentreY(gridTop, 0)), new Vector2(EditorWidth, RowHeight), entry.DisplayName, 16, Color.white, TextAnchor.MiddleLeft);
+            if (!DemoSwitchHub.FitsDemoSettings(descriptor))
+            {
+                _panel.AddText(new Vector2(x, gridTop - RowHeight - RowGap - 60f), new Vector2(EditorWidth, 120), HubText.DemoSettingsUnavailable, 15, Warning, TextAnchor.UpperLeft);
+                return;
+            }
+            var values = _demoSettings.Values(descriptor);
+            var shown = ShownDemoOptions(descriptor);
+            var row = 1;
+            if (shown.Count == 0)
+                _panel.AddText(new Vector2(x, RowCentreY(gridTop, row)), new Vector2(EditorWidth, RowHeight), HubText.NoOptions, 15, Muted, TextAnchor.MiddleLeft);
+            var deviceHeading = false;
+            foreach (var option in shown)
+            {
+                if (option.IsDevice && !deviceHeading)
+                {
+                    _panel.AddText(new Vector2(x, RowCentreY(gridTop, row++)), new Vector2(EditorWidth, RowHeight), HubText.DeviceSettings, 15, Muted, TextAnchor.MiddleLeft);
+                    deviceHeading = true;
+                }
+                var selected = option;
+                _panel.AddButton(new Vector2(x, RowCentreY(gridTop, row++)), new Vector2(EditorWidth, RowHeight),
+                    option.Label.Ja + "：" + option.Find(values[option.Id]).Label.Ja, 16, () => CycleDemoSetting(descriptor, selected));
+            }
+        }
+
+        /// <summary>Advances one per-demo setting to its next value, wrapping around, and saves at once.</summary>
+        internal void CycleDemoSetting(DemoSessionDescriptor descriptor, DemoSessionOption option)
+        {
+            var current = _demoSettings.Values(descriptor)[option.Id];
+            var position = option.Values.ToList().FindIndex(v => v.Value == current);
+            var next = option.Values[(position + 1) % option.Values.Count].Value;
+            _status = TryStoreDemoSettings(descriptor.DemoId, new Dictionary<string, string> { [option.Id] = next }, out _) ? string.Empty : HubText.SaveFailed;
+            Rebuild();
         }
 
         private void PlanChanged()
@@ -873,7 +969,7 @@ namespace Hapbeat.DemoHub
 
         // ------------------------------------------------- Demo Switch presets
 
-        /// <summary>Staff are editing: PRESET_SET / PRESET_START / HUB_SETTINGS_SET / HUB_START are refused (the receiver also refuses during a launch).</summary>
+        /// <summary>Staff are editing: PRESET_SET / PRESET_START / HUB_SETTINGS_SET / DEMO_SETTINGS_SET / HUB_START are refused (the receiver also refuses during a launch).</summary>
         public bool IsBusy => Screen == HubScreen.Manage;
 
         /// <summary>STATE `screen`: the top screen is `main`, the finish screen `completion`.</summary>
@@ -891,7 +987,7 @@ namespace Hapbeat.DemoHub
         /// <summary>Stores the preset with its revision increased, `visible` as the top-screen choice, and rebuilds the screen.</summary>
         public bool TryStorePreset(int number, string name, bool visible, IReadOnlyList<DemoSwitchPresetStep> steps, out string error)
         {
-            var plan = HubPlan.FromPreset(name, steps);
+            var plan = HubPlan.FromPreset(name, steps, _catalog);
             plan.Revision = _presets[number - 1].Revision;
             if (!_store.SavePreset(plan, number))
             {
@@ -915,7 +1011,7 @@ namespace Hapbeat.DemoHub
         /// <summary>The top screen's preset start: the Hub-wide launch settings apply.</summary>
         public bool TryStartPreset(int number, Action<string> onFailed, out string error) =>
             TryLaunch(_presets[number - 1].BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
-                Settings.TicketNarrationVolume), onFailed, out error);
+                Settings.TicketNarrationVolume, _demoSettings), onFailed, out error);
 
         // ------------------------------------------ Demo Switch Hub settings
 
@@ -964,6 +1060,54 @@ namespace Hapbeat.DemoHub
             return error == null;
         }
 
+        // ------------------------------------------ Demo Switch Demo settings
+
+        /// <summary>
+        /// DEMO_SETTINGS: every option of an installed demo with its per-demo value; a demo that is not installed has none, and
+        /// neither has one kept out of the per-demo settings (<see cref="DemoSwitchHub.FitsDemoSettings"/>).
+        /// </summary>
+        public DemoSwitchDemoSettings ReadDemoSettings(string demoId)
+        {
+            var entry = HubPlan.Find(_catalog, demoId);
+            if (entry == null) return new DemoSwitchDemoSettings(Settings.Revision, false, null);
+            return new DemoSwitchDemoSettings(Settings.Revision, true,
+                DemoSwitchHub.FitsDemoSettings(entry.Descriptor) ? _demoSettings.Values(entry.Descriptor) : null);
+        }
+
+        /// <summary>DEMO_SETTINGS_SET: the target must be installed (and have per-demo settings), every option and value in its descriptor.</summary>
+        public DemoSwitchPresetCheck CheckDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string offending)
+        {
+            var entry = HubPlan.Find(_catalog, demoId);
+            offending = demoId;
+            if (entry == null || !DemoSwitchHub.FitsDemoSettings(entry.Descriptor)) return DemoSwitchPresetCheck.NotInstalled;
+            foreach (var pair in settings)
+            {
+                var option = entry.Descriptor.FindOption(pair.Key);
+                offending = pair.Key;
+                if (option == null || !option.HasValue(pair.Value)) return DemoSwitchPresetCheck.UnknownOption;
+            }
+            offending = null;
+            return DemoSwitchPresetCheck.Ok;
+        }
+
+        /// <summary>
+        /// Stores the given per-demo values (the demo's other options keep theirs), increasing the revision; a failed save keeps
+        /// the previous values. The manage screen and DEMO_SETTINGS_SET.
+        /// </summary>
+        public bool TryStoreDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string error)
+        {
+            var previous = _demoSettings.Clone();
+            _demoSettings.Set(demoId, settings);
+            if (_store.SaveDemoSettings(_demoSettings, Settings))
+            {
+                error = null;
+                return true;
+            }
+            _demoSettings = previous;
+            error = "Could not save the per-demo settings.";
+            return false;
+        }
+
         /// <summary>CONTROL `hand_style_*`: the manage screen's hand toggle (Hub-wide, saved with the revision increased).</summary>
         public bool TrySetHandStyle(DemoHandStyle style, out string error)
         {
@@ -982,7 +1126,7 @@ namespace Hapbeat.DemoHub
         /// <summary>HUB_START: the same ticket as the start extra `steps` (Hub-wide launch settings, finish = this Hub, nothing stored).</summary>
         public bool TryStartSteps(IReadOnlyList<DemoSwitchPresetStep> steps, Action<string> onFailed, out string error)
         {
-            var ticket = HubStartRequest.FromSteps(steps).BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, out error);
+            var ticket = HubStartRequest.FromSteps(steps).BuildTicket(_presets, _catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings, _demoSettings, out error);
             return ticket != null && TryLaunch(ticket, onFailed, out error);
         }
 
@@ -1042,7 +1186,8 @@ namespace Hapbeat.DemoHub
 
         /// <summary>
         /// Same steps as the completed ticket, new session ID, index 0, the current haptics UI, recenter UI, hand and narration settings
-        /// (also CONTROL `hub_replay`). A failure shows on the status line; <paramref name="onFailed"/> as in <see cref="TryLaunch"/>.
+        /// and per-demo `scope: device` values (also CONTROL `hub_replay`). A failure shows on the status line; <paramref name="onFailed"/>
+        /// as in <see cref="TryLaunch"/>.
         /// </summary>
         public bool TryReplay(Action<string> onFailed, out string error)
         {
@@ -1052,9 +1197,26 @@ namespace Hapbeat.DemoHub
                 error = "No finished session.";
                 return false;
             }
-            var ticket = finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle)
-                .WithRecenterUi(Settings.RecenterUi).WithNarrationVolume(Settings.TicketNarrationVolume);
+            var ticket = WithDeviceSettings(finished.WithIndex(0, Settings.HapticsUi).WithSession(DemoSessionTicket.NewSessionId()).WithHandStyle(Settings.HandStyle)
+                .WithRecenterUi(Settings.RecenterUi).WithNarrationVolume(Settings.TicketNarrationVolume));
             return TryLaunch(ticket, onFailed, out error);
+        }
+
+        /// <summary>The ticket's steps with their `scope: device` options set to the current per-demo settings.</summary>
+        internal DemoSessionTicket WithDeviceSettings(DemoSessionTicket ticket)
+        {
+            var steps = ticket.Steps.Select(step =>
+            {
+                var descriptor = HubPlan.Find(_catalog, step.DemoId)?.Descriptor;
+                if (descriptor == null || !descriptor.Options.Any(o => o.IsDevice && step.Options.ContainsKey(o.Id))) return step;
+                var saved = _demoSettings.Values(descriptor);
+                var options = step.Options.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+                foreach (var option in descriptor.Options)
+                    if (option.IsDevice && options.ContainsKey(option.Id)) options[option.Id] = saved[option.Id];
+                return new DemoSessionStep(step.DemoId, step.Title, step.PackageName, step.ActivityName, options, step.Retry);
+            }).ToList();
+            return new DemoSessionTicket(ticket.SessionId, ticket.Index, ticket.HapticsUi, steps, ticket.Finish, ticket.HandStyle, ticket.RecenterUi,
+                ticket.NarrationVolume);
         }
 
         private void OnDestroy()
