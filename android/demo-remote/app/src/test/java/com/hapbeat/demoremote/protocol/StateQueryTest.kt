@@ -101,6 +101,16 @@ class StateQueryTest {
             prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"30"}}'""",
             DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "30")),
         )
+        // Boxing's haptics trim: the cut in dB as a plain number.
+        assertEquals(
+            prefix + """'{"version":1,"demo_id":"boxing","options":{"round":"55","haptics_db":"6"}}'""",
+            DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("round" to "55", "haptics_db" to "6")),
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun hubSessionRejectsANegativeHapticsValue() {
+        DemoCatalog.hubSessionCommand(demoId = "boxing", options = mapOf("haptics_db" to "-2"))
     }
 
     @Test

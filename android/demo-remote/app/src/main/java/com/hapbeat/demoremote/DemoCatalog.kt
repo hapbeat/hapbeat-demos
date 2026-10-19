@@ -52,6 +52,8 @@ object DemoCatalog {
     )
     private val BOXING_OPTIONS = listOf(
         DemoOption("round", "ラウンド", "55", listOf(OptionValue("30", "30秒"), OptionValue("55", "55秒"))),
+        // The cut in dB as a non-negative number ("2" = -2 dB): option values cannot start with "-".
+        DemoOption("haptics_db", "触覚の強さ", "2", listOf(OptionValue("0", "0 dB"), OptionValue("2", "-2 dB"), OptionValue("4", "-4 dB"), OptionValue("6", "-6 dB"), OptionValue("9", "-9 dB"), OptionValue("12", "-12 dB"))),
     )
 
     val apps: List<DemoApp> = listOf(

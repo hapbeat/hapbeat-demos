@@ -157,6 +157,9 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(HubPlan.Check(new[] { Step("volley"), Step("boxing", ("round", "120")), Step("handdemo") }, _catalog, out demoId),
                 Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
             Assert.That(demoId, Is.EqualTo("boxing"));
+            // Boxing's haptics trim (the cut in dB as a plain number).
+            Assert.That(HubPlan.Check(new[] { Step("boxing", ("round", "55"), ("haptics_db", "6")) }, _catalog, out demoId), Is.EqualTo(DemoSwitchPresetCheck.Ok));
+            Assert.That(HubPlan.Check(new[] { Step("boxing", ("haptics_db", "-2")) }, _catalog, out demoId), Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
             Assert.That(HubPlan.Check(new[] { Step("trex-encounter", ("tutorial", "on")) }, _catalog, out demoId), Is.EqualTo(DemoSwitchPresetCheck.UnknownOption));
             Assert.That(demoId, Is.EqualTo("trex-encounter"));
         }
