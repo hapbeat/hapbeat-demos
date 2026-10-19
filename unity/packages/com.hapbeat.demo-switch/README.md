@@ -165,6 +165,8 @@ Follows contracts `dc89594` (demo-session.md "ナレーションの音量"; tick
 
 ### Tutorial demonstration hand (0.1.0-d24, opt-in)
 
+- **Wrist fade of the shared hands** (0.1.0-d26): `DemoHands.SetWristFade(side, fade)` draws that tracked hand opaque up to `fade.x` m past its wrist joint, fading out over `fade.y` (null: the look's own fade, which starts before the wrist). A demo that shows a `DemoTutorialHand` forearm (hand meshes hidden) on the player's own hand passes the forearm's `HandFadeStart` / `HandFadeLength`, so hand and forearm meet like the demonstration hand's (no translucent band at the joint); Volley's block forearms do. The property block is written afresh every frame.
+
 `DemoTutorialHand` is a posed demonstration hand with a forearm for tutorials (moved from Energy Duel's `EnergyTutorialDemo`). It changes nothing in a demo that does not add it; the player's own hands (`DemoHands`) stay as they are (no forearm).
 
 - **Setup**: one component per hand (`Left` on or off) on its own GameObject, usually inactive until shown. `PlaceholderSkeleton` (required) is the host's public placeholder hand prefab (joints named `*_<XRHandJointID>` in XR Hands axes, a `SkinnedMeshRenderer`; `PlaceholderMaterials` its look): the posable skeleton, and the hand shown when the shared hands draw no Meta mesh (public clone, `DemoHands` off, procedural fallback). The package ships no posable public hand mesh. `Scale` sets the transform's scale when the hand is built.

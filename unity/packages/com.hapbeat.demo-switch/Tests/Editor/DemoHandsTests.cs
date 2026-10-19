@@ -101,6 +101,18 @@ namespace Hapbeat.DemoSwitch.Tests
             renderer.GetPropertyBlock(block);
             Assert.That(block.GetTexture("_MainTex"), Is.Not.Null, "Baked right-hand skin.");
 
+            // A forearm joined at the wrist: the hand stays opaque up to just past the joint, then the look's own fade again.
+            hands.SetWristFade(1, new Vector2(.002f, .008f));
+            hands.ApplyHand(1, true, poses, valid);
+            renderer.GetPropertyBlock(block);
+            Assert.That(block.GetFloat("_FadeStart"), Is.EqualTo(.002f).Within(1e-6f));
+            Assert.That(block.GetFloat("_FadeLength"), Is.EqualTo(.008f).Within(1e-6f));
+            Assert.That(block.GetTexture("_MainTex"), Is.Not.Null, "The skin is still set.");
+            hands.SetWristFade(1, null);
+            hands.ApplyHand(1, true, poses, valid);
+            renderer.GetPropertyBlock(block);
+            Assert.That(block.HasFloat("_FadeStart"), Is.False, "Back to the material's fade.");
+
             hands.ApplyHand(1, false, poses, valid);
             Assert.That(hands.IsHandVisible(1), Is.False);
         }

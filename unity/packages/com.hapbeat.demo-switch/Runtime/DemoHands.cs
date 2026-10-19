@@ -46,6 +46,8 @@ namespace Hapbeat.DemoSwitch
         private static readonly int WristPositionId = Shader.PropertyToID("_WristPosition");
         private static readonly int ArmDirectionId = Shader.PropertyToID("_ArmDirection");
         private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
+        private static readonly int FadeStartId = Shader.PropertyToID("_FadeStart");
+        private static readonly int FadeLengthId = Shader.PropertyToID("_FadeLength");
         private static readonly List<XRHandSubsystem> Subsystems = new List<XRHandSubsystem>();
         private static readonly int JointCount = XRHandJointID.EndMarker.ToIndex();
 
@@ -66,6 +68,7 @@ namespace Hapbeat.DemoSwitch
         private Material[] _ghostMaterials;
         private Material[] _skinMaterials;
         private MaterialPropertyBlock _block;
+        private readonly Vector2?[] _wristFade = new Vector2?[2];
         /// <summary>Tests point these at a missing path to exercise the procedural fallback.</summary>
         internal string LeftModelPath = MetaLeftModelPath;
         internal string RightModelPath = MetaRightModelPath;
@@ -88,6 +91,17 @@ namespace Hapbeat.DemoSwitch
         /// <summary>The ticket's `hand_style` when present, otherwise <paramref name="fallback"/> (the settings' default).</summary>
         public static DemoHandStyle ResolveStyle(DemoSessionTicket ticket, DemoHandStyle fallback) =>
             ticket != null && ticket.HandStyle.HasValue ? ticket.HandStyle.Value : fallback;
+
+        /// <summary>
+        /// Hand <paramref name="side"/> (0 left, 1 right) drawn opaque up to <paramref name="fade"/>.x metres past its wrist
+        /// joint, then fading out over <paramref name="fade"/>.y (fill, depth pre-pass and outline alike), for a demo that
+        /// joins a forearm there, such as a <see cref="DemoTutorialHand"/> forearm with its hand hidden (pass its
+        /// HandFadeStart / HandFadeLength). Null restores the look's own fade, which starts before the wrist.
+        /// </summary>
+        public void SetWristFade(int side, Vector2? fade) => _wristFade[side] = fade;
+
+        /// <summary>The wrist fade set by <see cref="SetWristFade"/> (null: the look's own).</summary>
+        public Vector2? WristFade(int side) => _wristFade[side];
 
         /// <summary>Switches the look; the procedural fallback has only the ghost look.</summary>
         public void SetStyle(DemoHandStyle style)
@@ -154,7 +168,13 @@ namespace Hapbeat.DemoSwitch
             PoseJoints(hand.Joints, poses, valid);
             var wrist = hand.Joints[XRHandJointID.Wrist.ToIndex()];
             _block ??= new MaterialPropertyBlock();
-            hand.Renderer.GetPropertyBlock(_block);
+            // Written afresh every frame, so a cleared wrist fade falls back to the materials' own.
+            _block.Clear();
+            if (_wristFade[side] is Vector2 fade)
+            {
+                _block.SetFloat(FadeStartId, fade.x);
+                _block.SetFloat(FadeLengthId, fade.y);
+            }
             // The mesh wrist's +Z points away from the fingers: toward the elbow.
             _block.SetVector(WristPositionId, wrist.position);
             _block.SetVector(ArmDirectionId, wrist.forward);
