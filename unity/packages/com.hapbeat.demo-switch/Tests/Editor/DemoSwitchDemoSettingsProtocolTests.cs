@@ -13,11 +13,11 @@ namespace Hapbeat.DemoSwitch.Tests
 
         // hapbeat-contracts fixtures/sample-demo-switch-messages.json unsigned_demo_settings_get / _settings / _settings_set.
         private const string DemoSettingsGet = "{\"version\":1,\"type\":\"DEMO_SETTINGS_GET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"target\":\"boxing\"}";
-        private const string DemoSettings = "{\"version\":1,\"type\":\"DEMO_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"revision\":4,\"target\":\"boxing\",\"installed\":true,\"settings\":{\"haptics_db\":\"2\",\"round\":\"55\"}}";
+        private const string DemoSettings = "{\"version\":1,\"type\":\"DEMO_SETTINGS\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"hub_id\":\"5c1e0a9b7d3f2468\",\"revision\":4,\"target\":\"boxing\",\"installed\":true,\"settings\":{\"haptics_db\":\"2\",\"round\":\"55\"}}";
         private const string DemoSettingsSet = "{\"version\":1,\"type\":\"DEMO_SETTINGS_SET\",\"controller_id\":\"remote-pixel\",\"seq\":48,\"demo_id\":\"demo_hub\",\"target\":\"boxing\",\"settings\":{\"haptics_db\":\"4\"}}";
 
         internal static DemoSwitchDemoSettings ExampleSettings() =>
-            new DemoSwitchDemoSettings(4, true, new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "2" });
+            new DemoSwitchDemoSettings("5c1e0a9b7d3f2468", 4, true, new Dictionary<string, string> { ["round"] = "55", ["haptics_db"] = "2" });
 
         private static string WithAuth(string json, string auth) => json.Substring(0, json.Length - 1) + ",\"auth\":\"" + auth + "\"}";
 
@@ -32,21 +32,26 @@ namespace Hapbeat.DemoSwitch.Tests
 
             Assert.That(DemoSwitchProtocol.SerializeDemoSettings(get.Request, ExampleSettings(), string.Empty), Is.EqualTo(DemoSettings), "Settings sorted by option ID.");
             var reply = new DemoSwitchDemoSettingsReply("remote-pixel", "0123456789abcdef", "boxing", ExampleSettings());
-            Assert.That(DemoSwitchProtocol.Canonicalize(reply), Does.EndWith("target=6:boxing\ninstalled=4:true\nsettings=21:haptics_db=2|round=55\n"));
-            Assert.That(JObject.Parse(DemoSwitchProtocol.SerializeDemoSettings(get.Request, ExampleSettings(), Secret)).Value<string>("auth"), Is.EqualTo("bcbd4b9a0a15ede79e48bedf1ab30fdc7c636c81c3bf2735d0af67354ae0a8a5"));
+            Assert.That(DemoSwitchProtocol.Canonicalize(reply), Does.EndWith("nonce=16:0123456789abcdef\nhub_id=16:5c1e0a9b7d3f2468\nrevision=1:4\n" +
+                "target=6:boxing\ninstalled=4:true\nsettings=21:haptics_db=2|round=55\n"));
+            Assert.Throws<ArgumentException>(() => DemoSwitchProtocol.SerializeDemoSettings(get.Request,
+                new DemoSwitchDemoSettings("5C1E0A9B7D3F2468", 4, true, null), string.Empty), "hub_id is lowercase hex.");
+            Assert.That(DemoSwitchHub.IsHubId(DemoSwitchHub.NewHubId()), Is.True);
+            Assert.That(DemoSwitchHub.NewHubId(), Is.Not.EqualTo(DemoSwitchHub.NewHubId()));
+            Assert.That(JObject.Parse(DemoSwitchProtocol.SerializeDemoSettings(get.Request, ExampleSettings(), Secret)).Value<string>("auth"), Is.EqualTo("0f4a3edbb7b34747ce095a8a96e608b7ac2d2bd9eeaebb06276be4ceff3bf519"));
         }
 
         [Test]
         public void ADemoThatIsNotInstalledHasNoSettings()
         {
             var get = DemoSwitchProtocol.ParseDemoSettingsGet(DemoSettingsGet).Request;
-            var none = JObject.Parse(DemoSwitchProtocol.SerializeDemoSettings(get, new DemoSwitchDemoSettings(4, false, null), string.Empty));
+            var none = JObject.Parse(DemoSwitchProtocol.SerializeDemoSettings(get, new DemoSwitchDemoSettings("5c1e0a9b7d3f2468", 4, false, null), string.Empty));
             Assert.That(none.Value<bool>("installed"), Is.False);
             Assert.That(none["settings"], Is.Empty);
             Assert.That(DemoSwitchProtocol.Canonicalize(new DemoSwitchDemoSettingsReply("remote-pixel", "0123456789abcdef", "boxing",
-                new DemoSwitchDemoSettings(4, false, null))), Does.EndWith("installed=5:false\nsettings=0:\n"));
+                new DemoSwitchDemoSettings("5c1e0a9b7d3f2468", 4, false, null))), Does.EndWith("installed=5:false\nsettings=0:\n"));
             Assert.Throws<ArgumentException>(() => DemoSwitchProtocol.SerializeDemoSettings(get,
-                new DemoSwitchDemoSettings(4, false, new Dictionary<string, string> { ["round"] = "55" }), string.Empty));
+                new DemoSwitchDemoSettings("5c1e0a9b7d3f2468", 4, false, new Dictionary<string, string> { ["round"] = "55" }), string.Empty));
         }
 
         [Test]
@@ -101,7 +106,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchDemoSettingsGetHandler.Handle(DemoSettingsGet, read, string.Empty, true).ResponseJson, Is.EqualTo(DemoSettings));
             Assert.That(DemoSwitchDemoSettingsGetHandler.Handle(DemoSettingsGet, read, Secret, true).ErrorCode, Is.EqualTo("invalid_auth"));
             var signed = DemoSwitchDemoSettingsGetHandler.Handle(WithAuth(DemoSettingsGet, "bbd39a11d9b607e9ce63b1541d102768c294f93b8d64b6e192147f0810d00c40"), read, Secret, false);
-            Assert.That(JObject.Parse(signed.ResponseJson).Value<string>("auth"), Is.EqualTo("bcbd4b9a0a15ede79e48bedf1ab30fdc7c636c81c3bf2735d0af67354ae0a8a5"));
+            Assert.That(JObject.Parse(signed.ResponseJson).Value<string>("auth"), Is.EqualTo("0f4a3edbb7b34747ce095a8a96e608b7ac2d2bd9eeaebb06276be4ceff3bf519"));
         }
 
         [Test]

@@ -57,13 +57,16 @@ namespace Hapbeat.DemoSwitch
     /// <summary>One demo's per-demo settings as DEMO_SETTINGS carries them (contracts demo-switch-control.md "Demo settings").</summary>
     public sealed class DemoSwitchDemoSettings
     {
-        public DemoSwitchDemoSettings(long revision, bool installed, IReadOnlyDictionary<string, string> settings)
+        public DemoSwitchDemoSettings(string hubId, long revision, bool installed, IReadOnlyDictionary<string, string> settings)
         {
+            HubId = hubId;
             Revision = revision;
             Installed = installed;
             Settings = settings ?? new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
+        /// <summary>This Hub's `hub_id`: 16 lowercase hex generated once at its first start (<see cref="DemoSwitchHub.IsHubId"/>).</summary>
+        public string HubId { get; }
         /// <summary>The <see cref="DemoSwitchHubSettings.Revision"/> counter (also increased by every per-demo settings save).</summary>
         public long Revision { get; }
         /// <summary>False when the target is not a Hub catalog entry; <see cref="Settings"/> is then empty.</summary>
@@ -198,13 +201,24 @@ namespace Hapbeat.DemoSwitch
             var request = new DemoSwitchDemoSettingsGet(new string('a', 64), "0123456789abcdef", descriptor.DemoId, null);
             try
             {
-                DemoSwitchProtocol.SerializeDemoSettings(request, new DemoSwitchDemoSettings(DemoSwitchProtocol.MaxSequence, true, settings), "x");
+                DemoSwitchProtocol.SerializeDemoSettings(request, new DemoSwitchDemoSettings("0123456789abcdef", DemoSwitchProtocol.MaxSequence, true, settings), "x");
                 return true;
             }
             catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
             {
                 return false;
             }
+        }
+
+        /// <summary>A `hub_id`: 16 lowercase hex characters.</summary>
+        public static bool IsHubId(string value) => value != null && value.Length == 16 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+
+        /// <summary>A new `hub_id` from a secure random source (the Hub makes one at its first start and keeps it).</summary>
+        public static string NewHubId()
+        {
+            var bytes = new byte[8];
+            using (var random = System.Security.Cryptography.RandomNumberGenerator.Create()) random.GetBytes(bytes);
+            return string.Concat(bytes.Select(b => b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture)));
         }
 
         /// <summary>A HUB_SETTINGS title: the preset name rules without the empty name (1-40 code points, a non-space character).</summary>

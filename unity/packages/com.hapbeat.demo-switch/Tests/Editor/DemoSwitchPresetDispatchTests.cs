@@ -54,7 +54,7 @@ namespace Hapbeat.DemoSwitch.Tests
             public string CurrentScreen => Screen;
             public DemoSwitchHubSettings ReadSettings() => DemoSwitchHubProtocolTests.ExampleSettings();
             public DemoSwitchDemoSettings ReadDemoSettings(string demoId) =>
-                demoId == "boxing" ? DemoSwitchDemoSettingsProtocolTests.ExampleSettings() : new DemoSwitchDemoSettings(4, false, null);
+                demoId == "boxing" ? DemoSwitchDemoSettingsProtocolTests.ExampleSettings() : new DemoSwitchDemoSettings("5c1e0a9b7d3f2468", 4, false, null);
             public DemoSwitchPresetCheck CheckDemoSettings(string demoId, IReadOnlyDictionary<string, string> settings, out string offending)
             {
                 offending = demoId != "boxing" ? demoId : settings.Keys.FirstOrDefault(id => id != "round" && id != "haptics_db");

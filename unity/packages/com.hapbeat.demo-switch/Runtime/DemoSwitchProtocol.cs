@@ -1353,7 +1353,7 @@ namespace Hapbeat.DemoSwitch
         public static string SerializeDemoSettings(DemoSwitchDemoSettingsGet request, DemoSwitchDemoSettings settings, string secret)
         {
             if (request == null || settings == null || !IsIdentifier(request.ControllerId) || !IsNonce(request.Nonce) ||
-                !IsIdentifier(request.Target) || settings.Revision < 0 || settings.Revision > MaxSequence ||
+                !IsIdentifier(request.Target) || !DemoSwitchHub.IsHubId(settings.HubId) || settings.Revision < 0 || settings.Revision > MaxSequence ||
                 settings.Settings.Count > DemoSwitchHub.MaxDemoSettings || (!settings.Installed && settings.Settings.Count > 0) ||
                 !settings.Settings.All(p => IsIdentifier(p.Key) && DemoSessionJson.IsValue(p.Value)))
                 throw new ArgumentException("DEMO_SETTINGS fields do not satisfy the Demo Switch contract.", nameof(settings));
@@ -1367,6 +1367,7 @@ namespace Hapbeat.DemoSwitch
                 ["type"] = "DEMO_SETTINGS",
                 ["controller_id"] = reply.ControllerId,
                 ["nonce"] = reply.Nonce,
+                ["hub_id"] = settings.HubId,
                 ["revision"] = settings.Revision,
                 ["target"] = reply.Target,
                 ["installed"] = settings.Installed,
@@ -1529,7 +1530,8 @@ namespace Hapbeat.DemoSwitch
         public static string Canonicalize(DemoSwitchDemoSettingsReply reply) =>
             "HAPBEAT-DEMO-SWITCH/1\nDEMO_SETTINGS\n" +
             Field("version", "1") + Field("type", "DEMO_SETTINGS") + Field("controller_id", reply.ControllerId) +
-            Field("nonce", reply.Nonce) + Field("revision", reply.Settings.Revision.ToString(CultureInfo.InvariantCulture)) +
+            Field("nonce", reply.Nonce) + Field("hub_id", reply.Settings.HubId) +
+            Field("revision", reply.Settings.Revision.ToString(CultureInfo.InvariantCulture)) +
             Field("target", reply.Target) + Field("installed", BooleanText(reply.Settings.Installed)) +
             Field("settings", CanonicalDemoSettings(reply.Settings.Settings));
 
