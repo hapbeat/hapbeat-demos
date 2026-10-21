@@ -818,15 +818,20 @@ void FHapbeatDemoSessionSpec::Define()
     });
     Describe(TEXT("Recenter"),[this]()
     {
-        It(TEXT("the default recenter puts the head over the pawn's start, facing its start yaw, at the same height"),[this]()
+        It(TEXT("the default recenter puts the head over the pawn's start, facing its start yaw, with the eyes 165 cm above it"),[this]()
         {
-            // Pawn at (100, 0, 0) turned 90 deg; the head 30 cm in front of it (+Y) and 160 cm up, looking 20 deg further.
+            // Pawn at (100, 0, 0) turned 90 deg; the head 30 cm in front of it (+Y) and 150 cm up, looking 20 deg further.
+            // The start (the floor) is at Z 20.
             const FTransform Pawn(FRotator(0,90,0),FVector(100,0,0));
-            const FVector Eye(100,30,160);
-            const FTransform T=UHapbeatDemoSessionSubsystem::RecenterPawn(Pawn,Eye,110,FVector(0,0,0),0);
+            const FVector Eye(100,30,150);
+            const FTransform T=UHapbeatDemoSessionSubsystem::RecenterPawn(Pawn,Eye,110,FVector(0,0,20),0);
             const FVector NewEye=T.TransformPosition(Pawn.InverseTransformPosition(Eye));
             TestTrue(TEXT("head over the start"),FVector2D(NewEye).IsNearlyZero(.01f));
-            TestTrue(TEXT("height unchanged"),FMath::IsNearlyEqual(NewEye.Z,160.f,.01f));
+            TestTrue(TEXT("eyes 165 cm above the start"),FMath::IsNearlyEqual(NewEye.Z,20.f+UHapbeatDemoSessionSubsystem::TargetEyeHeightCm,.01f));
+            TestTrue(TEXT("the pawn moved by the eye height offset"),FMath::IsNearlyEqual(T.GetLocation().Z,Pawn.GetLocation().Z+35.f,.01f));
+            TestEqual(TEXT("target 165 cm"),UHapbeatDemoSessionSubsystem::TargetEyeHeightCm,165.f);
+            TestEqual(TEXT("a 180 cm eye goes down 15 cm"),UHapbeatDemoSessionSubsystem::EyeHeightOffset(180),-15.f);
+            TestEqual(TEXT("a seated 120 cm eye goes up 45 cm"),UHapbeatDemoSessionSubsystem::EyeHeightOffset(120),45.f);
             const float NewFacing=T.GetRotation().Rotator().Yaw+(110-90);
             TestTrue(TEXT("facing the start yaw"),FMath::IsNearlyZero(FRotator::NormalizeAxis(NewFacing),.01f));
         });

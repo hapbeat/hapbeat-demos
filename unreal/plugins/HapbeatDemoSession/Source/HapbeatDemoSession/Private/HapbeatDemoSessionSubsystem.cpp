@@ -261,9 +261,10 @@ void UHapbeatDemoSessionSubsystem::ClearRecenterHandler(const UObject* Owner)
 
 FTransform UHapbeatDemoSessionSubsystem::RecenterPawn(const FTransform& Pawn,const FVector& Eye,float FacingYaw,const FVector& Start,float StartYawDegrees)
 {
-    // Turn about the eye so that the facing becomes the start yaw, then move the eye over the start location.
+    // Turn about the eye so that the facing becomes the start yaw, then move the eye over the start location and to the
+    // common eye height above it (the start location is the floor).
     const FQuat Turn(FVector::UpVector,FMath::DegreesToRadians(FRotator::NormalizeAxis(StartYawDegrees-FacingYaw)));
-    const FVector Location=Eye+Turn.RotateVector(Pawn.GetLocation()-Eye)+FVector(Start.X-Eye.X,Start.Y-Eye.Y,0);
+    const FVector Location=Eye+Turn.RotateVector(Pawn.GetLocation()-Eye)+FVector(Start.X-Eye.X,Start.Y-Eye.Y,EyeHeightOffset(Eye.Z-Start.Z));
     return FTransform(Turn*Pawn.GetRotation(),Location,Pawn.GetScale3D());
 }
 

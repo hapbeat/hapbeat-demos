@@ -54,7 +54,9 @@ enum class EHapbeatControlRoute : uint8
  *
  * 視線をリセット: the in-view button (shown while IsRecenterUiVisible(): ticket recenter_ui, or CONTROL
  * recenter_ui_show/hide) and CONTROL recenter call the demo's own start alignment (SetRecenterHandler), or else
- * turn and move the player's pawn so that the head is at the pawn's start location, facing its start yaw.
+ * turn and move the player's pawn so that the head is at the pawn's start location, facing its start yaw, with the
+ * eyes TargetEyeHeightCm above it (every demo puts the eyes at the same height, whatever the wearer's height and the
+ * headset's floor setting).
  *
  * Shared pause (demos without a menu of their own, [HapbeatDemoSession.Pause] in DefaultGame.ini): the left menu
  * gesture / controller menu button (FHapbeatPauseDetector) opens a panel in front of the head with 再開 /
@@ -152,17 +154,29 @@ public:
      * The demo's own start alignment for 視線をリセット (one per demo; the last one set wins). FacingYaw is the world yaw
      * the user faces: the head's for CONTROL recenter, the in-view buttons' heading for the button (the head is then
      * glancing down-left at it). The handler puts the head at the demo's start position facing its start direction,
-     * without changing the floor height, and returns false when it could not.
+     * with the eyes TargetEyeHeightCm above the demo's floor (EyeHeightOffset), and returns false when it could not.
+     * Demos also align the height when the headset is first put on.
      */
     void SetRecenterHandler(const UObject* Owner,TFunction<bool(float FacingYaw)> Handler);
     void ClearRecenterHandler(const UObject* Owner);
     /**
      * 視線をリセット: the recenter handler, or without one the player's pawn turned about the head by StartYaw - FacingYaw
-     * and moved so that the head is over its start location (RecenterPawn). Open panels are put in front of the head.
+     * and moved so that the head is over its start location with the eyes TargetEyeHeightCm above it (RecenterPawn).
+     * Open panels are put in front of the head.
      */
     bool RecenterView(float FacingYaw,const TCHAR* Source);
-    /** The pawn transform after the default recenter (height unchanged). */
+    /**
+     * The pawn transform after the default recenter. The pawn's start location is the demo's floor (a pawn whose root
+     * is its tracking origin on the floor); the eyes end TargetEyeHeightCm above it.
+     */
     static FTransform RecenterPawn(const FTransform& Pawn,const FVector& Eye,float FacingYaw,const FVector& StartLocation,float StartYaw);
+    /**
+     * Eye height after 視线をリセット, in cm above the demo's floor: the same for every demo and wearer (the wearer's height
+     * and the headset's floor setting are not used). Unity's com.hapbeat.demo-switch DemoEyeHeight has the same value.
+     */
+    static constexpr float TargetEyeHeightCm=165.f;
+    /** The Z to add to the tracking origin (e.g. the pawn) so that eyes HeadHeight cm above the demo's floor end at TargetEyeHeightCm. */
+    static float EyeHeightOffset(float HeadHeight) {return TargetEyeHeightCm-HeadHeight;}
 
     /**
      * Registers a Demo Switch CONTROL action handled by the demo; Handler returns false when it could not run.
