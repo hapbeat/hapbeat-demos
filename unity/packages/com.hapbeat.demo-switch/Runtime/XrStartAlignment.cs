@@ -9,6 +9,7 @@ namespace Hapbeat.DemoSwitch
     /// Aligns the first tracked HMD frame with a scene-authored X/Z and yaw anchor.
     /// A later alignment is requested only when Demo Switch reads a fresh launch context, or by 視線をリセット
     /// (<see cref="DemoRecenter.ResetView"/>) when the scene host has no <see cref="IDemoSessionRecenter"/>.
+    /// The first alignment also forces the eye height (<see cref="DemoEyeHeight"/>); 視線をリセット applies it itself.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class XrStartAlignment : MonoBehaviour
@@ -20,6 +21,7 @@ namespace Hapbeat.DemoSwitch
         private int _requestedAlignment;
         private int _completedAlignment;
         private bool _initialAlignmentRequested;
+        private bool _eyeHeightApplied;
 
         private void OnEnable()
         {
@@ -62,6 +64,9 @@ namespace Hapbeat.DemoSwitch
                 var requestToComplete = _requestedAlignment;
                 Align(_xrOrigin, _anchor);
                 _completedAlignment = requestToComplete;
+                if (_eyeHeightApplied) continue;
+                _eyeHeightApplied = true;
+                DemoEyeHeight.Apply();
             }
 
             _alignmentCoroutine = null;
@@ -76,6 +81,14 @@ namespace Hapbeat.DemoSwitch
                 alignment.RequestAlignment();
                 return true;
             }
+            return false;
+        }
+
+        /// <summary>Whether the scene has an active alignment (which applies the start eye height, <see cref="DemoRecenterWatch"/>).</summary>
+        internal static bool AnyActive()
+        {
+            foreach (var alignment in FindObjectsByType<XrStartAlignment>(FindObjectsSortMode.None))
+                if (alignment.isActiveAndEnabled) return true;
             return false;
         }
 
@@ -102,7 +115,7 @@ namespace Hapbeat.DemoSwitch
             xrOrigin.RotateAroundCameraUsingOriginUp(yaw);
 
             // RotateAroundCameraUsingOriginUp moves the origin. Re-read the camera afterwards,
-            // then translate only world X/Z; floor tracking owns Y and Camera Offset.
+            // then translate only world X/Z; the eye height (DemoEyeHeight) or the demo's floor tracking owns Y.
             camera = xrOrigin.Camera;
             xrOrigin.Origin.transform.position += ComputeHorizontalDelta(camera.transform.position, anchor.position);
         }

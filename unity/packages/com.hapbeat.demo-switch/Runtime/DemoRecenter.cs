@@ -102,9 +102,10 @@ namespace Hapbeat.DemoSwitch
 
         /// <summary>
         /// 視線をリセット: the current head position and the participant's front (<see cref="Front(Transform)"/>) become
-        /// this runtime's start position and front (app space; the floor height and the OS tracking origin stay). The registered host's
+        /// this runtime's start position and front (app space; the OS tracking origin stays). The registered host's
         /// <see cref="IDemoSessionRecenter"/> wins; otherwise the scene's <see cref="XrStartAlignment"/> aligns again;
         /// otherwise the XR Origin is turned and moved so the head is at the origin's pose when the scene loaded.
+        /// Then the eye height is forced to <see cref="DemoEyeHeight.Target"/> (<see cref="DemoEyeHeight"/>).
         /// The Hub has no start pose: only its panel moves. Then the open panels go in front, as after a system recenter.
         /// </summary>
         public static void ResetView()
@@ -114,6 +115,7 @@ namespace Hapbeat.DemoSwitch
             {
                 if (DemoSession.CurrentHost is IDemoSessionRecenter own) own.RecenterToStart();
                 else if (!XrStartAlignment.TryRealignActive()) AlignToStart();
+                DemoEyeHeight.Apply();
             }
             SettleUntil = Time.realtimeSinceStartup + SettleSeconds;
             Notify();
@@ -127,6 +129,13 @@ namespace Hapbeat.DemoSwitch
             _startRig = rig;
             _startPosition = rig.position;
             _startForward = rig.forward;
+        }
+
+        /// <summary>The height of <paramref name="rig"/> when its scene loaded (the authored floor of <see cref="DemoEyeHeight"/>).</summary>
+        internal static float StartFloor(Transform rig)
+        {
+            CaptureStart();
+            return rig == _startRig ? _startPosition.y : rig.position.y;
         }
 
         private static void AlignToStart()
@@ -149,7 +158,7 @@ namespace Hapbeat.DemoSwitch
         }
 
         /// <summary>The XR Origin (or the head camera's parent) and the head camera.</summary>
-        private static Transform FindRig(out Transform head)
+        internal static Transform FindRig(out Transform head)
         {
             var origin = UnityEngine.Object.FindAnyObjectByType<XROrigin>();
             if (origin != null && origin.Camera != null)
@@ -196,6 +205,8 @@ namespace Hapbeat.DemoSwitch
         private bool _originUpdated;
         private float _nextScan;
         private bool _hasHead;
+        /// <summary>The eye height of a newly loaded scene waits for the first tracked head frame (<see cref="DemoEyeHeight"/>).</summary>
+        private bool _startHeightPending = true;
         private Vector3 _headPosition;
         private Quaternion _headRotation;
 
@@ -218,7 +229,11 @@ namespace Hapbeat.DemoSwitch
 
         private void OnDisable() => SceneManager.sceneLoaded -= OnSceneLoaded;
 
-        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode) => DemoRecenter.CaptureStart();
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            DemoRecenter.CaptureStart();
+            _startHeightPending = true;
+        }
 
         private void LateUpdate()
         {
@@ -226,6 +241,9 @@ namespace Hapbeat.DemoSwitch
             _originUpdated = false;
             if (TryGetHead(out var position, out var rotation))
             {
+                // A scene with an XrStartAlignment applies the eye height at its first alignment instead.
+                if (_startHeightPending && !XrStartAlignment.AnyActive()) DemoEyeHeight.Apply();
+                _startHeightPending = false;
                 if (source == null && _hasHead && DemoRecenter.IsJump(_headPosition, _headRotation, position, rotation, Time.unscaledDeltaTime))
                     source = "head pose jump";
                 _hasHead = true;
@@ -242,7 +260,12 @@ namespace Hapbeat.DemoSwitch
                 Debug.Log("[Demo Session] DEMO_SESSION_RECENTER (" + source + ")");
                 DemoRecenter.SettleUntil = now + DemoRecenter.SettleSeconds;
             }
-            if (now <= DemoRecenter.SettleUntil) DemoRecenter.Notify();
+            if (now <= DemoRecenter.SettleUntil)
+            {
+                // Every settling frame, like the panels: the head's tracked pose may follow the origin change a frame late.
+                DemoEyeHeight.Apply();
+                DemoRecenter.Notify();
+            }
         }
 
         /// <summary>The HMD pose in tracking space.</summary>

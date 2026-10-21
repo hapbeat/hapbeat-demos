@@ -57,6 +57,7 @@ namespace Hapbeat.DemoSwitch
             _launcher = DemoSwitchLaunchAdapter.Create();
             StartReceiver();
             DemoSession.Initialize(settings.CurrentDemoId, DemoSessionPlatform.Create());
+            DemoEyeHeight.Configure(settings.EyeHeight);
             gameObject.AddComponent<DemoSessionHapticsButton>();
             gameObject.AddComponent<DemoSessionRecenterButton>();
             gameObject.AddComponent<DemoRecenterWatch>();

@@ -187,6 +187,7 @@ namespace Hapbeat.DemoSwitch
             HapticsUiVisibleChanged = null;
             RecenterUiVisibleChanged = null;
             DemoRecenter.ResetForTests();
+            DemoEyeHeight.ResetForTests();
             DemoNarration.ResetForTests();
         }
 

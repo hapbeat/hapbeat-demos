@@ -62,6 +62,10 @@ namespace Hapbeat.DemoSwitch
         [Tooltip("Hand input for the pause menu. System Menu needs the OpenXR feature Meta Hand Tracking Aim.")]
         [SerializeField] private DemoPauseGesture _pauseGesture = DemoPauseGesture.SystemMenu;
 
+        [Header("Eye height")]
+        [Tooltip("Eye height above the floor (m) forced on 視線をリセット, a system recenter and the first tracked frame of a scene, whatever the headset's floor or the participant's height (DemoEyeHeight).")]
+        [SerializeField, Min(0.5f)] private float _eyeHeight = DemoEyeHeight.DefaultTargetEyeHeight;
+
         public bool ReceiverEnabled => _receiverEnabled;
         public int Port => _port;
         public string CurrentDemoId => _currentDemoId;
@@ -71,6 +75,7 @@ namespace Hapbeat.DemoSwitch
         public DemoHandStyle HandStyle => _handStyle;
         public bool PauseMenu => _pauseMenu;
         public DemoPauseGesture PauseGesture => _pauseGesture;
+        public float EyeHeight => _eyeHeight;
 
         public bool TryResolveTarget(string demoId, out DemoSwitchTarget target)
         {
