@@ -6,6 +6,7 @@ Creates under /Game/HapbeatDemoHands (the path UHapbeatDemoHand / FHapbeatDemoHa
 - Materials/M_HandInside: opaque inner shell (back faces only, darker skin), seen only through the wrist opening,
   where it shows the inside of the hand instead of the scene behind (UHapbeatDemoHand::SetInsideVisible, off by default).
 - Materials/M_GhostHand + M_GhostOutline: Quest-style dark fill with a light outline shell.
+- Materials/M_HandPlaceholder: plain shaded colour for the placeholder hand (engine shapes, when Meta's mesh is missing).
 - Textures/T_MetaHand_{L,R}: from <project>/ThirdParty/MetaHands/Textures (baked with bake_meta_hand_textures.py
   from Meta's OpenXR hand meshes; derived from Meta's asset, so they stay in each project and are not shared here).
 Run:  UnrealEditor-Cmd <project>.uproject -run=PythonScript -script=<project>/Plugins/HapbeatDemoHands/Scripts/create_hand_materials.py
@@ -224,6 +225,22 @@ if m:
     assert mel.connect_material_property(mask, '', u.MaterialProperty.MP_OPACITY_MASK)
     finish(m, 'M_HandInside')
 
-for name in ('M_HandDepth', 'M_SkinHand', 'M_GhostHand', 'M_GhostOutline', 'M_HandInside'):
+# M_HandPlaceholder: the hand drawn from engine shapes when Meta's mesh is not installed (instanced, so it needs that
+# usage flag to cook). Translucent only for the sort priority over the Demo Session panels; fully opaque in colour.
+m = new_material('M_HandPlaceholder', u.BlendMode.BLEND_TRANSLUCENT)
+if m:
+    m.set_editor_property('two_sided', False)
+    m.set_editor_property('used_with_skeletal_mesh', False)
+    m.set_editor_property('used_with_instanced_static_meshes', True)
+    g = Graph(m)
+    color = g.node(u.MaterialExpressionVectorParameter, parameter_name='Color', default_value=u.LinearColor(.72, .47, .36, 1))
+    rgb = g.node(u.MaterialExpressionComponentMask, r=True, g=True, b=True, a=False); g.link(color, rgb)
+    shade = g.custom(SKIN_HLSL, u.CustomMaterialOutputType.CMOT_FLOAT3, ('Albedo', 'N', 'V'))
+    g.link(rgb, shade, 'Albedo')
+    g.link(g.node(u.MaterialExpressionVertexNormalWS), shade, 'N'); g.link(g.node(u.MaterialExpressionCameraVectorWS), shade, 'V')
+    assert mel.connect_material_property(shade, '', u.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(m, 'M_HandPlaceholder')
+
+for name in ('M_HandDepth', 'M_SkinHand', 'M_GhostHand', 'M_GhostOutline', 'M_HandInside', 'M_HandPlaceholder'):
     assert lib.does_asset_exist(f'{MATS}/{name}'), name
 u.log('HAPBEAT_DEMO_HAND_MATERIALS_READY')

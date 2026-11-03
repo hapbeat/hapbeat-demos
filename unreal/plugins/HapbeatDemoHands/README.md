@@ -17,6 +17,12 @@ like `HapbeatDemoSession`.
   `GetOutlineMaterial()` / `GetSurfaceMaterial()` are the dynamic instances (e.g. tint the outline while grabbing).
   `SetSortPriorityBase(AHapbeatDemoSessionUi::HandSortPriority)` keeps the hands in front of the Demo Session panels.
 
+- Placeholder hand: `UHapbeatDemoHand::Create` with a null mesh returns a hand drawn from engine shapes (spheres on the
+  joints, cylinders between them, two instanced static mesh components) from the same tracked joints, so a clone without
+  Meta's meshes still shows hands. Same calls: `Update`, `SetVisible`, `SetStyle` (colour only), `SetSortPriorityBase`;
+  `GetRig()` is a built-in rough layout, so `BuildReferenceSample` works. `IsPlaceholder()` tells it apart: there
+  `GetPoseMesh()` and `GetOutlineMaterial()` are null. Nothing changes when the mesh is there.
+
 ## Per project
 
 Third-party content stays in the project (it is not in this public repository):
@@ -28,5 +34,11 @@ Third-party content stays in the project (it is not in this public repository):
    `/Game/HapbeatDemoHands/Materials` and imports the textures to `/Game/HapbeatDemoHands/Textures`.
 
 In C++: take `FHapbeatDemoHandMaterials::FindInConstructor()` and the meshes/textures in the owner's constructor
-(so they cook), then `UHapbeatDemoHand::Create(Owner, Mesh, SkinTexture, Materials, Style)` and call `Update(State)`
-every frame. Keep the returned object in a `UPROPERTY`.
+(so they cook), with `FHapbeatDemoHandMaterials::FindOptionalMesh(Path)` / `FindOptionalTexture(Path)` for what may not
+be installed (null, without the `CDO Constructor ... Failed to find` error), then
+`UHapbeatDemoHand::Create(Owner, Mesh, SkinTexture, Materials, Style, bRightHand)` and call `Update(State)` every frame.
+Keep the returned object in a `UPROPERTY`.
+
+The placeholder's material `M_HandPlaceholder` comes from `create_hand_materials.py` too; commit it in the project (it
+contains nothing of Meta's). Without it the placeholder uses the engine shape's own material, without the sort priority
+over the Demo Session panels.

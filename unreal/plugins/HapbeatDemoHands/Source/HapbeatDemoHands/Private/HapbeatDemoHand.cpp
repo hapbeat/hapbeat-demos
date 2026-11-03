@@ -1,9 +1,12 @@
 #include "HapbeatDemoHand.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -18,6 +21,28 @@ namespace
     constexpr int32 WristJoint=int32(EHandKeypoint::Wrist),PalmJoint=int32(EHandKeypoint::Palm),
         MiddleProximal=int32(EHandKeypoint::MiddleProximal),IndexProximal=int32(EHandKeypoint::IndexProximal),
         LittleProximal=int32(EHandKeypoint::LittleProximal);
+
+    // Placeholder hand, reference pose (cm, EHandKeypoint order): X wrist -> fingers, Y towards the index, Z the palm
+    // side of the right hand (mirrored for the left). Rough proportions, drawn only when Meta's mesh is missing.
+    const FVector PlaceholderJoints[EHandKeypointCount]={
+        {5,0,0},{0,0,0},
+        {1.8,1.8,1.2},{4.6,3.9,2.2},{7.3,5.3,2.8},{9.6,6.1,3},
+        {1.8,1,.2},{9,2.5,0},{13,3,0},{15.4,3.2,0},{17.6,3.4,0},
+        {1.8,.3,.2},{9.4,.7,0},{13.9,.8,0},{16.7,.9,0},{19,.9,0},
+        {1.8,-.4,.2},{9,-1.1,0},{13.1,-1.4,0},{15.7,-1.5,0},{17.9,-1.6,0},
+        {1.8,-1.1,.2},{8.4,-2.9,0},{11.6,-3.6,0},{13.4,-3.9,0},{15.2,-4.1,0}};
+    // Cylinders between the joints: the wrist to each finger base and across the knuckles (the palm), then the fingers.
+    struct FPlaceholderBone { int32 From,To; };
+    constexpr FPlaceholderBone PlaceholderBones[]={
+        {1,2},{1,6},{1,11},{1,16},{1,21},{6,7},{11,12},{16,17},{21,22},{7,12},{12,17},{17,22},
+        {2,3},{3,4},{4,5},{7,8},{8,9},{9,10},{12,13},{13,14},{14,15},{17,18},{18,19},{19,20},{22,23},{23,24},{24,25}};
+    constexpr int32 PalmBones=12; // the first ones are drawn thicker, so that they read as a palm
+    constexpr float PlaceholderShapeSize=100; // /Engine/BasicShapes: 100 cm across, the cylinder 100 cm long along Z
+
+    template<class T> T* FindOptional(const TCHAR* Path)
+    {
+        return FPackageName::DoesPackageExist(FString(Path))?ConstructorHelpers::FObjectFinder<T>(Path).Object:nullptr;
+    }
 }
 
 bool FHapbeatHandRig::Init(const USkeletalMesh* Asset)
@@ -48,6 +73,24 @@ bool FHapbeatHandRig::Init(const USkeletalMesh* Asset)
     RefLength=FMath::Max(1.f,RefForward.Size());
     if(!bOk)Bones.Reset();
     return bOk;
+}
+
+void FHapbeatHandRig::InitPlaceholder(bool bRightHand)
+{
+    *this=FHapbeatHandRig();
+    const FVector Mirror(1,1,bRightHand?1:-1);
+    auto Loc=[&](int32 Joint){return PlaceholderJoints[Joint]*Mirror;};
+    for(const FFingerChain& C:FingerChains) {
+        ChainStart.Add(Bones.Num());
+        for(int32 J=C.Base;J<C.Base+C.Joints;++J) {
+            Bones.Add(JointName(J));From.Add(J);To.Add(J+1);
+            RefRot.Add(FQuat::Identity);RefLoc.Add(Loc(J));RefDir.Add((Loc(J+1)-Loc(J)).GetSafeNormal());
+        }
+    }
+    HandBone=JointName(WristJoint);HandLoc=Loc(WristJoint);
+    RefForward=Loc(MiddleProximal)-HandLoc;RefSide=Loc(IndexProximal)-Loc(LittleProximal);
+    RefPalm=FVector(0,0,Mirror.Z); // as in Init: the thumb's side of the metacarpal plane
+    RefLength=RefForward.Size();
 }
 
 bool FHapbeatHandRig::Pose(UPoseableMeshComponent* Mesh,const FXRHandTrackingState& S,const FVector& Offset) const
@@ -104,19 +147,45 @@ bool FHapbeatHandRig::BuildReferenceSample(const FTransform& World,float CurlDeg
 FHapbeatDemoHandMaterials FHapbeatDemoHandMaterials::FindInConstructor()
 {
     FHapbeatDemoHandMaterials M;
-    M.Depth=ConstructorHelpers::FObjectFinder<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_HandDepth.M_HandDepth")).Object;
-    M.Skin=ConstructorHelpers::FObjectFinder<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_SkinHand.M_SkinHand")).Object;
-    M.Ghost=ConstructorHelpers::FObjectFinder<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_GhostHand.M_GhostHand")).Object;
-    M.Outline=ConstructorHelpers::FObjectFinder<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_GhostOutline.M_GhostOutline")).Object;
-    M.Inside=ConstructorHelpers::FObjectFinder<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_HandInside.M_HandInside")).Object;
+    M.Depth=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_HandDepth.M_HandDepth"));
+    M.Skin=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_SkinHand.M_SkinHand"));
+    M.Ghost=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_GhostHand.M_GhostHand"));
+    M.Outline=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_GhostOutline.M_GhostOutline"));
+    M.Inside=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_HandInside.M_HandInside"));
+    M.Placeholder=FindOptional<UMaterialInterface>(TEXT("/Game/HapbeatDemoHands/Materials/M_HandPlaceholder.M_HandPlaceholder"));
+    M.PlaceholderJoint=ConstructorHelpers::FObjectFinder<UStaticMesh>(TEXT("/Engine/BasicShapes/Sphere")).Object;
+    M.PlaceholderBone=ConstructorHelpers::FObjectFinder<UStaticMesh>(TEXT("/Engine/BasicShapes/Cylinder")).Object;
     return M;
 }
 
-UHapbeatDemoHand* UHapbeatDemoHand::Create(AActor* Owner,USkeletalMesh* Mesh,UTexture2D* InSkinTexture,const FHapbeatDemoHandMaterials& InMaterials,EHapbeatHandStyle InStyle)
+USkeletalMesh* FHapbeatDemoHandMaterials::FindOptionalMesh(const TCHAR* Path) { return FindOptional<USkeletalMesh>(Path); }
+UTexture2D* FHapbeatDemoHandMaterials::FindOptionalTexture(const TCHAR* Path) { return FindOptional<UTexture2D>(Path); }
+
+UHapbeatDemoHand* UHapbeatDemoHand::Create(AActor* Owner,USkeletalMesh* Mesh,UTexture2D* InSkinTexture,const FHapbeatDemoHandMaterials& InMaterials,EHapbeatHandStyle InStyle,bool bRightHand)
 {
-    if(!Owner||!Mesh)return nullptr;
+    if(!Owner||(!Mesh&&!(InMaterials.PlaceholderJoint&&InMaterials.PlaceholderBone)))return nullptr;
     UHapbeatDemoHand* Hand=NewObject<UHapbeatDemoHand>(Owner);
     Hand->Materials=InMaterials;Hand->SkinTexture=InSkinTexture;Hand->Style=InStyle;
+    if(!Mesh) {
+        UE_LOG(LogTemp,Display,TEXT("HAPBEAT_DEMO_HAND placeholder right=%d (no hand mesh installed)"),bRightHand);
+        Hand->Rig.InitPlaceholder(bRightHand);
+        const auto AddPart=[&](UStaticMesh* Shape,int32 Instances) {
+            // Left at the world origin, unattached: the instances carry world transforms.
+            auto* Part=NewObject<UInstancedStaticMeshComponent>(Owner);
+            Part->SetMobility(EComponentMobility::Movable);
+            Part->SetStaticMesh(Shape);Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);Part->SetCastShadow(false);
+            Part->SetCanEverAffectNavigation(false);
+            Part->SetVisibility(false);Part->RegisterComponent();
+            TArray<FTransform> Start;Start.Init(FTransform::Identity,Instances);
+            Part->AddInstances(Start,false);
+            Hand->PlaceholderParts.Add(Part);
+        };
+        AddPart(InMaterials.PlaceholderJoint,EHandKeypointCount-1); // no sphere on the palm joint, inside the palm
+        AddPart(InMaterials.PlaceholderBone,UE_ARRAY_COUNT(PlaceholderBones));
+        Hand->SetSortPriorityBase(1);
+        Hand->ApplyStyle();
+        return Hand;
+    }
     if(!Hand->Rig.Init(Mesh))UE_LOG(LogTemp,Error,TEXT("HAPBEAT_DEMO_HAND missing XRHand_* bones in %s"),*Mesh->GetName());
     for(int32 Layer=0;Layer<4;++Layer) {
         auto* M=NewObject<UPoseableMeshComponent>(Owner);
@@ -140,12 +209,22 @@ UHapbeatDemoHand* UHapbeatDemoHand::Create(AActor* Owner,USkeletalMesh* Mesh,UTe
 void UHapbeatDemoHand::SetSortPriorityBase(int32 Base)
 {
     for(int32 Layer=1;Layer<Layers.Num();++Layer)Layers[Layer]->SetTranslucentSortPriority(Base+FMath::Min(Layer,2)-1);
+    // Joints over bones (no depth write): the same order on both hands, the cylinder ends stay hidden in the spheres.
+    if(IsPlaceholder()){PlaceholderParts[1]->SetTranslucentSortPriority(Base);PlaceholderParts[0]->SetTranslucentSortPriority(Base+1);}
 }
 
 void UHapbeatDemoHand::ApplyStyle()
 {
-    if(Layers.Num()<4)return;
     const bool bGhost=Style==EHapbeatHandStyle::Ghost;
+    if(IsPlaceholder()) {
+        // Without M_HandPlaceholder the shape's own engine material (lit, no sort over the Demo Session panels).
+        UMaterialInterface* Base=Materials.Placeholder?Materials.Placeholder.Get():PlaceholderParts[0]->GetStaticMesh()->GetMaterial(0);
+        SurfaceMaterial=Base?UMaterialInstanceDynamic::Create(Base,this):nullptr;
+        if(SurfaceMaterial)SurfaceMaterial->SetVectorParameterValue(TEXT("Color"),bGhost?FLinearColor(.42f,.45f,.50f):FLinearColor(.72f,.47f,.36f));
+        for(UInstancedStaticMeshComponent* Part:PlaceholderParts)Part->SetMaterial(0,SurfaceMaterial);
+        return;
+    }
+    if(Layers.Num()<4)return;
     // The materials fade out along the reference forearm axis (pre-skinning component space).
     auto Make=[this](UMaterialInterface* Base) {
         UMaterialInstanceDynamic* Mid=Base?UMaterialInstanceDynamic::Create(Base,this):nullptr;
@@ -191,18 +270,41 @@ bool UHapbeatDemoHand::Update(const FXRHandTrackingState& S,const FVector& Offse
 {
     const bool bValid=S.bValid&&S.TrackingStatus==ETrackingStatus::Tracked;
     bool bPosed=bValid;
+    if(IsPlaceholder())bPosed=bPosed&&UpdatePlaceholder(S,Offset);
     for(UPoseableMeshComponent* M:Layers)bPosed=bPosed&&Rig.Pose(M,S,Offset);
     SetVisible(bPosed);
     return bPosed;
 }
 
+bool UHapbeatDemoHand::UpdatePlaceholder(const FXRHandTrackingState& S,const FVector& Offset)
+{
+    if(S.HandKeyLocations.Num()!=EHandKeypointCount)return false;
+    const TArray<FVector>& K=S.HandKeyLocations;
+    const auto Radius=[&S](int32 Joint){return S.HandKeyRadii.IsValidIndex(Joint)?FMath::Clamp(S.HandKeyRadii[Joint],.4f,1.2f):.7f;};
+    TArray<FTransform,TInlineAllocator<EHandKeypointCount>> Joints;
+    for(int32 J=0;J<EHandKeypointCount;++J)
+        if(J!=PalmJoint)Joints.Add(FTransform(FQuat::Identity,K[J]+Offset,FVector(2*Radius(J)/PlaceholderShapeSize)));
+    TArray<FTransform,TInlineAllocator<UE_ARRAY_COUNT(PlaceholderBones)>> Bones;
+    for(int32 B=0;B<UE_ARRAY_COUNT(PlaceholderBones);++B) {
+        const FVector A=K[PlaceholderBones[B].From],C=K[PlaceholderBones[B].To],Along=C-A;
+        const float Width=2*FMath::Min(Radius(PlaceholderBones[B].From),Radius(PlaceholderBones[B].To))*(B<PalmBones?1.5f:.95f)/PlaceholderShapeSize;
+        const FQuat Rot=Along.IsNearlyZero()?FQuat::Identity:FRotationMatrix::MakeFromZ(Along).ToQuat();
+        Bones.Add(FTransform(Rot,(A+C)/2+Offset,FVector(Width,Width,Along.Size()/PlaceholderShapeSize)));
+    }
+    PlaceholderParts[0]->BatchUpdateInstancesTransforms(0,TArrayView<const FTransform>(Joints),false,true,true);
+    PlaceholderParts[1]->BatchUpdateInstancesTransforms(0,TArrayView<const FTransform>(Bones),false,true,true);
+    return true;
+}
+
 void UHapbeatDemoHand::SetVisible(bool bVisible)
 {
     bShown=bVisible;
+    for(UInstancedStaticMeshComponent* Part:PlaceholderParts)Part->SetVisibility(bVisible);
     for(int32 Layer=0;Layer<Layers.Num();++Layer)Layers[Layer]->SetVisibility(bVisible&&IsLayerShown(Layer));
 }
 
 bool UHapbeatDemoHand::IsVisible() const
 {
+    if(IsPlaceholder())return PlaceholderParts[0]->IsVisible();
     return !Layers.IsEmpty()&&Layers[0]->IsVisible();
 }

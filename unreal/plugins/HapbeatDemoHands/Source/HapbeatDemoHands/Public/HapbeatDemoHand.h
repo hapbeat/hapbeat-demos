@@ -5,10 +5,12 @@
 #include "HapbeatDemoHand.generated.h"
 
 class AActor;
+class UInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPoseableMeshComponent;
 class USkeletalMesh;
+class UStaticMesh;
 class UTexture2D;
 
 /** Skin: textured, natural hand. Ghost: Quest-style dark fill with a light outline. */
@@ -33,6 +35,8 @@ struct HAPBEATDEMOHANDS_API FHapbeatHandRig
     float RefLength=1;
 
     bool Init(const USkeletalMesh* Asset);
+    /** A rough built-in layout of the 26 joints instead of a mesh's reference pose, for the placeholder hand. */
+    void InitPlaceholder(bool bRightHand);
     bool IsValid() const { return !Bones.IsEmpty(); }
     /** Poses Mesh from the 26 joints (directions only). False, mesh untouched, when the joints are unusable. */
     bool Pose(UPoseableMeshComponent* Mesh,const FXRHandTrackingState& State,const FVector& Offset=FVector::ZeroVector) const;
@@ -54,14 +58,29 @@ struct HAPBEATDEMOHANDS_API FHapbeatDemoHandMaterials
     UPROPERTY() TObjectPtr<UMaterialInterface> Ghost;
     UPROPERTY() TObjectPtr<UMaterialInterface> Outline;
     UPROPERTY() TObjectPtr<UMaterialInterface> Inside;
-    /** Loads them from /Game/HapbeatDemoHands/Materials. Call from a constructor (ConstructorHelpers) so they cook. */
+    /** The placeholder hand (no Meta mesh): its material, null -> the engine shape's own material. */
+    UPROPERTY() TObjectPtr<UMaterialInterface> Placeholder;
+    UPROPERTY() TObjectPtr<UStaticMesh> PlaceholderJoint;
+    UPROPERTY() TObjectPtr<UStaticMesh> PlaceholderBone;
+    /**
+     * Loads them from /Game/HapbeatDemoHands/Materials and the placeholder shapes from /Engine/BasicShapes. Call from
+     * a constructor (ConstructorHelpers) so they cook. A material that is not in the project stays null, quietly.
+     */
     static FHapbeatDemoHandMaterials FindInConstructor();
+    /**
+     * For third-party content that may not be installed (Meta's hand meshes, the skin textures baked from them): the
+     * asset, or null without the "CDO Constructor ... Failed to find" error. Call from a constructor, so they cook.
+     */
+    static USkeletalMesh* FindOptionalMesh(const TCHAR* Path);
+    static UTexture2D* FindOptionalTexture(const TCHAR* Path);
 };
 
 /**
  * One drawn hand: copies of the same posed mesh. The Custom Depth copy is never drawn (it is the stand-in for a
  * depth pre-pass); the outline shell and the visible surface draw only the hand's nearest layer and fade out just
  * past the wrist, where Meta's mesh ends; the inner shell (Skin) shows the inside through that opening.
+ * Without a mesh (Create with Mesh null) it is a placeholder instead: spheres on the joints and cylinders between them,
+ * from the same tracked joints, with the same calls. See IsPlaceholder().
  * Keep a UPROPERTY reference to it in the owner.
  */
 UCLASS()
@@ -69,7 +88,8 @@ class HAPBEATDEMOHANDS_API UHapbeatDemoHand : public UObject
 {
     GENERATED_BODY()
 public:
-    static UHapbeatDemoHand* Create(AActor* Owner,USkeletalMesh* Mesh,UTexture2D* SkinTexture,const FHapbeatDemoHandMaterials& Materials,EHapbeatHandStyle Style);
+    /** Mesh null: the placeholder hand. bRightHand only picks the side of its built-in reference pose (GetRig). */
+    static UHapbeatDemoHand* Create(AActor* Owner,USkeletalMesh* Mesh,UTexture2D* SkinTexture,const FHapbeatDemoHandMaterials& Materials,EHapbeatHandStyle Style,bool bRightHand=false);
     /** Poses all layers from the joints and shows them; hides the hand when tracking is unusable. */
     bool Update(const FXRHandTrackingState& State,const FVector& Offset=FVector::ZeroVector);
     void SetVisible(bool bVisible);
@@ -88,6 +108,8 @@ public:
      * hand in front of a panel stays visible.
      */
     void SetSortPriorityBase(int32 Base);
+    /** True when drawn from engine shapes because the mesh is missing: GetPoseMesh() and GetOutlineMaterial() are null. */
+    bool IsPlaceholder() const { return !PlaceholderParts.IsEmpty(); }
     /** The Custom Depth copy: query bones here (all layers share its pose). */
     UPoseableMeshComponent* GetPoseMesh() const { return Layers.IsEmpty()?nullptr:Layers[0].Get(); }
     UMaterialInstanceDynamic* GetSurfaceMaterial() const { return SurfaceMaterial; }
@@ -95,7 +117,9 @@ public:
     const FHapbeatHandRig& GetRig() const { return Rig; }
 private:
     void ApplyStyle();
+    bool UpdatePlaceholder(const FXRHandTrackingState& State,const FVector& Offset);
     UPROPERTY() TArray<TObjectPtr<UPoseableMeshComponent>> Layers; // depth, outline, surface, inside
+    UPROPERTY() TArray<TObjectPtr<UInstancedStaticMeshComponent>> PlaceholderParts; // joints, bones
     UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> InsideMaterial;
     UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> SurfaceMaterial;
     UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> OutlineMaterial;
