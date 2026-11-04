@@ -145,11 +145,11 @@ namespace Hapbeat.DemoSwitch.Tests
             var start = DemoSwitchProtocol.ParseHubStart(HubStart);
             Assert.That(start.Success, Is.True, start.ErrorMessage);
             Assert.That(start.Command.Steps.Single().Options["scene"], Is.EqualTo("match"));
-            Assert.That(DemoSwitchProtocol.Canonicalize(start.Command), Does.EndWith("steps=20:volley;scene=match;1\n"));
-            Assert.That(DemoSwitchProtocol.ComputeAuth(start.Command, Secret), Is.EqualTo("8cc476ef9a64e5b376aad77225b57429736f116063bdf4149601e111bec1e7a2"));
-            var signed = DemoSwitchProtocol.ParseHubStart(WithAuth(HubStart, "8cc476ef9a64e5b376aad77225b57429736f116063bdf4149601e111bec1e7a2"));
+            Assert.That(DemoSwitchProtocol.Canonicalize(start.Command), Does.EndWith("steps=20:volley;scene=match;0\n"));
+            Assert.That(DemoSwitchProtocol.ComputeAuth(start.Command, Secret), Is.EqualTo("34e7719552c6c843ce09bc17029dac95c9d53a4173733359e45ca49d2a4efe2f"));
+            var signed = DemoSwitchProtocol.ParseHubStart(WithAuth(HubStart, "34e7719552c6c843ce09bc17029dac95c9d53a4173733359e45ca49d2a4efe2f"));
             Assert.That(DemoSwitchProtocol.Authenticate(signed.Command, Secret), Is.True);
-            var tampered = DemoSwitchProtocol.ParseHubStart(WithAuth(HubStart.Replace("match", "block"), "8cc476ef9a64e5b376aad77225b57429736f116063bdf4149601e111bec1e7a2"));
+            var tampered = DemoSwitchProtocol.ParseHubStart(WithAuth(HubStart.Replace("match", "block"), "34e7719552c6c843ce09bc17029dac95c9d53a4173733359e45ca49d2a4efe2f"));
             Assert.That(DemoSwitchProtocol.Authenticate(tampered.Command, Secret), Is.False, "steps are signed.");
         }
 

@@ -557,7 +557,7 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
-        public void TheDemosOwnButtonsNeedRetryLikeRetryItself()
+        public void TheDemosOwnButtonsDoNotNeedRetry()
         {
             Assert.That(DemoSession.TryBegin(Ticket, "trex-encounter", null, out var error), Is.True, error);
             var host = new ActionsHost();
@@ -566,7 +566,7 @@ namespace Hapbeat.DemoSwitch.Tests
             DemoSession.ShowCompletion();
             var panel = Object.FindAnyObjectByType<DemoSessionCompletionPanel>();
             Assert.That(panel.RetryButton, Is.Null);
-            Assert.That(panel.ActionButtons, Is.Empty);
+            Assert.That(panel.ActionButtons.Count, Is.EqualTo(1));
         }
 
         [Test]

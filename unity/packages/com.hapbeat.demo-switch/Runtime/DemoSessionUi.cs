@@ -680,9 +680,9 @@ namespace Hapbeat.DemoSwitch
             IReadOnlyList<DemoSessionCompletionAction> actions = null)
         {
             var step = ticket.Steps[ticket.Index];
-            // The demo's own buttons only where もう一度 is offered (a step with retry), and only usable ones.
+            // The demo's own buttons, whether or not もう一度 is offered, and only usable ones.
             var own = new List<DemoSessionCompletionAction>();
-            if (step.Retry && actions != null)
+            if (actions != null)
                 foreach (var action in actions)
                     if (!string.IsNullOrEmpty(action.Label) && action.Run != null) own.Add(action);
             var buttons = (step.Retry ? 2 : 1) + own.Count;

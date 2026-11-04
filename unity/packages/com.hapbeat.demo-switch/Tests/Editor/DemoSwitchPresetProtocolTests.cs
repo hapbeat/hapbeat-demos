@@ -12,8 +12,8 @@ namespace Hapbeat.DemoSwitch.Tests
 
         // hapbeat-contracts fixtures/sample-demo-switch-messages.json unsigned_preset_get / unsigned_preset / unsigned_preset_set / unsigned_preset_start.
         private const string PresetGetExample = "{\"version\":1,\"type\":\"PRESET_GET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"preset\":1,\"from\":0}";
-        private const string PresetExample = "{\"version\":1,\"type\":\"PRESET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"preset\":1,\"revision\":7,\"name\":\"XR Kaigi A\",\"visible\":true,\"step_count\":2,\"from\":0,\"steps\":[{\"demo_id\":\"energy-duel\",\"options\":{\"tutorial\":\"on\"}},{\"demo_id\":\"volley\",\"options\":{\"scene\":\"match\"},\"retry\":false}]}";
-        private const string PresetSetExample = "{\"version\":1,\"type\":\"PRESET_SET\",\"controller_id\":\"remote-pixel\",\"seq\":44,\"demo_id\":\"demo_hub\",\"preset\":1,\"name\":\"XR Kaigi A\",\"visible\":true,\"steps\":[{\"demo_id\":\"energy-duel\",\"options\":{\"tutorial\":\"on\"}},{\"demo_id\":\"volley\",\"options\":{\"scene\":\"match\"},\"retry\":false}]}";
+        private const string PresetExample = "{\"version\":1,\"type\":\"PRESET\",\"controller_id\":\"remote-pixel\",\"nonce\":\"0123456789abcdef\",\"preset\":1,\"revision\":7,\"name\":\"XR Kaigi A\",\"visible\":true,\"step_count\":2,\"from\":0,\"steps\":[{\"demo_id\":\"energy-duel\",\"options\":{\"tutorial\":\"on\"},\"retry\":true},{\"demo_id\":\"volley\",\"options\":{\"scene\":\"match\"}}]}";
+        private const string PresetSetExample = "{\"version\":1,\"type\":\"PRESET_SET\",\"controller_id\":\"remote-pixel\",\"seq\":44,\"demo_id\":\"demo_hub\",\"preset\":1,\"name\":\"XR Kaigi A\",\"visible\":true,\"steps\":[{\"demo_id\":\"energy-duel\",\"options\":{\"tutorial\":\"on\"},\"retry\":true},{\"demo_id\":\"volley\",\"options\":{\"scene\":\"match\"}}]}";
         private const string PresetStartExample = "{\"version\":1,\"type\":\"PRESET_START\",\"controller_id\":\"remote-pixel\",\"seq\":45,\"demo_id\":\"demo_hub\",\"preset\":1}";
         // HMAC-SHA256 of the PRESET_GET fixture with the test secret above.
         private const string PresetGetVector = "6e1ee8be274d4dd262f88078ec289a4742585ea11b482dc39de2a951f3816814";
@@ -55,8 +55,8 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(set.Command.Name, Is.EqualTo("XR Kaigi A"));
             Assert.That(set.Command.Visible, Is.True);
             Assert.That(set.Command.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "energy-duel", "volley" }));
-            Assert.That(set.Command.Steps[0].Retry, Is.True, "retry defaults to true.");
-            Assert.That(set.Command.Steps[1].Retry, Is.False);
+            Assert.That(set.Command.Steps[0].Retry, Is.True);
+            Assert.That(set.Command.Steps[1].Retry, Is.False, "retry defaults to false.");
             Assert.That(set.Command.Steps[1].Options["scene"], Is.EqualTo("match"));
             Assert.That(DemoSwitchProtocol.Canonicalize(set.Command), Is.EqualTo(
                 "HAPBEAT-DEMO-SWITCH/1\nCOMMAND\nversion=1:1\ntype=10:PRESET_SET\ncontroller_id=12:remote-pixel\nseq=2:44\ndemo_id=8:demo_hub\npreset=1:1\n" +
@@ -64,7 +64,7 @@ namespace Hapbeat.DemoSwitch.Tests
             Assert.That(DemoSwitchProtocol.ComputeAuth(set.Command, Secret), Is.EqualTo("1b89a5c12ee854a17a41bbd151d0baacdb5606a2d39da2d1ac481dcfb6bfc4ac"));
             var signedSet = DemoSwitchProtocol.ParsePresetCommand(WithAuth(PresetSetExample, "1b89a5c12ee854a17a41bbd151d0baacdb5606a2d39da2d1ac481dcfb6bfc4ac"));
             Assert.That(DemoSwitchProtocol.Authenticate(signedSet.Command, Secret), Is.True);
-            var tampered = DemoSwitchProtocol.ParsePresetCommand(WithAuth(PresetSetExample.Replace("\"retry\":false", "\"retry\":true"),
+            var tampered = DemoSwitchProtocol.ParsePresetCommand(WithAuth(PresetSetExample.Replace("\"retry\":true", "\"retry\":false"),
                 "1b89a5c12ee854a17a41bbd151d0baacdb5606a2d39da2d1ac481dcfb6bfc4ac"));
             Assert.That(DemoSwitchProtocol.Authenticate(tampered.Command, Secret), Is.False, "steps are signed.");
 
@@ -90,7 +90,7 @@ namespace Hapbeat.DemoSwitch.Tests
         }
 
         [Test]
-        public void CanonicalStepsSortOptionsAndDefaultRetryToOne()
+        public void CanonicalStepsSortOptionsAndDefaultRetryToZero()
         {
             var set = DemoSwitchProtocol.ParsePresetCommand(PresetSetExample);
             Assert.That(DemoSwitchProtocol.CanonicalSteps(set.Command.Steps), Is.EqualTo(ExampleSteps));
@@ -147,7 +147,7 @@ namespace Hapbeat.DemoSwitch.Tests
         [TestCase("\"scene\":\"match\"", "\"scene\":1")]
         [TestCase("\"scene\":\"match\"", "\"Scene\":\"match\"")]
         [TestCase("\"scene\":\"match\"", "\"scene\":\"match\",\"scene\":\"block\"")]
-        [TestCase("\"retry\":false", "\"retry\":\"no\"")]
+        [TestCase("\"retry\":true", "\"retry\":\"no\"")]
         [TestCase("\"preset\":1", "\"preset\":1,\"nonce\":\"0123456789abcdef\"")]
         [TestCase(",\"name\":\"XR Kaigi A\"", "")]
         [TestCase(",\"visible\":true", "")]
@@ -231,7 +231,7 @@ namespace Hapbeat.DemoSwitch.Tests
                     var bigger = JObject.Parse(json);
                     var next = steps[from + page.Count];
                     var stepValue = new JObject { ["demo_id"] = next.DemoId, ["options"] = JObject.FromObject(next.Options.OrderBy(p => p.Key).ToDictionary(p => p.Key, p => p.Value)) };
-                    if (!next.Retry) stepValue["retry"] = false;
+                    if (next.Retry) stepValue["retry"] = true;
                     ((JArray)bigger["steps"]).Add(stepValue);
                     Assert.That(Encoding.UTF8.GetByteCount(bigger.ToString(Newtonsoft.Json.Formatting.None)), Is.GreaterThan(DemoSwitchProtocol.MaxPayloadBytes));
                 }

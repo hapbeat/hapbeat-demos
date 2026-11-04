@@ -18,7 +18,7 @@ namespace Hapbeat.DemoSwitch
 
         public string DemoId { get; }
         public IReadOnlyDictionary<string, string> Options { get; }
-        /// <summary>Offer "もう一度" after the step (default true).</summary>
+        /// <summary>Offer "もう一度" after the step (default false).</summary>
         public bool Retry { get; }
     }
 

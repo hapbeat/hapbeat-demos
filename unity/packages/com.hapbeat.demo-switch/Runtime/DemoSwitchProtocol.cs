@@ -1019,7 +1019,7 @@ namespace Hapbeat.DemoSwitch
                     options[property.Name] = optionValue;
                 }
             }
-            var retry = true;
+            var retry = false;
             if (value.ContainsKey("retry") && !TryBoolean(value, "retry", out retry)) return false;
             step = new DemoSwitchPresetStep(demoId, options, retry);
             return true;
@@ -1065,7 +1065,7 @@ namespace Hapbeat.DemoSwitch
                     foreach (var pair in step.Options.OrderBy(p => p.Key, StringComparer.Ordinal)) options[pair.Key] = pair.Value;
                     stepValue["options"] = options;
                 }
-                if (!step.Retry) stepValue["retry"] = false;
+                if (step.Retry) stepValue["retry"] = true;
                 steps.Add(stepValue);
             }
             var value = new JObject
