@@ -15,7 +15,7 @@ class DemoCatalogThumbnailTest {
     fun thumbnailFilesAreBundled() {
         // Unit tests run with the module directory (app/) as the working directory.
         DemoCatalog.sessionApps.forEach { app ->
-            val file = File("src/main/assets", app.thumbnail!!)
+            val file = File("../shared/src/main/assets", app.thumbnail!!)
             assertTrue(file.path, file.isFile)
         }
     }

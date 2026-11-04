@@ -14,30 +14,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hapbeat.demoremote.RemoteViewModel
-import com.hapbeat.demoremote.adb.UsbLinkJudge
 
-/** Restores the Quest's Wi-Fi adb with this phone as the USB host (instead of a PC). Starts by itself on plug-in. */
+/** Restores the Quest's Wi-Fi adb over a USB cable, in the way of this platform ([RemoteViewModel.usbTexts]). */
 @Composable
 fun UsbAdbDialog(vm: RemoteViewModel) {
     val (status, error) = vm.usbAdbStatus
+    val texts = vm.usbTexts
     AlertDialog(
         onDismissRequest = vm::closeUsbDialog,
         title = { Text("Quest と USB でつなぐ") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "Quest を再起動すると、スマホからの Wi-Fi 接続（adb）が切れます。USB ケーブルで一度つなぐと元に戻ります",
+                    texts.dialogIntro,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                listOf(
-                    "1. スマホと Quest を USB-C ケーブル（データ対応）でつなぐ",
-                    "2. 自動で始まります。初めてのスマホでは HMD を被り、「USB デバッグを許可」で「常に許可」にチェックして許可する",
-                    "3. 「完了」と出たらケーブルを外す",
-                ).forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                texts.dialogSteps.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 // Fixed one-line USB status: what the phone currently sees on the cable.
                 Text(
-                    "USB の状態: ${UsbLinkJudge.statusText(vm.usbLink)}",
+                    "USB の状態: ${vm.usbStatusText}",
                     Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
@@ -65,8 +61,8 @@ fun UsbAdbDialog(vm: RemoteViewModel) {
         },
         confirmButton = {
             // Fixed width (fits the longer label); disabled while a run is going.
-            TextButton(onClick = vm::enableWifiAdbOverUsb, enabled = !vm.usbAdbRunning, modifier = Modifier.width(120.dp)) {
-                Text(if (vm.usbAttempted) "もう一度試す" else "始める", maxLines = 1)
+            TextButton(onClick = vm::enableWifiAdbOverUsb, enabled = !vm.usbAdbRunning, modifier = Modifier.width(texts.startButtonWidthDp.dp)) {
+                Text(if (vm.usbAttempted) texts.retryLabel else texts.startLabel, maxLines = 1)
             }
         },
         dismissButton = {

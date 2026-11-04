@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.hapbeat.demoremote.DEVICE_WORD
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.HubPresetSlot
 import com.hapbeat.demoremote.data.HubPresets
@@ -91,7 +92,7 @@ fun PresetImportDialog(vm: RemoteViewModel) {
                         val (status, error) = when {
                             vm.importStatus.first.isNotEmpty() -> vm.importStatus
                             duplicate -> "同じ枠を 2 回選んでいます" to true
-                            block != null -> "$block。「後で書き込む」でスマホに保存できます" to true
+                            block != null -> "$block。「後で書き込む」で${DEVICE_WORD}に保存できます" to true
                             else -> " " to false
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall, color = if (error) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -112,7 +113,7 @@ fun PresetImportDialog(vm: RemoteViewModel) {
                         TextButton(
                             onClick = { vm.keepImportForLater(targets.toList()) },
                             enabled = !duplicate && !vm.importRunning && (block != null || vm.importStatus.second),
-                        ) { Text("後で書き込む（スマホに保存）") }
+                        ) { Text("後で書き込む（${DEVICE_WORD}に保存）") }
                         TextButton(onClick = vm::dismissImport, enabled = !vm.importRunning) { Text("やめる") }
                     }
                 },

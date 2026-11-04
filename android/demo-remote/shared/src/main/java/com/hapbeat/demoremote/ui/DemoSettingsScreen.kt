@@ -28,6 +28,7 @@ import com.hapbeat.demoremote.DemoApp
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.DemoSettingsRead
 import com.hapbeat.demoremote.LogState
+import com.hapbeat.demoremote.DEVICE_WORD
 import com.hapbeat.demoremote.RemoteViewModel
 
 /**
@@ -89,7 +90,7 @@ fun DemoSettingsScreen(vm: RemoteViewModel, demoId: String, onDone: () -> Unit) 
             Column(Modifier.fillMaxWidth()) {
                 val (readText, readError) = when (read) {
                     DemoSettingsRead.NONE -> (if (vm.demoSettingsReading) "読み込み中…" else " ") to false
-                    DemoSettingsRead.NO_ANSWER -> (if (entry != null) "Hub が応答しません。下はスマホに保存した内容です"
+                    DemoSettingsRead.NO_ANSWER -> (if (entry != null) "Hub が応答しません。下は${DEVICE_WORD}に保存した内容です"
                         else "Hub が応答しません（Hub が起動していないか、Hub の版が古い）。Hub を開いてから「再読込」") to true
                     DemoSettingsRead.NOT_INSTALLED -> "$label は HMD の Hub に入っていません" to true
                     DemoSettingsRead.NO_SETTINGS -> "$label には Hub に保存するデモごとの設定がありません" to true
@@ -98,7 +99,7 @@ fun DemoSettingsScreen(vm: RemoteViewModel, demoId: String, onDone: () -> Unit) 
                 Text(readText, style = MaterialTheme.typography.bodySmall,
                     color = if (readError) StatusRed else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    if (unwritten.isNotEmpty()) "未書き込み（スマホだけに保存）: ${demoSettingsSummary(demoId, unwritten)}" else " ",
+                    if (unwritten.isNotEmpty()) "未書き込み（${DEVICE_WORD}だけに保存）: ${demoSettingsSummary(demoId, unwritten)}" else " ",
                     style = MaterialTheme.typography.bodySmall, color = StatusYellow, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }

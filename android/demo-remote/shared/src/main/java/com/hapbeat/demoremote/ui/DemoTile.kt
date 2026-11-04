@@ -1,8 +1,5 @@
 package com.hapbeat.demoremote.ui
 
-import android.content.res.AssetManager
-import android.graphics.BitmapFactory
-import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -37,23 +34,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hapbeat.demoremote.DemoApp
+import com.hapbeat.demoremote.RemotePlatform
 
 /** Decoded demo thumbnails (`assets/thumbs/`), decoded once per path. */
 object DemoThumbnails {
     private val cache = HashMap<String, ImageBitmap>()
 
-    fun get(assets: AssetManager, path: String): ImageBitmap = synchronized(cache) {
-        cache.getOrPut(path) { assets.open(path).use { BitmapFactory.decodeStream(it) }.asImageBitmap() }
+    fun get(platform: RemotePlatform, path: String): ImageBitmap = synchronized(cache) {
+        cache.getOrPut(path) { platform.openAsset(path).use { decodeImageBitmap(it) } }
     }
 }
 
@@ -117,12 +113,12 @@ fun DemoTile(
 private suspend fun PointerInputScope.detectHold(holdMs: Long, onHold: (Boolean) -> Unit, onLongPress: () -> Unit) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        val deadline = SystemClock.uptimeMillis() + holdMs
+        val deadline = (System.nanoTime() / 1_000_000) + holdMs
         var fired = false
         onHold(true)
         try {
             while (true) {
-                val left = deadline - SystemClock.uptimeMillis()
+                val left = deadline - (System.nanoTime() / 1_000_000)
                 val event = if (left > 0) withTimeoutOrNull(left) { awaitPointerEvent(PointerEventPass.Initial) } else null
                 if (event == null) {
                     fired = true
@@ -149,8 +145,8 @@ private suspend fun PointerInputScope.detectHold(holdMs: Long, onHold: (Boolean)
 private fun ColumnScope.DemoTileContent(app: DemoApp, enabled: Boolean) {
     val path = app.thumbnail
     if (path != null) {
-        val assets = LocalContext.current.assets
-        val bitmap = remember(path) { DemoThumbnails.get(assets, path) }
+        val platform = LocalRemotePlatform.current
+        val bitmap = remember(path) { DemoThumbnails.get(platform, path) }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Image(
                 bitmap = bitmap,

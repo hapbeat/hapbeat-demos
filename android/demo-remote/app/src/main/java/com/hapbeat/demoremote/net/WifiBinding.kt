@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import java.net.Inet4Address
 
 /**
  * Pins this process to the Wi-Fi network. A demo LAN often has no internet, and Android may then
@@ -43,5 +44,32 @@ class WifiBinding(context: Context, private val onChanged: () -> Unit) {
         runCatching { cm?.unregisterNetworkCallback(callback) }
         network = null
         cm?.bindProcessToNetwork(null)
+    }
+}
+
+/** The Wi-Fi network as [PlatformNetwork]. */
+class AndroidNetwork(private val context: Context) : PlatformNetwork {
+    private var binding: WifiBinding? = null
+
+    override fun start(onChanged: () -> Unit) {
+        binding = WifiBinding(context, onChanged).also { it.start() }
+    }
+
+    override fun stop() {
+        binding?.stop()
+    }
+
+    override fun localIpv4(): LocalIpv4? {
+        val network = binding?.network ?: return null
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val link = cm.getLinkProperties(network) ?: return null
+        return link.linkAddresses.firstOrNull { it.address is Inet4Address }?.let { LocalIpv4(it.address, it.prefixLength) }
+    }
+
+    override fun gatewayIpv4(): String? {
+        val network = binding?.network ?: return null
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val link = cm.getLinkProperties(network) ?: return null
+        return link.routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway?.hostAddress
     }
 }

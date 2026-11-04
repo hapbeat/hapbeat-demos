@@ -1,30 +1,11 @@
 package com.hapbeat.demoremote
 
-import android.os.SystemClock
-import android.app.Application
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
-import android.net.LinkAddress
-import android.os.BatteryManager
-import android.os.Build
-import android.view.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.hapbeat.demoremote.adb.AdbConnectResult
-import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.AdbRetryPolicy
 import com.hapbeat.demoremote.adb.BoundaryState
 import com.hapbeat.demoremote.adb.DeviceAddress
@@ -32,11 +13,10 @@ import com.hapbeat.demoremote.adb.DeviceAddressFile
 import com.hapbeat.demoremote.adb.DeviceAddressSummary
 import com.hapbeat.demoremote.adb.QuestAdb
 import com.hapbeat.demoremote.adb.QuestBoundary
-import com.hapbeat.demoremote.adb.UsbAdb
 import com.hapbeat.demoremote.adb.UsbAdbException
-import com.hapbeat.demoremote.adb.UsbAdbKey
 import com.hapbeat.demoremote.adb.UsbLink
-import com.hapbeat.demoremote.adb.UsbLinkJudge
+import com.hapbeat.demoremote.adb.UsbProgress
+import com.hapbeat.demoremote.adb.UsbTexts
 import com.hapbeat.demoremote.adb.UsbWifiAdbResult
 import com.hapbeat.demoremote.data.DemoSettingsEntry
 import com.hapbeat.demoremote.data.DemoSettingsStore
@@ -58,10 +38,11 @@ import com.hapbeat.demoremote.data.UnwrittenDemoSettings
 import com.hapbeat.demoremote.data.UnwrittenPreset
 import com.hapbeat.demoremote.data.UnwrittenPresets
 import com.hapbeat.demoremote.mirror.MirrorSession
+import com.hapbeat.demoremote.mirror.VideoSink
 import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
+import com.hapbeat.demoremote.net.LocalIpv4
 import com.hapbeat.demoremote.net.QuestWake
-import com.hapbeat.demoremote.net.WifiBinding
 import com.hapbeat.demoremote.protocol.AuthConfig
 import com.hapbeat.demoremote.protocol.DemoSwitchMessage
 import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
@@ -70,6 +51,7 @@ import com.hapbeat.demoremote.protocol.SequenceReserver
 import dadb.AdbKeyPair
 import dadb.Dadb
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -151,23 +133,18 @@ private class PendingCommand(
 /** Last result of a retried Wi-Fi adb connect; [answered]: at least one try got an answer (not HostUnreachable). */
 private data class RetriedConnect(val result: AdbConnectResult, val answered: Boolean)
 
-class RemoteViewModel(app: Application) : AndroidViewModel(app) {
-    private val settings = SettingsStore(app)
+/**
+ * The app's state and logic, shared by the Android and the desktop build. [scope] is the main-thread scope all of it runs
+ * in (Android: `scope` of a thin holder); [close] ends it.
+ */
+class RemoteViewModel(val platform: RemotePlatform, private val scope: CoroutineScope) {
+    private val settings = SettingsStore(platform.settings, platform.controllerIdPrefix, platform.defaultMirrorSettings)
     private val reserver = SequenceReserver(settings)
-    private val keyPair: AdbKeyPair by lazy { AdbKeys.load(app) }
-    private val socket = DemoSwitchSocket(viewModelScope) { source, payload ->
-        viewModelScope.launch(Dispatchers.Main) { onPayload(source, payload) }
+    private val keyPair: AdbKeyPair by lazy { platform.loadAdbKeyPair() }
+    private val socket = DemoSwitchSocket(scope) { source, payload ->
+        scope.launch(Dispatchers.Main) { onPayload(source, payload) }
     }
-    private val wifi = WifiBinding(app) {
-        viewModelScope.launch(Dispatchers.Main) {
-            refreshWifiDiag()
-            if (foreground) {
-                reopenSocket()
-                scanAdbHosts()
-            }
-        }
-    }
-    private val logFile = RemoteLogFile(File(app.filesDir, RemoteLogFile.FILE_NAME))
+    private val logFile = RemoteLogFile(File(platform.dataDir, RemoteLogFile.FILE_NAME))
 
     // ---- observable state ----
     var controllerId by mutableStateOf(settings.controllerId); private set
@@ -230,7 +207,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** A USB run has started since the dialog was opened ("始める" vs "もう一度試す"). */
     var usbAttempted by mutableStateOf(false); private set
     /** Diagnostics line 1: the phone's Wi-Fi address and gateway. */
-    var wifiDiag by mutableStateOf("Wi-Fi 未接続"); private set
+    var wifiDiag by mutableStateOf(platform.networkMissingText); private set
     /** Diagnostics line 2: last discovery round and 5555 scan. */
     var discoveryDiag by mutableStateOf("探索 --:--:--　／ 5555 走査 --:--:--"); private set
     /** Quest Wi-Fi as read over USB ("ip/prefix SSID"), shown after the phone's Wi-Fi on diagnostics line 1; "" before. */
@@ -291,7 +268,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     val selectedQuest: QuestState? get() = quests.firstOrNull { it.ip == selectedIp }
 
     /** HMD list entries shown (see [QuestVisibility.isListed]). */
-    val listedQuests: List<QuestState> get() = quests.filter { QuestVisibility.isListed(it, showEditors, selectedIp, SystemClock.elapsedRealtime()) }
+    val listedQuests: List<QuestState> get() = quests.filter { QuestVisibility.isListed(it, showEditors, selectedIp, platform.monotonicMs()) }
 
     /** Hub-wide settings last read from the selected HMD, or null. */
     val selectedHubSettings: HubSettingsSnapshot? get() = selectedIp?.let { hubSettings[it] }
@@ -351,7 +328,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var adbJob: Job? = null
     private var batteryJob: Job? = null
     private var keepaliveJob: Job? = null
-    private var mirrorSurface: Surface? = null
+    /** Makes the video output of a mirror session; null while there is none (Android: until the SurfaceView exists). */
+    private var mirrorSinkFactory: (() -> VideoSink)? = platform.mirrorSinkFactory
+    private var mirrorRetryJob: Job? = null
     private var mirrorSession: MirrorSession? = null
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
     private val fileTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -365,7 +344,6 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private var lastUsbSuccessAtMs = 0L
     private var lastUsbSuccessIp: String? = null
     private var usbCloseJob: Job? = null
-    private var usbWatch: BroadcastReceiver? = null
     /** The dialog was already brought up for the current peripheral-side connection (once per cable). */
     private var peripheralPrompted = false
     /** Hosts already tried for the remembered serial (key not trusted, another serial): not offered the key again. Memory only; "再探索" clears it. */
@@ -385,7 +363,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     // ---- lifecycle ----------------------------------------------------------------------
 
     init {
-        wifi.start()
+        platform.network.start {
+            scope.launch(Dispatchers.Main) {
+                refreshWifiDiag()
+                if (foreground) {
+                    reopenSocket()
+                    scanAdbHosts()
+                }
+            }
+        }
         unwrittenPresets.addAll(UnwrittenPresets.decode(settings.unwrittenPresets))
     }
 
@@ -404,7 +390,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         describedIps.clear()
         quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = null, respondedPrevRound = null) }
         discoveryLoop?.cancel()
-        discoveryLoop = viewModelScope.launch {
+        discoveryLoop = scope.launch {
             while (isActive) {
                 runDiscoveryRound()
                 selectedQuest?.takeIf { it.respondedLastRound == true }?.let { queryState(it.ip) }
@@ -416,7 +402,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         scanAdbHosts()
         // Rescan while the selected Quest has no adb: it may come back on a new IP or after waking.
         rescanLoop?.cancel()
-        rescanLoop = viewModelScope.launch {
+        rescanLoop = scope.launch {
             while (isActive) {
                 delay(ADB_RESCAN_INTERVAL_MS)
                 if (selectedQuest?.adb != AdbState.CONNECTED) scanAdbHosts()
@@ -443,11 +429,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         stopUsbWatch()
     }
 
-    override fun onCleared() {
+    /** The end of the app: Android's `onCleared`, or the desktop window closing. */
+    fun close() {
         stopMirror()
         socket.close()
         adbConnections.values.forEach { it.close() }
-        wifi.stop()
+        platform.network.stop()
         stopUsbWatch()
     }
 
@@ -618,7 +605,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun rediscover() {
         followTriedHosts.clear()
         resetPortDiagnosis()
-        viewModelScope.launch { runDiscoveryRound() }
+        scope.launch { runDiscoveryRound() }
         scanAdbHosts()
     }
 
@@ -632,7 +619,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         scanningAdb = true
-        viewModelScope.launch {
+        scope.launch {
             try {
                 // Without Wi-Fi there is no subnet to scan (never the mobile network).
                 val local = refreshWifiDiag() ?: return@launch
@@ -734,14 +721,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Refreshes diagnostics line 1 and returns the phone's Wi-Fi IPv4 (null without Wi-Fi). */
-    private suspend fun refreshWifiDiag(): LinkAddress? {
-        val app = getApplication<Application>()
-        val network = wifi.network
+    private suspend fun refreshWifiDiag(): LocalIpv4? {
         val (local, gateway) = withContext(Dispatchers.IO) {
-            DemoSwitchSocket.localIpv4(app, network) to DemoSwitchSocket.gatewayIpv4(app, network)
+            platform.network.localIpv4() to platform.network.gatewayIpv4()
         }
-        wifiDiag = if (local == null) "Wi-Fi 未接続"
-        else "スマホ Wi-Fi ${local.address.hostAddress}/${local.prefixLength}" + (gateway?.let { "（GW $it）" } ?: "")
+        wifiDiag = if (local == null) platform.networkMissingText
+        else "${platform.networkLabel} ${local.address.hostAddress}/${local.prefixLength}" + (gateway?.let { "（GW $it）" } ?: "")
         return local
     }
 
@@ -749,7 +734,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (quests.none { it.ip == source }) {
             // A Demo Switch answer alone does not prove a headset (a PC running a demo in the Unity editor answers
             // too): it stays "未確認" until adb reports a Quest model.
-            quests.add(QuestState(source, unconfirmedLabel(source), addedAtMs = SystemClock.elapsedRealtime()))
+            quests.add(QuestState(source, unconfirmedLabel(source), addedAtMs = platform.monotonicMs()))
         }
         updateQuest(source) { withForegroundDemo(it, here.currentDemoId).copy(respondedLastRound = true) }
         if (source == selectedIp) onSelectedAnswered()
@@ -887,7 +872,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!config.canSend || !socket.isOpen) return
         val nonce = DemoSwitchProtocol.newNonce()
         queryNonces[nonce] = ip
-        viewModelScope.launch {
+        scope.launch {
             socket.send(ip, DemoSwitchProtocol.buildQuery(controllerId, nonce, config))
             delay(QUERY_TIMEOUT_MS)
             queryNonces.remove(nonce)
@@ -898,7 +883,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshHubState() {
         val ip = selectedIp ?: return
         if (!foreground) return
-        viewModelScope.launch { fetchState(ip) }
+        scope.launch { fetchState(ip) }
     }
 
     /**
@@ -951,7 +936,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!config.canSend) return
         val content = "切替 → ${DemoCatalog.labelFor(demoId)}"
         if (refusedNotForeground(quest.ip, quest.label, content)) return
-        viewModelScope.launch {
+        scope.launch {
             val seq = reserveSeq() ?: return@launch
             val payload = DemoSwitchProtocol.buildSwitch(controllerId, seq, demoId, config)
             send(quest, seq, demoId, content, payload, SWITCH_TIMEOUT_MS, "")
@@ -966,7 +951,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         val config = authConfig
         if (!config.canSend) return
-        viewModelScope.launch {
+        scope.launch {
             val refused = { reason: String ->
                 addLog(quest.label, control.label, null, LogState.ERROR, reason)
                 listener?.invoke(LogState.ERROR, reason)
@@ -1068,7 +1053,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             listener?.invoke(LogState.ERROR, "UDP 送信に失敗しました")
             return
         }
-        viewModelScope.launch {
+        scope.launch {
             delay(timeoutMs)
             if (!command.terminal) {
                 command.terminal = true
@@ -1107,10 +1092,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun copyLog() {
-        val app = getApplication<Application>()
-        viewModelScope.launch {
+        scope.launch {
             val text = withContext(Dispatchers.IO) { logFile.read() }
-            app.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Demo Remote log", text))
+            platform.copyToClipboard("Demo Remote log", text)
             logToolStatus = "コピーしました（${text.lines().count { it.isNotEmpty() }} 行）"
         }
     }
@@ -1127,7 +1111,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         noticeClearJob?.cancel()
         if (text.isEmpty()) return
         fileLog("通知: $text")
-        noticeClearJob = viewModelScope.launch {
+        noticeClearJob = scope.launch {
             delay(NOTICE_CLEAR_MS)
             notice = "" to false
         }
@@ -1142,7 +1126,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun connectAdb(manual: Boolean = true) {
         val ip = selectedIp ?: return
         adbJob?.cancel()
-        adbJob = viewModelScope.launch {
+        adbJob = scope.launch {
             handleAdbResult(ip, connectWithRetry(ip, retryPortClosed = false, sleepHint = manual).result, manual)
         }
     }
@@ -1162,12 +1146,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
         try {
             if (firstDelayMs > 0) delay(firstDelayMs)
-            val startedAt = SystemClock.elapsedRealtime()
+            val startedAt = platform.monotonicMs()
             return coroutineScope {
                 // Elapsed seconds so a slow connect reads as progress, not a hang.
                 val ticker = launch {
                     while (isActive) {
-                        val s = (SystemClock.elapsedRealtime() - startedAt) / 1000
+                        val s = (platform.monotonicMs() - startedAt) / 1000
                         if (ip == selectedIp && quests.firstOrNull { it.ip == ip }?.adb == AdbState.CONNECTING) {
                             setAdbMessage(AdbRetryPolicy.connectingText(s, sleepSuspect = unanswered > 0))
                         }
@@ -1184,11 +1168,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                             hinted = true
                             sleepHintIp = ip
                         }
-                        val elapsed = SystemClock.elapsedRealtime() - startedAt
+                        val elapsed = platform.monotonicMs() - startedAt
                         val wait = AdbRetryPolicy.nextDelayMs(results.size, elapsed, result, retryPortClosed) ?: break
                         delay(wait)
                     }
-                    val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+                    val seconds = (platform.monotonicMs() - startedAt) / 1000
                     fileLog("Wi-Fi adb $ip: ${results.joinToString(", ")}（${results.size} 回・$seconds 秒）")
                     RetriedConnect(results.last(), answered = unanswered < results.size)
                 } finally {
@@ -1308,7 +1292,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         adbJob?.cancel()
         val label = quests.firstOrNull { it.ip == ip }?.label ?: ip
         addLog(label, "adb 切断 $ip", null, LogState.INFO, "自動で再接続します")
-        adbJob = viewModelScope.launch {
+        adbJob = scope.launch {
             var round = 0
             var result: AdbConnectResult = AdbConnectResult.HostUnreachable
             while (true) {
@@ -1401,7 +1385,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (boundaryRunning || quest.adb != AdbState.CONNECTED) return
         val ip = quest.ip
         boundaryRunning = true
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val content = if (paused) "境界を止める" else "境界を戻す"
                 val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
@@ -1437,7 +1421,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun readDeviceAddress() {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
-        viewModelScope.launch { refreshDeviceAddress(quest.ip) }
+        scope.launch { refreshDeviceAddress(quest.ip) }
     }
 
     /** `cat` of every installed known demo's file into the Quest entry; stops (keeps the old value) when adb is lost. */
@@ -1462,7 +1446,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val targets = DeviceAddressFile.targets(quest.installed.orEmpty())
         deviceAddressWriting = true
         deviceAddressStatus = "書き込み中…" to LogState.SENT
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val content = "Hapbeat 宛先 プレイヤー ${DeviceAddressFile.axisText(address.player)}・グループ ${DeviceAddressFile.axisText(address.group)}"
                 val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
@@ -1501,7 +1485,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** Keeps connected Quests' Wi-Fi awake with a short shell command; a failure marks the connection lost ([adbShell]). */
     private fun startKeepalive() {
         keepaliveJob?.cancel()
-        keepaliveJob = viewModelScope.launch {
+        keepaliveJob = scope.launch {
             while (isActive) {
                 delay(KEEPALIVE_INTERVAL_MS)
                 quests.filter { it.adb == AdbState.CONNECTED }.map { it.ip }.forEach { adbShell(it, "true") }
@@ -1511,7 +1495,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startBatteryPolling() {
         batteryJob?.cancel()
-        batteryJob = viewModelScope.launch {
+        batteryJob = scope.launch {
             while (isActive) {
                 delay(BATTERY_INTERVAL_MS)
                 quests.filter { it.adb == AdbState.CONNECTED }.map { it.ip }.forEach { ip ->
@@ -1560,7 +1544,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             ?.let { runCatching { DemoCatalog.hubSessionCommand(demoId, options) }.getOrNull() }
         val config = authConfig
         sessionStarting = true
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val current = if (config.canSend) probeForegroundDemo(quest.ip, config) else null
                 when {
@@ -1647,7 +1631,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun learnHubId(ip: String) {
         if (hubIds.containsKey(ip)) return
-        viewModelScope.launch { fetchDemoSettings(ip, DemoCatalog.HUB_ID)?.let { hubIds[ip] = it.hubId } }
+        scope.launch { fetchDemoSettings(ip, DemoCatalog.HUB_ID)?.let { hubIds[ip] = it.hubId } }
     }
 
     /** "再読込". */
@@ -1661,7 +1645,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun readHubPresets(numbers: List<Int>) {
         val ip = selectedIp ?: return
         hubReadJob?.cancel()
-        hubReadJob = viewModelScope.launch {
+        hubReadJob = scope.launch {
             val job = coroutineContext[Job]
             hubPresetReading = true
             hubPresetStatus = "読み込み中…"
@@ -1719,7 +1703,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun readHubSettings() {
         val ip = selectedIp ?: return
         hubSettingsJob?.cancel()
-        hubSettingsJob = viewModelScope.launch {
+        hubSettingsJob = scope.launch {
             val job = coroutineContext[Job]
             hubSettingsReading = true
             hubSettingsStatus = "読み込み中…"
@@ -1776,7 +1760,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (hubSettingsSaving) return
         hubSettingsSaving = true
         hubSettingsSaveStatus = "送信中…" to LogState.SENT
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val (text, state) = writeHubSettings(quest, settings)
                 hubSettingsSaveStatus = text to state
@@ -1827,7 +1811,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun readDemoSettings(demoId: String) {
         val quest = selectedQuest ?: return
         demoSettingsJob?.cancel()
-        demoSettingsJob = viewModelScope.launch {
+        demoSettingsJob = scope.launch {
             val job = coroutineContext[Job]
             demoSettingsReading = true
             try {
@@ -1905,7 +1889,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
         demoSettingsSaving = true
         show("送信中…" to LogState.SENT)
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val (text, state) = sendDemoSettings(quest, demoId, changes) { show(it) }
                 if (state == LogState.READY && hubIds[quest.ip] == hubId) {
@@ -1914,7 +1898,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     if (selectedIp == quest.ip && onScreen) readDemoSettings(demoId)
                     then?.invoke()
                 } else {
-                    show((if (then != null) "起動しませんでした（設定を Hub に書き込めません）: $text" else "未書き込み（スマホに保存）: $text") to state)
+                    show((if (then != null) "起動しませんでした（設定を Hub に書き込めません）: $text" else "未書き込み（${DEVICE_WORD}に保存）: $text") to state)
                 }
             } finally {
                 demoSettingsSaving = false
@@ -1970,7 +1954,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (presetSaving) return
         presetSaving = true
         presetSaveStatus = "送信中…" to LogState.SENT
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val (text, state) = writeHubPreset(quest, number, preset) { presetSaveStatus = "Hub が受け付けました。保存中…" to LogState.ACK }
                 presetSaveStatus = text to state
@@ -2016,7 +2000,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val config = authConfig
         if (!config.canSend) return
         val content = "Hub のプリセット $number を開始"
-        viewModelScope.launch {
+        scope.launch {
             checkHubFront(quest)?.let {
                 addLog(quest.label, content, null, LogState.ERROR, it)
                 return@launch
@@ -2062,7 +2046,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         if (demoSwitchBlockReason != null) return
         importRunning = true
-        viewModelScope.launch {
+        scope.launch {
             try {
                 imported.forEachIndexed { i, preset ->
                     if (i in importWritten) return@forEachIndexed
@@ -2111,7 +2095,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         pendingImport = null
         importWritten.clear()
         importStatus = "" to false
-        setNotice("未書き込みのプリセットとしてスマホに ${keep.size} 件保存しました（起動タブから Hub に書き込めます）", false)
+        setNotice("未書き込みのプリセットとして${DEVICE_WORD}に ${keep.size} 件保存しました（起動タブから Hub に書き込めます）", false)
         fileLog("取り込み: ${keep.size} 件を未書き込みとして保存")
     }
 
@@ -2146,7 +2130,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (unwrittenWriting != null || importRunning || demoSwitchBlockReason != null) return
         unwrittenWriting = id
         unwrittenStatus = "「${item.preset.name}」をプリセット ${item.slot} に書き込み中…" to false
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val (text, state) = writeHubPreset(quest, item.slot, HubPreset(item.preset.name, visible = true, item.preset.steps)) {}
                 if (state == LogState.READY) {
@@ -2178,7 +2162,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
         resetPortDiagnosis()
-        viewModelScope.launch {
+        scope.launch {
             val logId = addLog(quest.label, "開始 $title（Hub 経由）", null, LogState.SENT)
             val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(DemoCatalog.HUB_PACKAGE) + command)
             if (response == null) {
@@ -2202,7 +2186,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         if (quest.adb != AdbState.CONNECTED) return
         resetPortDiagnosis()
-        viewModelScope.launch {
+        scope.launch {
             val logId = addLog(quest.label, "起動 ${app.label}（adb）", null, LogState.SENT)
             val response = adbShell(quest.ip, DemoCatalog.stopOtherDemosCommand(app.packageName) + DemoCatalog.launchCommand(app))
             if (response == null) {
@@ -2231,7 +2215,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!foreground || ip != selectedIp || portDiagnosedIp == ip || portActionRunning) return
         if (selectedQuest?.adb != AdbState.CONNECTED) return
         portDiagnosedIp = ip
-        viewModelScope.launch { diagnosePort(ip) }
+        scope.launch { diagnosePort(ip) }
     }
 
     /**
@@ -2305,7 +2289,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val quest = selectedQuest ?: return
         if (portActionRunning || quest.adb != AdbState.CONNECTED) return
         val ip = quest.ip
-        viewModelScope.launch {
+        scope.launch {
             val top = adbShell(ip, PortDiagnosis.TOP_ACTIVITY_COMMAND)?.output ?: return@launch
             if (ip != selectedIp) return@launch
             val front = PortDiagnosis.frontDemo(top)
@@ -2329,7 +2313,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val ip = quest.ip
         portActionRunning = true
         portStatus = "$content…" to false
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val logId = addLog(quest.label, "$content（adb）", null, LogState.SENT)
                 val response = adbShell(ip, command)
@@ -2367,8 +2351,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A unicast DISCOVER to [ip] every [PORT_POLL_MS] for at most [waitMs]; the demo ID that answered, or null. */
     private suspend fun waitForDemoSwitch(ip: String, waitMs: Long): String? {
-        val deadline = SystemClock.elapsedRealtime() + waitMs
-        while (SystemClock.elapsedRealtime() < deadline) {
+        val deadline = platform.monotonicMs() + waitMs
+        while (platform.monotonicMs() < deadline) {
             val config = authConfig
             if (!config.canSend) return null
             probeForegroundDemo(ip, config)?.let { return it }
@@ -2401,11 +2385,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Status area before a run: the fix for a peripheral-side phone / USB debugging off, or how it starts. */
-    private fun usbIdleStatus(link: UsbLink): Pair<String, Boolean> = when (link) {
-        UsbLink.PERIPHERAL, UsbLink.HOST_NO_ADB -> UsbLinkJudge.notFoundText(link) to true
-        UsbLink.HOST_QUEST -> "Quest を認識しています。「始める」で始まります" to false
-        UsbLink.NONE -> "Quest を USB でつなぐと始まります" to false
-    }
+    private fun usbIdleStatus(link: UsbLink): Pair<String, Boolean> = platform.usb.idleStatus(link)
 
     /** Running, under 20 s since the last success, or that success's Wi-Fi connection is up. */
     private fun usbAutoStartBlocked(): Boolean {
@@ -2426,7 +2406,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         // the peripheral side and must not get this dialog.
         if (link == UsbLink.PERIPHERAL && !peripheralPrompted && wifiAdbOff) {
             peripheralPrompted = true
-            fileLog("USB: スマホが周辺機器側のためダイアログを表示")
+            fileLog("USB: ${DEVICE_WORD}が周辺機器側のためダイアログを表示")
             showUsbDialog()
             usbAdbStatus = usbIdleStatus(link)
         } else if (usbDialogOpen && changed && (link == UsbLink.PERIPHERAL || link == UsbLink.HOST_NO_ADB)) {
@@ -2449,31 +2429,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         enableWifiAdbOverUsb()
     }
 
-    /** Reads what the system tells about the USB link (attached devices, sticky USB_STATE, charging source). */
+    /** Reads what the platform tells about the USB link. */
     private fun refreshUsbLink(): UsbLink {
-        val app = getApplication<Application>()
-        val manager = app.getSystemService(UsbManager::class.java)
-        val devices = manager?.deviceList?.values.orEmpty()
-        val usbState = stickyBroadcast(ACTION_USB_STATE)
-        val battery = stickyBroadcast(Intent.ACTION_BATTERY_CHANGED)
-        val link = UsbLinkJudge.judge(
-            adbDevice = devices.any { UsbAdb.adbInterface(it) != null },
-            otherDevices = devices.count { UsbAdb.adbInterface(it) == null },
-            usbConnected = usbState?.takeIf { it.hasExtra(EXTRA_USB_CONNECTED) }?.getBooleanExtra(EXTRA_USB_CONNECTED, false),
-            hostConnected = usbState?.takeIf { it.hasExtra(EXTRA_USB_HOST_CONNECTED) }?.getBooleanExtra(EXTRA_USB_HOST_CONNECTED, false),
-            pluggedUsb = battery?.takeIf { it.hasExtra(BatteryManager.EXTRA_PLUGGED) }
-                ?.let { it.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) == BatteryManager.BATTERY_PLUGGED_USB },
-        )
-        if (link != usbLink) fileLog("USB の状態: ${UsbLinkJudge.statusText(link)}")
+        val link = platform.usb.readLink()
+        if (link != usbLink) fileLog("USB の状態: ${platform.usb.statusText(link)}")
         usbLink = link
         return link
-    }
-
-    /** Current value of a sticky system broadcast, or null when it cannot be read (then nothing is inferred). */
-    private fun stickyBroadcast(action: String): Intent? = try {
-        getApplication<Application>().registerReceiver(null, IntentFilter(action))
-    } catch (_: SecurityException) {
-        null
     }
 
     /**
@@ -2481,70 +2442,45 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
      * catches a phone on the peripheral side, which never receives ATTACHED.
      */
     private fun startUsbWatch() {
-        if (usbWatch != null) return
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val previous = usbLink
-                val link = refreshUsbLink()
-                if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && link == UsbLink.HOST_QUEST) onUsbDeviceAttached()
-                else onUsbLink(link, changed = link != previous)
-            }
+        platform.usb.startWatch { attached ->
+            val previous = usbLink
+            val link = refreshUsbLink()
+            if (attached && link == UsbLink.HOST_QUEST) onUsbDeviceAttached()
+            else onUsbLink(link, changed = link != previous)
         }
-        val filter = IntentFilter().apply {
-            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-            addAction(ACTION_USB_STATE)
-            addAction(Intent.ACTION_POWER_CONNECTED)
-            addAction(Intent.ACTION_POWER_DISCONNECTED)
-        }
-        // System broadcasts only: they are delivered to an exported or not-exported receiver alike.
-        ContextCompat.registerReceiver(getApplication(), receiver, filter, ContextCompat.RECEIVER_EXPORTED)
-        usbWatch = receiver
     }
 
-    private fun stopUsbWatch() {
-        val receiver = usbWatch ?: return
-        usbWatch = null
-        runCatching { getApplication<Application>().unregisterReceiver(receiver) }
-    }
+    private fun stopUsbWatch() = platform.usb.stopWatch()
+
+    /** The USB dialog's wording on this platform. */
+    val usbTexts: UsbTexts get() = platform.usb.texts
+
+    /** The USB dialog's status line on this platform. */
+    val usbStatusText: String get() = platform.usb.statusText(usbLink)
 
     /**
-     * Phone as USB host: runs `adb tcpip 5555` on a directly connected Quest (skipped when already on),
-     * checks that its Wi-Fi IP is on the phone's subnet, then connects over Wi-Fi adb with retries.
+     * Runs `adb tcpip 5555` on a directly connected Quest (skipped when already on; how depends on the platform),
+     * checks that its Wi-Fi IP is on this device's subnet, then connects over Wi-Fi adb with retries.
      */
     fun enableWifiAdbOverUsb() {
         if (usbAdbRunning) return
-        val app = getApplication<Application>()
         usbAdbRunning = true
         usbAttempted = true
         usbCloseJob?.cancel()
-        viewModelScope.launch {
+        scope.launch {
             try {
                 val link = refreshUsbLink()
-                val manager = app.getSystemService(UsbManager::class.java) ?: throw UsbAdbException(UsbLinkJudge.notFoundText(UsbLink.NONE))
-                val devices = UsbAdb.describeDevices(manager)
-                fileLog("USB: ${UsbLinkJudge.statusText(link)}${if (devices.isEmpty()) "" else "（${devices.joinToString(" / ")}）"}")
-                // Device details go to their own small line in the dialog (the three-line status area would cut them).
-                usbDeviceDetail = devices.joinToString(" / ")
-                val device = UsbAdb.findDevice(manager) ?: throw UsbAdbException(UsbLinkJudge.notFoundText(link))
-                usbAdbStatus = "USB の使用を許可してください" to false
-                if (!requestUsbPermission(manager, device)) throw UsbAdbException("USB の使用が許可されませんでした。「もう一度試す」を押して許可してください")
-                usbAdbStatus = "Quest と通信中…" to false
-                val key = withContext(Dispatchers.IO) {
-                    try {
-                        keyPair // generates the key files on first use
-                        UsbAdbKey.read(app.filesDir)
-                    } catch (e: java.io.IOException) {
-                        throw UsbAdbException("adb の鍵を読み込めません（${e.javaClass.simpleName}）")
-                    } catch (e: java.security.GeneralSecurityException) {
-                        throw UsbAdbException("adb の鍵を読み込めません（${e.javaClass.simpleName}）")
+                val result = platform.usb.enableWifiAdb(link, object : UsbProgress {
+                    override fun status(text: String) {
+                        scope.launch(Dispatchers.Main.immediate) { if (usbAdbRunning) usbAdbStatus = text to false }
                     }
-                }
-                val result = UsbAdb.enableWifiAdb(manager, device, key, onAuthWaiting = {
-                    viewModelScope.launch(Dispatchers.Main) {
-                        if (usbAdbRunning) usbAdbStatus = "ヘッドセット内で「USB デバッグを許可」の「常に許可」にチェックして許可してください（最大 30 秒）" to false
+                    override fun deviceDetail(text: String) {
+                        scope.launch(Dispatchers.Main.immediate) { usbDeviceDetail = text }
                     }
-                }, onStep = { line -> viewModelScope.launch(Dispatchers.Main) { fileLog("USB: $line") } })
+                    override fun log(line: String) {
+                        scope.launch(Dispatchers.Main.immediate) { fileLog("USB: $line") }
+                    }
+                })
                 onUsbWifiAdbEnabled(result)
             } catch (e: UsbAdbException) {
                 usbAdbStatus = (e.message ?: "") to true
@@ -2564,12 +2500,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val ssid = result.ssid.ifEmpty { "SSID 不明" }
         usbQuestDiag = "USB: Quest $ip/${result.prefixLength} $ssid"
         // Wi-Fi adb cannot work across networks: say so instead of timing out on the Wi-Fi connect.
-        val local = DemoSwitchSocket.localIpv4(getApplication(), wifi.network)
+        val local = platform.network.localIpv4()
         val mismatch = when {
             // Here the phone is the one to fix, not the Quest.
-            local == null -> "スマホが Wi-Fi に繋がっていません。スマホを Quest と同じ Wi-Fi（$ssid）に繋いでください"
+            local == null -> "${DEVICE_WORD}が Wi-Fi に繋がっていません。${DEVICE_WORD}を Quest と同じ Wi-Fi（$ssid）に繋いでください"
             !DemoSwitchSocket.inSubnet(ip, local.address.address, local.prefixLength) ->
-                "Quest は別のネットワークにいます（Quest $ip $ssid / スマホ ${local.address.hostAddress}/${local.prefixLength}）。Quest の Wi-Fi を確認してください"
+                "Quest は別のネットワークにいます（Quest $ip $ssid / $DEVICE_WORD ${local.address.hostAddress}/${local.prefixLength}）。Quest の Wi-Fi を確認してください"
             else -> null
         }
         if (mismatch != null) {
@@ -2585,7 +2521,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         wifiAdbOff = false
         usbAdbStatus = "完了。ケーブルを外してください（Quest $ip/${result.prefixLength} $ssid）" to false
         // Keep the dialog up long enough to read the result.
-        usbCloseJob = viewModelScope.launch {
+        usbCloseJob = scope.launch {
             delay(USB_DONE_CLOSE_MS)
             closeUsbDialog()
         }
@@ -2602,37 +2538,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         adbConnections.remove(ip)?.close()
         updateQuest(ip) { it.copy(adb = AdbState.CONNECTING) }
         setAdbMessage("Wi-Fi adb を有効にしました。接続します…")
-        adbJob = viewModelScope.launch {
+        adbJob = scope.launch {
             val (result, answered) = connectWithRetry(ip, retryPortClosed = true, sleepHint = true, firstDelayMs = USB_WIFI_FIRST_DELAY_MS)
             if (!answered) {
                 // USB worked, so Wi-Fi adb is on: the problem is the path, not the headset. No "USB で有効化" here.
                 addLog(quests.firstOrNull { it.ip == ip }?.label ?: ip, "adb 接続 $ip", null, LogState.ERROR, result.toString())
                 if (ip == selectedIp) wifiAdbOff = false
-                adbFailed(ip, manual = true, "USB での有効化は成功しました。スマホから Quest に届きません（同じ Wi-Fi か、ルーターの端末間通信の遮断を確認）")
+                adbFailed(ip, manual = true, "USB での有効化は成功しました。${DEVICE_WORD}から Quest に届きません（同じ Wi-Fi か、ルーターの端末間通信の遮断を確認）")
             } else {
                 handleAdbResult(ip, result, manual = true)
             }
-        }
-    }
-
-    private suspend fun requestUsbPermission(manager: UsbManager, device: UsbDevice): Boolean {
-        if (manager.hasPermission(device)) return true
-        val app = getApplication<Application>()
-        val result = CompletableDeferred<Boolean>()
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                result.complete(intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false))
-            }
-        }
-        ContextCompat.registerReceiver(app, receiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED)
-        try {
-            // Mutable: the system adds EXTRA_DEVICE / EXTRA_PERMISSION_GRANTED. Explicit (package) as API 34 requires.
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
-            val intent = PendingIntent.getBroadcast(app, 0, Intent(ACTION_USB_PERMISSION).setPackage(app.packageName), flags)
-            manager.requestPermission(device, intent)
-            return withTimeoutOrNull(USB_PERMISSION_WAIT_MS) { result.await() } ?: false
-        } finally {
-            app.unregisterReceiver(receiver)
         }
     }
 
@@ -2641,6 +2556,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun changeMirrorEnabled(enabled: Boolean) {
         mirrorEnabled = enabled
         settings.mirrorEnabled = enabled
+        mirrorRetryJob?.cancel()
         if (!enabled) stopMirror()
         updateMirror()
     }
@@ -2654,15 +2570,16 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun onMirrorSurfaceAvailable(surface: Surface) {
-        mirrorSurface = surface
+    /** The video output exists now (Android: the SurfaceView's surface was created). */
+    fun onMirrorSinkAvailable(factory: () -> VideoSink) {
+        mirrorSinkFactory = factory
         updateMirror()
     }
 
     /** Called from SurfaceHolder.Callback.surfaceDestroyed: the decoder must stop before returning. */
-    fun onMirrorSurfaceDestroyed() {
+    fun onMirrorSinkDestroyed() {
         stopMirror()
-        mirrorSurface = null
+        mirrorSinkFactory = null
     }
 
     private fun updateMirror() {
@@ -2670,9 +2587,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (!mirrorEnabled) { mirrorStatus = "ミラー停止中"; return }
         if (!foreground) return
         val ip = selectedIp ?: run { mirrorStatus = "Quest を選択してください"; return }
-        val surface = mirrorSurface ?: return
+        val sinkFactory = mirrorSinkFactory ?: return
         if (adbConnections[ip]?.dadb == null || selectedQuest?.adb != AdbState.CONNECTED) { mirrorStatus = "adb 接続後に表示します"; return }
-        val app = getApplication<Application>()
         mirrorStatus = "ミラー開始中…"
         var session: MirrorSession? = null
         val wake = wakePayload()
@@ -2681,19 +2597,20 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             wake?.let { QuestWake.wakeBlocking(ip, it) }
             Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, 0)
         },
-            { app.assets.open("scrcpy-server.jar") }, mirrorSettings, surface,
+            { platform.openAsset("scrcpy-server.jar") }, mirrorSettings, sinkFactory(),
             object : MirrorSession.Listener {
                 override fun onVideoSize(width: Int, height: Int) {
-                    viewModelScope.launch(Dispatchers.Main) {
+                    scope.launch(Dispatchers.Main) {
                         if (mirrorSession === session) { mirrorVideoSize = width to height; mirrorStatus = "" }
                     }
                 }
 
                 override fun onError(message: String) {
-                    viewModelScope.launch(Dispatchers.Main) {
+                    scope.launch(Dispatchers.Main) {
                         if (mirrorSession !== session) return@launch
                         mirrorStatus = "ミラーエラー: $message"
                         stopMirror()
+                        scheduleMirrorRetry()
                     }
                 }
             })
@@ -2707,8 +2624,19 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun retryMirror() {
+        mirrorRetryJob?.cancel()
         stopMirror()
         updateMirror()
+    }
+
+    /** Where the platform retries by itself ([RemotePlatform.mirrorRetryMs]): again until it runs or the mirror is turned off. */
+    private fun scheduleMirrorRetry() {
+        val interval = platform.mirrorRetryMs ?: return
+        mirrorRetryJob?.cancel()
+        mirrorRetryJob = scope.launch {
+            delay(interval)
+            if (mirrorEnabled && mirrorSession == null) updateMirror()
+        }
     }
 
     // ---- display ---------------------------------------------------------------------------------
@@ -2762,17 +2690,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         const val PORT_STOP_WAIT_MS = 6_000L
         const val PORT_RESTART_WAIT_MS = 20_000L
         const val PORT_POLL_MS = 1_000L
-        const val USB_PERMISSION_WAIT_MS = 60_000L
         /** tcpip restarts adbd, which re-enumerates on USB and sends ATTACHED again. */
         const val USB_REATTACH_IGNORE_MS = 20_000L
         const val USB_WIFI_FIRST_DELAY_MS = 1_500L
         const val USB_DONE_CLOSE_MS = 3_000L
         const val NOTICE_CLEAR_MS = 15_000L
         const val NOT_FOREGROUND_TEXT = "Quest のデモが前面にありません（HMD 内でメニューや一時停止を閉じてください）"
-        const val ACTION_USB_PERMISSION = "com.hapbeat.demoremote.USB_PERMISSION"
-        // Hidden UsbManager constants, written as strings.
-        const val ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE"
-        const val EXTRA_USB_CONNECTED = "connected"
-        const val EXTRA_USB_HOST_CONNECTED = "host_connected"
     }
 }

@@ -1,15 +1,10 @@
 package com.hapbeat.demoremote.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.view.SurfaceHolder
-import android.view.SurfaceView
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,18 +42,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import com.hapbeat.demoremote.AdbState
 import com.hapbeat.demoremote.ControlCatalog
+import com.hapbeat.demoremote.DEVICE_WORD
 import com.hapbeat.demoremote.DemoCatalog
 import com.hapbeat.demoremote.LogEntry
 import com.hapbeat.demoremote.LogState
@@ -71,8 +63,6 @@ import com.hapbeat.demoremote.adb.QuestBoundary
 import com.hapbeat.demoremote.data.HubDemo
 import com.hapbeat.demoremote.data.HubPresets
 import com.hapbeat.demoremote.data.HubPresetSlot
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -85,39 +75,41 @@ import kotlinx.coroutines.delay
 @Composable
 fun RemoteScreen(
     vm: RemoteViewModel, onOpenSettings: () -> Unit, onEditPreset: (Int) -> Unit = {}, onOpenHubSettings: () -> Unit = {},
-    tab: Int = 0, onTab: (Int) -> Unit = {}, onOpenDemoSettings: (String) -> Unit = {},
+    tab: Int = 0, onTab: (Int) -> Unit = {}, onOpenDemoSettings: (String) -> Unit = {}, onOpenPlatformExtra: () -> Unit = {},
 ) {
     if (!vm.authChosen) AuthChoiceDialog(vm)
     if (vm.sleepHintIp != null) SleepHintDialog(vm)
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        if (wide) {
-            Row(Modifier.fillMaxSize().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1.5f).fillMaxHeight()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 600.dp
+        // Phone portrait: the mirror stays pinned at the top while the controls below scroll.
+        val mirrorHeight = maxHeight * 0.36f
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (wide) {
+                Row(Modifier.fillMaxSize().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1.5f).fillMaxHeight()) {
+                        MirrorHeader(vm)
+                        if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().weight(1f))
+                    }
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        QuestBar(vm, onOpenSettings)
+                        ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings, onOpenPlatformExtra)
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                     MirrorHeader(vm)
-                    if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().weight(1f))
-                }
-                Column(
-                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    QuestBar(vm, onOpenSettings)
-                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings)
-                }
-            }
-        } else {
-            // Phone portrait: the mirror stays pinned at the top while the controls below scroll.
-            val mirrorHeight = (LocalConfiguration.current.screenHeightDp * 0.36f).dp
-            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                MirrorHeader(vm)
-                // ON opens the pane, OFF closes it: no separate collapse button.
-                if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().height(mirrorHeight))
-                Column(
-                    Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    QuestBar(vm, onOpenSettings)
-                    ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings)
+                    // ON opens the pane, OFF closes it: no separate collapse button.
+                    if (vm.mirrorEnabled) MirrorPane(vm, Modifier.fillMaxWidth().height(mirrorHeight))
+                    Column(
+                        Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        QuestBar(vm, onOpenSettings)
+                        ActionsAndLog(vm, onEditPreset, onOpenHubSettings, tab, onTab, onOpenDemoSettings, onOpenPlatformExtra)
+                    }
                 }
             }
         }
@@ -127,7 +119,7 @@ fun RemoteScreen(
 @Composable
 private fun ActionsAndLog(
     vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenHubSettings: () -> Unit, tab: Int, onTab: (Int) -> Unit,
-    onOpenDemoSettings: (String) -> Unit,
+    onOpenDemoSettings: (String) -> Unit, onOpenPlatformExtra: () -> Unit,
 ) {
     val quest = vm.selectedQuest
     val hubInstalled = quest?.installed?.contains(DemoCatalog.hub.packageName) != false
@@ -152,7 +144,7 @@ private fun ActionsAndLog(
             modifier = Modifier.weight(1f).height(48.dp),
             outlined = true,
         ) { onOpenHubSettings() }
-        Spacer(Modifier.weight(1f))
+        PlatformMainActionSlot(vm, onOpenPlatformExtra, Modifier.weight(1f).height(48.dp))
     }
     NoticeArea(vm)
     TabRow(selectedTabIndex = tab) {
@@ -491,7 +483,7 @@ private fun SessionTab(vm: RemoteViewModel, onEditPreset: (Int) -> Unit, onOpenH
     slots.forEachIndexed { i, slot ->
         HubPresetRow(i + 1, slot, hubDemos, stale = block != null, canWrite = block == null, onEdit = { onEditPreset(i + 1) }, onStart = { confirmStart = i + 1 })
     }
-    QrImportButton(vm, Modifier.fillMaxWidth())
+    PlatformQrImportButton(vm, Modifier.fillMaxWidth())
     // Started by the Hub from what it stores: show that content once more before starting.
     confirmStart?.let { number ->
         val slot = slots.getOrNull(number - 1)
@@ -582,7 +574,7 @@ private fun UnwrittenPresetSection(vm: RemoteViewModel, block: String?, hubDemos
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("未書き込みのプリセットを削除しますか？") },
-            text = { Text("「${item.preset.name}」をスマホから消します（Hub のプリセットは変わりません）") },
+            text = { Text("「${item.preset.name}」を${DEVICE_WORD}から消します（Hub のプリセットは変わりません）") },
             confirmButton = { TextButton(onClick = { deleting = null; vm.deleteUnwritten(item.id) }) { Text("削除") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("やめる") } },
         )
@@ -652,38 +644,6 @@ private fun presetTitle(slot: HubPresetSlot): String = when {
     slot.preset.name.isNotEmpty() -> slot.preset.name
     slot.stepCount == 0 -> "空き"
     else -> "（名前なし）"
-}
-
-/**
- * Reads a showcase QR with the in-app scanner (zxing-android-embedded). The camera permission is asked
- * right before the first scan; the result goes to the import confirmation dialog.
- */
-@Composable
-private fun QrImportButton(vm: RemoteViewModel, modifier: Modifier) {
-    val context = LocalContext.current
-    val scan = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let(vm::importFromQr)
-    }
-    val scanOptions = {
-        ScanOptions()
-            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("ショーケースのプリセットの QR を枠に入れてください")
-            .setBeepEnabled(false)
-            .setOrientationLocked(false)
-    }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) scan.launch(scanOptions()) else vm.onQrCameraDenied()
-    }
-    TextButton(
-        onClick = {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                scan.launch(scanOptions())
-            } else {
-                permission.launch(Manifest.permission.CAMERA)
-            }
-        },
-        modifier = modifier,
-    ) { Text("QR から Hub に取り込む") }
 }
 
 /**
@@ -816,13 +776,16 @@ private fun LogRow(entry: LogEntry) {
 
 @Composable
 private fun MirrorHeader(vm: RemoteViewModel) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("画面ミラー", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-        // Fixed width whether or not the retry button is shown.
-        Box(Modifier.width(88.dp)) {
-            if (vm.mirrorEnabled && vm.mirrorStatus.startsWith("ミラーエラー")) TextButton(onClick = vm::retryMirror) { Text("再試行") }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("画面ミラー", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            // Fixed width whether or not the retry button is shown.
+            Box(Modifier.width(88.dp)) {
+                if (vm.mirrorEnabled && vm.mirrorStatus.startsWith("ミラーエラー")) TextButton(onClick = vm::retryMirror) { Text("再試行") }
+            }
+            Switch(checked = vm.mirrorEnabled, onCheckedChange = vm::changeMirrorEnabled)
         }
-        Switch(checked = vm.mirrorEnabled, onCheckedChange = vm::changeMirrorEnabled)
+        PlatformMirrorHeaderExtras(vm)
     }
 }
 
@@ -832,18 +795,7 @@ private fun MirrorPane(vm: RemoteViewModel, modifier: Modifier) {
         if (vm.mirrorEnabled) {
             val size = vm.mirrorVideoSize
             val aspect = if (size != null && size.second > 0) size.first.toFloat() / size.second else 16f / 9f
-            AndroidView(
-                factory = { context ->
-                    SurfaceView(context).apply {
-                        holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(holder: SurfaceHolder) = vm.onMirrorSurfaceAvailable(holder.surface)
-                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
-                            override fun surfaceDestroyed(holder: SurfaceHolder) = vm.onMirrorSurfaceDestroyed()
-                        })
-                    }
-                },
-                modifier = Modifier.aspectRatio(aspect),
-            )
+            PlatformMirrorVideo(vm, Modifier.aspectRatio(aspect))
         }
         if (vm.mirrorStatus.isNotEmpty()) {
             Text(vm.mirrorStatus, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))

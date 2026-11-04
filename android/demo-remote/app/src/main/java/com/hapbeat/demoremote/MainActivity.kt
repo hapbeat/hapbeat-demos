@@ -1,11 +1,11 @@
 package com.hapbeat.demoremote
 
+import android.app.Application
 import android.content.Intent
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
@@ -17,27 +17,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.viewModelScope
 import com.hapbeat.demoremote.ui.AppTheme
-import com.hapbeat.demoremote.ui.DemoSettingsScreen
-import com.hapbeat.demoremote.ui.HubSettingsScreen
-import com.hapbeat.demoremote.ui.LicenseScreen
-import com.hapbeat.demoremote.ui.PresetEditScreen
-import com.hapbeat.demoremote.ui.PresetImportDialog
-import com.hapbeat.demoremote.ui.RemoteScreen
-import com.hapbeat.demoremote.ui.SettingsScreen
-import com.hapbeat.demoremote.ui.UsbAdbDialog
+import com.hapbeat.demoremote.ui.RemoteApp
 
-enum class Screen { REMOTE, SETTINGS, LICENSES, PRESET, HUB_SETTINGS, DEMO_SETTINGS }
+/** Keeps the shared [RemoteViewModel] across configuration changes. */
+class RemoteViewModelHolder(app: Application) : AndroidViewModel(app) {
+    val remote = RemoteViewModel(AndroidPlatform(app), viewModelScope)
+
+    override fun onCleared() = remote.close()
+}
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: RemoteViewModel by viewModels()
+    private val holder: RemoteViewModelHolder by viewModels()
+    private val viewModel: RemoteViewModel get() = holder.remote
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,43 +45,14 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             AppTheme {
-                var screen by rememberSaveable { mutableStateOf(Screen.REMOTE) }
-                var editingPreset by rememberSaveable { mutableStateOf<Int?>(null) }
-                var demoSettingsId by rememberSaveable { mutableStateOf<String?>(null) }
-                // The main screen's tab stays when another screen is opened and closed.
-                var remoteTab by rememberSaveable { mutableIntStateOf(0) }
                 LaunchedEffect(viewModel.keepScreenOn) {
                     if (viewModel.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
-                BackHandler(enabled = screen != Screen.REMOTE) {
-                    screen = if (screen == Screen.LICENSES) Screen.SETTINGS else Screen.REMOTE
-                }
                 // targetSdk 35 draws edge-to-edge: keep content clear of the status / navigation bars.
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-                        when (screen) {
-                            Screen.REMOTE -> RemoteScreen(
-                                viewModel,
-                                onOpenSettings = { screen = Screen.SETTINGS },
-                                onEditPreset = { editingPreset = it; screen = Screen.PRESET },
-                                onOpenHubSettings = { screen = Screen.HUB_SETTINGS },
-                                tab = remoteTab,
-                                onTab = { remoteTab = it },
-                                onOpenDemoSettings = { demoSettingsId = it; screen = Screen.DEMO_SETTINGS },
-                            )
-                            Screen.PRESET -> PresetEditScreen(viewModel, editingPreset ?: 1, onDone = { screen = Screen.REMOTE })
-                            Screen.HUB_SETTINGS -> HubSettingsScreen(viewModel, onDone = { screen = Screen.REMOTE })
-                            Screen.DEMO_SETTINGS -> DemoSettingsScreen(viewModel, demoSettingsId ?: "", onDone = { screen = Screen.REMOTE })
-                            Screen.SETTINGS -> SettingsScreen(
-                                viewModel,
-                                onBack = { screen = Screen.REMOTE },
-                                onOpenLicenses = { screen = Screen.LICENSES },
-                            )
-                            Screen.LICENSES -> LicenseScreen(onBack = { screen = Screen.SETTINGS })
-                        }
-                        if (viewModel.usbDialogOpen) UsbAdbDialog(viewModel)
-                        PresetImportDialog(viewModel)
+                        RemoteApp(viewModel)
                     }
                 }
             }

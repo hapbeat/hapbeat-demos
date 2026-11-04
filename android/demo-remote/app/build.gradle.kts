@@ -1,11 +1,17 @@
 import java.net.URI
 import java.security.MessageDigest
+import java.util.Properties
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// The one version value of the Android and the desktop build.
+val demoRemoteVersion: String = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}.getProperty("demoRemoteVersion")
 
 android {
     namespace = "com.hapbeat.demoremote"
@@ -16,9 +22,20 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0-d5"
+        versionName = demoRemoteVersion
     }
 
+    // The code and assets both builds share ("../shared" is a source directory, not a Gradle module).
+    sourceSets {
+        getByName("main") {
+            java.srcDir("../shared/src/main/java")
+            assets.srcDir("../shared/src/main/assets")
+        }
+        getByName("test") {
+            java.srcDir("../shared/src/test/java")
+            resources.srcDir("../shared/src/test/resources")
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -29,7 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.hapbeat.demoremote.BuildConfig
+import com.hapbeat.demoremote.DEVICE_WORD
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.MirrorSettings
@@ -67,7 +68,7 @@ fun SettingsScreen(vm: RemoteViewModel, onBack: () -> Unit, onOpenLicenses: () -
             LabeledSwitch("画面を常時 ON にする", vm.keepScreenOn, enabled = true, onChange = vm::setKeepScreenOnSetting)
             HorizontalDivider()
             TextButton(onClick = onOpenLicenses) { Text("ライセンス") }
-            Text("バージョン ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
+            Text("バージョン ${vm.platform.versionName}", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -175,7 +176,7 @@ private fun QuestRow(vm: RemoteViewModel, quest: QuestState) {
 private fun UsbAdbSection(vm: RemoteViewModel) {
     SectionTitle("Quest と USB でつなぐ")
     Text(
-        "Quest を再起動すると、スマホからの Wi-Fi 接続（adb）が切れます。USB ケーブルで一度つなぐと元に戻ります（PC 不要）。",
+        vm.usbTexts.settingsBody,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -186,7 +187,7 @@ private fun UsbAdbSection(vm: RemoteViewModel) {
 private fun LogSection(vm: RemoteViewModel) {
     SectionTitle("ログ")
     Text(
-        "結果ログと接続の各段階をスマホ内に保存しています（最新 500 行）。不具合の報告に使えます。",
+        "結果ログと接続の各段階を${DEVICE_WORD}内に保存しています（最新 500 行）。不具合の報告に使えます。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -207,7 +208,7 @@ private fun MirrorSection(vm: RemoteViewModel) {
     ChoiceRow("フレームレート", MirrorSettings.FPS, s.maxFps, { "$it fps" }) { vm.updateMirrorSettings(s.copy(maxFps = it)) }
     LabeledSwitch("両目を表示", s.bothEyes, enabled = true) { vm.updateMirrorSettings(s.copy(bothEyes = it)) }
     Text(
-        "既定は 1024 / 8 Mbps / 30 fps（廉価タブレットでも詰まりにくい値）。",
+        vm.platform.mirrorDefaultsNote,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -215,7 +216,8 @@ private fun MirrorSection(vm: RemoteViewModel) {
 
 @Composable
 private fun <T> ChoiceRow(label: String, options: List<T>, selected: T, text: (T) -> String, onSelect: (T) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Scrolls when the chips do not fit a phone's width.
+    Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, Modifier.width(110.dp))
         options.forEach { option ->
             FilterChip(selected = option == selected, onClick = { onSelect(option) }, label = { Text(text(option)) })

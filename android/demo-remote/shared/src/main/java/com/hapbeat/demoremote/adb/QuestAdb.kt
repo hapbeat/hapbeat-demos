@@ -1,6 +1,5 @@
 package com.hapbeat.demoremote.adb
 
-import android.content.Context
 import dadb.AdbAuthException
 import dadb.AdbKeyPair
 import dadb.AdbShellResponse
@@ -18,10 +17,10 @@ import java.net.InetSocketAddress
 import java.net.Socket
 
 object AdbKeys {
-    /** Loads (or generates once) this app's RSA key pair under filesDir. minSdk 26 allows dadb's own helpers. */
-    fun load(context: Context): AdbKeyPair {
-        val priv = File(context.filesDir, "adbkey")
-        val pub = File(context.filesDir, "adbkey.pub")
+    /** Loads (or generates once) this app's RSA key pair under [dir]. minSdk 26 allows dadb's own helpers. */
+    fun load(dir: File): AdbKeyPair {
+        val priv = File(dir, "adbkey")
+        val pub = File(dir, "adbkey.pub")
         if (!priv.isFile || !pub.isFile) AdbKeyPair.generate(priv, pub)
         return AdbKeyPair.read(priv, pub)
     }

@@ -1,10 +1,5 @@
 package com.hapbeat.demoremote.mirror
 
-import android.media.MediaCodec
-import android.media.MediaFormat
-import android.os.Build
-import android.os.SystemClock
-import android.view.Surface
 import com.hapbeat.demoremote.data.MirrorSettings
 import dadb.AdbShellPacket
 import dadb.AdbShellStream
@@ -43,16 +38,28 @@ object ScrcpyLaunch {
     }
 }
 
+/** Where a mirror session's H.264 goes. [MirrorSession] calls these one at a time. */
+interface VideoSink {
+    /** Stream (re)configuration: (re)creates the decoder for this size. */
+    fun configure(width: Int, height: Int)
+    /** Returns false when the decoder is congested and the packet was not taken. Before [configure]: nothing to decode into, true. */
+    fun queue(packet: ScrcpyPacket.Media): Boolean
+    /** Outputs what is decoded so far. */
+    fun drain()
+    /** Frees the decoder; safe to call repeatedly, and [configure] may follow. */
+    fun release()
+}
+
 /**
  * Display-only Quest mirror: pushes scrcpy-server, starts it over the shared dadb connection,
- * reads the H.264 stream and renders it to [surface] with MediaCodec. No audio, no input.
+ * reads the H.264 stream and hands it to [sink]. No audio, no input.
  */
 class MirrorSession(
     /** Opens a dedicated adb connection: the video stream never shares (or stalls) the control one. */
     private val connect: () -> Dadb,
     private val serverJar: () -> InputStream,
     private val settings: MirrorSettings,
-    private val surface: Surface,
+    private val sink: VideoSink,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -64,8 +71,7 @@ class MirrorSession(
 
     @Volatile private var stopped = false
     @Volatile private var dadb: Dadb? = null
-    private val codecLock = Any()
-    private var codec: MediaCodec? = null
+    private val sinkLock = Any()
     @Volatile private var shell: AdbShellStream? = null
     @Volatile private var video: AdbStream? = null
     private val shellTail = ArrayDeque<String>()
@@ -123,7 +129,7 @@ class MirrorSession(
                 stream = dadb.open("localabstract:scrcpy_$scid")
                 break
             } catch (_: Exception) {
-                SystemClock.sleep(100)
+                Thread.sleep(100)
             }
         }
         val opened = stream ?: throw IOException("scrcpy に接続できません")
@@ -134,83 +140,45 @@ class MirrorSession(
     private fun decode(reader: ScrcpyVideoReader) {
         val codecId = reader.readHeader()
         if (codecId != ScrcpyVideoReader.CODEC_H264) throw IOException("未対応のコーデック 0x%08x".format(codecId))
-        val info = MediaCodec.BufferInfo()
         var dropping = false
         var droppingSince = 0L
         while (!stopped) {
             when (val packet = reader.readPacket()) {
                 is ScrcpyPacket.Session -> {
-                    configureCodec(packet.width, packet.height)
+                    configureSink(packet.width, packet.height)
                     listener.onVideoSize(packet.width, packet.height)
                     dropping = false
                 }
                 is ScrcpyPacket.Media -> {
                     if (dropping && !packet.keyFrame && !packet.config) {
-                        if (SystemClock.uptimeMillis() - droppingSince > KEYFRAME_WAIT_MS) throw RestartNeeded()
-                        drainOutput(info)
+                        if (uptimeMs() - droppingSince > KEYFRAME_WAIT_MS) throw RestartNeeded()
+                        drainSink()
                         continue
                     }
-                    val queued = queue(packet)
+                    val queued = synchronized(sinkLock) { sink.queue(packet) }
                     // A lost SPS/PPS cannot be recovered from later frames: restart for a fresh one.
                     if (!queued && packet.config) throw RestartNeeded()
                     if (!queued) {
-                        if (!dropping) { dropping = true; droppingSince = SystemClock.uptimeMillis() }
+                        if (!dropping) { dropping = true; droppingSince = uptimeMs() }
                     } else if (packet.keyFrame) {
                         dropping = false
                     }
-                    drainOutput(info)
+                    drainSink()
                 }
             }
         }
     }
 
-    private fun configureCodec(width: Int, height: Int) = synchronized(codecLock) {
+    private fun configureSink(width: Int, height: Int) = synchronized(sinkLock) {
         if (stopped) return
-        codec?.let { it.stop(); it.release() }
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-        codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
-            configure(format, surface, null, 0)
-            start()
-        }
+        sink.configure(width, height)
     }
 
-    /** Returns false if no input buffer became free within 50 ms (decoder is congested). */
-    private fun queue(packet: ScrcpyPacket.Media): Boolean = synchronized(codecLock) {
-        val c = codec ?: return true // no session yet: nothing to decode into
-        val index = c.dequeueInputBuffer(INPUT_TIMEOUT_US)
-        if (index < 0) return false
-        val buffer = c.getInputBuffer(index) ?: return false
-        buffer.clear()
-        buffer.put(packet.data)
-        var flags = 0
-        if (packet.config) flags = flags or MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-        if (packet.keyFrame) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
-        c.queueInputBuffer(index, 0, packet.data.size, if (packet.config) 0 else packet.ptsUs, flags)
-        true
-    }
+    private fun drainSink() = synchronized(sinkLock) { sink.drain() }
 
-    private fun drainOutput(info: MediaCodec.BufferInfo) = synchronized(codecLock) {
-        val c = codec ?: return
-        while (true) {
-            val index = c.dequeueOutputBuffer(info, 0)
-            if (index >= 0) c.releaseOutputBuffer(index, true)
-            else if (index == MediaCodec.INFO_TRY_AGAIN_LATER) break
-            // INFO_OUTPUT_FORMAT_CHANGED / INFO_OUTPUT_BUFFERS_CHANGED: keep draining
-        }
-    }
+    private fun releaseCodec() = synchronized(sinkLock) { sink.release() }
 
-    private fun releaseCodec() = synchronized(codecLock) {
-        codec?.let {
-            try {
-                it.stop()
-            } catch (_: IllegalStateException) {
-                // Already in error/released state; release() below still frees it.
-            }
-            it.release()
-        }
-        codec = null
-    }
+    private fun uptimeMs() = System.nanoTime() / 1_000_000
 
     private fun closeStreams() {
         video?.let { runCatching { it.close() } }
@@ -249,7 +217,6 @@ class MirrorSession(
     }
 
     private companion object {
-        const val INPUT_TIMEOUT_US = 50_000L
         const val KEYFRAME_WAIT_MS = 2_000L
     }
 }

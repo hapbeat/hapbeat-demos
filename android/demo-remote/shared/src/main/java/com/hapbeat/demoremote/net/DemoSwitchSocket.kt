@@ -1,9 +1,5 @@
 package com.hapbeat.demoremote.net
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.LinkAddress
-import android.net.Network
 import com.hapbeat.demoremote.protocol.DemoSwitchProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +12,20 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.SocketException
+
+/** This device's IPv4 address on the LAN and its prefix length. */
+data class LocalIpv4(val address: InetAddress, val prefixLength: Int)
+
+/** The LAN this device uses for Demo Switch and adb. */
+interface PlatformNetwork {
+    /** [onChanged] runs on any thread whenever the network comes, goes or changes. */
+    fun start(onChanged: () -> Unit)
+    fun stop()
+    /** Null without a usable LAN (never a mobile network, where a broadcast or subnet scan would be meaningless). */
+    fun localIpv4(): LocalIpv4?
+    /** IPv4 default gateway of that LAN, or null. */
+    fun gatewayIpv4(): String?
+}
 
 /**
  * One ephemeral UDP socket shared by DISCOVER / SWITCH / CONTROL. Kept open while the app is
@@ -74,25 +84,6 @@ class DemoSwitchSocket(
     }
 
     companion object {
-        /**
-         * This device's IPv4 address and prefix on the Wi-Fi [network]; null without Wi-Fi (never the
-         * mobile network, where a broadcast or subnet scan would be meaningless).
-         */
-        fun localIpv4(context: Context, network: Network?): LinkAddress? {
-            if (network == null) return null
-            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
-            val link = cm.getLinkProperties(network) ?: return null
-            return link.linkAddresses.firstOrNull { it.address is Inet4Address }
-        }
-
-        /** IPv4 default gateway of the Wi-Fi [network], or null. */
-        fun gatewayIpv4(context: Context, network: Network?): String? {
-            if (network == null) return null
-            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
-            val link = cm.getLinkProperties(network) ?: return null
-            return link.routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway?.hostAddress
-        }
-
         /** True when the IPv4 [ip] is inside [network]/[prefixLength]. */
         fun inSubnet(ip: String, network: ByteArray, prefixLength: Int): Boolean {
             if (!DemoSwitchProtocol.isUnicastIpv4(ip) || network.size != 4 || prefixLength !in 0..32) return false
