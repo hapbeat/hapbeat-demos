@@ -337,6 +337,7 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
     /** Hosts with Wi-Fi adb that turned out not to be a Quest. Memory only: DHCP may later give the IP to a Quest. */
     private val ignoredAdbHosts = mutableSetOf<String>()
     private var lastDiscovery = ""
+    private var firstRoundsLogged = 0
     private var lastScan = ""
     /** A scan was asked for while one was running (e.g. Wi-Fi changed mid-scan): run once more right after it. */
     private var adbRescanRequested = false
@@ -386,6 +387,7 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
 
     fun onForeground() {
         foreground = true
+        firstRoundsLogged = 0
         reopenSocket()
         describedIps.clear()
         quests.indices.forEach { quests[it] = quests[it].copy(respondedLastRound = null, respondedPrevRound = null) }
@@ -631,6 +633,7 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
                 val open = found.filter { it !in ignoredAdbHosts }.toSet()
                 lastScan = "5555 走査 ${timeFormat.format(Date())} ${open.size} 台"
                 updateDiscoveryDiag()
+                logFirstRounds(lastScan)
                 // Port 5555 alone does not prove a Quest (a phone left in `adb tcpip` answers too): such a host is
                 // shown as unconfirmed until adb reports its model.
                 open.filter { ip -> quests.none { it.ip == ip } }.forEach { ip ->
@@ -693,6 +696,7 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
             lastDiscovery = "探索 ${timeFormat.format(Date())} 送信 $sent" + (if (failed > 0) "（失敗 $failed）" else "") +
                 "・応答 ${responders.size}（bcast ${broadcastResponders.size}）"
             updateDiscoveryDiag()
+            logFirstRounds(lastDiscovery)
             quests.indices.forEach {
                 val q = quests[it]
                 // No answer in two rounds in a row: whatever was in front before is no longer known (home screen, asleep,
@@ -713,6 +717,14 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
             activeNonces.remove(broadcastNonce)
             activeNonces.remove(unicastNonce)
             discovering = false
+        }
+    }
+
+    /** The log file shows that discovery runs: the first discovery round and 5555 scan after each start. */
+    private fun logFirstRounds(line: String) {
+        if (firstRoundsLogged < 2) {
+            firstRoundsLogged++
+            fileLog(line)
         }
     }
 
@@ -1323,6 +1335,22 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
         } catch (_: Exception) {
             adbLost(ip)
             null
+        }
+    }
+
+    /** A shell command on the control connection; null when adb is not connected or was lost by it. */
+    suspend fun questShell(ip: String, command: String): dadb.AdbShellResponse? = adbShell(ip, command)
+
+    /** A new adb connection of its own to [ip], for work that must not hold up the control one. Blocking; the caller closes it. */
+    fun openAdbConnection(ip: String): Dadb = Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, 0)
+
+    /** The selected Quest's installed packages and address files, read again after something was installed. */
+    fun refreshInstalledPackages() {
+        val ip = selectedIp ?: return
+        scope.launch {
+            val packages = adbShell(ip, "pm list packages")?.output?.let { QuestAdb.parsePackages(it) } ?: return@launch
+            updateQuest(ip) { it.copy(installed = packages) }
+            refreshDeviceAddress(ip)
         }
     }
 

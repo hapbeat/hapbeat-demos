@@ -3,7 +3,6 @@ package com.hapbeat.demoremote.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -41,10 +40,11 @@ fun PlatformMirrorHeaderExtras(vm: RemoteViewModel) = MirrorFullScreenControls(v
 
 /** The free half of the row under 「Hub の設定」. */
 @Composable
-fun PlatformMainActionSlot(vm: RemoteViewModel, onOpen: () -> Unit, modifier: Modifier) = Spacer(modifier)
+fun PlatformMainActionSlot(vm: RemoteViewModel, onOpen: () -> Unit, modifier: Modifier) =
+    ActionButton("Quest へのインストール", enabled = true, modifier = modifier, outlined = true, onClick = onOpen)
 
 @Composable
-fun PlatformExtraScreen(vm: RemoteViewModel, onBack: () -> Unit) = Unit
+fun PlatformExtraScreen(vm: RemoteViewModel, onBack: () -> Unit) = InstallScreen(vm, LocalDesktopState.current.installModel(vm), onBack)
 
 /** No camera on a PC: the showcase's preset link (or the QR's text) is pasted instead; it goes to the same confirmation dialog. */
 @Composable

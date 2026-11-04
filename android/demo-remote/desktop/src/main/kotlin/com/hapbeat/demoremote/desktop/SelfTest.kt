@@ -18,6 +18,8 @@ import com.hapbeat.demoremote.net.PlatformNetwork
 import com.hapbeat.demoremote.ui.AppTheme
 import com.hapbeat.demoremote.ui.DesktopState
 import com.hapbeat.demoremote.ui.LocalDesktopState
+import com.hapbeat.demoremote.ui.LocalRemotePlatform
+import com.hapbeat.demoremote.ui.PlatformExtraScreen
 import com.hapbeat.demoremote.ui.RemoteApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +55,8 @@ object SelfTest {
         val platform = DesktopPlatform(BuildInfo.VERSION, temp, store, FixedNetwork(), DesktopUsbBridge(), null, File(temp, "none"))
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val vm = RemoteViewModel(platform, scope)
-        val desktop = DesktopState(store, MirrorFrames())
+        store.write { putString("desktop_apk_dir", temp.path) }
+        val desktop = DesktopState(store, MirrorFrames(), scope, temp.path)
         vm.quests.add(QuestState("192.168.0.37", "HMD #1", model = "Quest 3S", adb = AdbState.CONNECTED, respondedLastRound = true, battery = 80, lastDemoId = "demo_hub"))
         vm.selectQuest("192.168.0.37")
         listOf(1400 to 860, 900 to 700).forEach { (width, height) ->
@@ -67,6 +70,17 @@ object SelfTest {
             scene.close()
             println("rendered main-${width}x$height.png")
         }
+        val scene = ImageComposeScene(1400, 860, Density(1f)) {
+            AppTheme {
+                CompositionLocalProvider(LocalRemotePlatform provides platform, LocalDesktopState provides desktop) {
+                    PlatformExtraScreen(vm, onBack = {})
+                }
+            }
+        }
+        scene.render(0)
+        val image = scene.render(1_000_000_000)
+        File(dir, "install-1400x860.png").writeBytes((image.encodeToData(EncodedImageFormat.PNG) ?: error("PNG encoding failed")).bytes)
+        scene.close()
         scope.cancel()
         0
     }

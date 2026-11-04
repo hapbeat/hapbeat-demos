@@ -59,7 +59,7 @@ fun main(args: Array<String>) {
             dataDir.mkdirs()
             PropertiesStore(File(dataDir, "settings.properties"))
         }
-        val desktop = remember { DesktopState(store, MirrorFrames()) }
+        val desktop = remember { DesktopState(store, MirrorFrames(), scope, BuildInfo.DEFAULT_APK_DIR) }
         val vm = remember {
             val platform = DesktopPlatform(
                 versionName = BuildInfo.VERSION,

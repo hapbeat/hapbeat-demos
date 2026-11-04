@@ -53,6 +53,7 @@ import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.data.KeyValueStore
 import com.hapbeat.demoremote.mirror.MirrorFrames
 import com.hapbeat.demoremote.mirror.MirrorLayout
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -77,7 +78,13 @@ object MonitorChoice {
 }
 
 /** What the desktop adds around the shared screens: the frames of the one mirror stream and the full-screen output. */
-class DesktopState(private val store: KeyValueStore, val frames: MirrorFrames) {
+class DesktopState(private val store: KeyValueStore, val frames: MirrorFrames, private val scope: CoroutineScope, private val defaultApkDir: String) {
+    private var installModel: InstallModel? = null
+
+    /** The install screen's state; it outlives the screen, so an install keeps running while another screen is open. */
+    fun installModel(vm: RemoteViewModel): InstallModel =
+        installModel ?: InstallModel(vm, store, scope, defaultApkDir).also { installModel = it }
+
     var fullScreen by mutableStateOf(false)
         private set
     /** Fill the display (centre crop) instead of fitting with black bars. */

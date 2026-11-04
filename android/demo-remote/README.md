@@ -1,6 +1,6 @@
-# Hapbeat Demo Remote（Android）
+# Hapbeat Demo Remote（Android / Windows）
 
-展示・デモ運営用の Android リモコンアプリ。同じ LAN 上の Meta Quest に対して次を行う。
+展示・デモ運営用のリモコンアプリ。Android アプリと Windows アプリは同じソースからビルドする（[Windows 版](#windows-版)）。同じ LAN 上の Meta Quest に対して次を行う。
 
 - **アプリ切替 / アプリ操作**: Demo Switch プロトコル（UDP 7710、`hapbeat-contracts` の `specs/demo-switch-control.md`）で `SWITCH` / `CONTROL` を送る。M5 controller（`hapbeat-demo-switch-controller-firmware`）の代替として使え、併存もできる
 - **Hub のプリセット 1〜3**: 同じく Demo Switch（`PRESET_GET` / `PRESET_SET` / `PRESET_START`）で、Hub に保存されたプリセットを読み、書き換え、開始する（adb 不要）
@@ -32,7 +32,7 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 - `local.properties`（`sdk.dir=...`）は各 PC で用意する（commit しない）
 - scrcpy-server はビルド時に GitHub Releases から取得し、SHA-256 を検証して APK に同梱する（repo には置かない）。`tools/quest-mirror/scrcpy/scrcpy-server` に同じハッシュのファイルがあればそれを使う（オフラインビルド用）
 - ユニットテスト: `.\gradlew.bat :app:testDebugUnitTest`
-- デモボタンのサムネイル（`app/src/main/assets/thumbs/<demo_id>.webp`）は devtools-site のショーケースから縮小して同梱している。ショーケースの画像を更新したら差し替える
+- デモボタンのサムネイル（`shared/src/main/assets/thumbs/<demo_id>.webp`）は devtools-site のショーケースから縮小して同梱している。ショーケースの画像を更新したら差し替える
 
 ## 初回設定
 
@@ -218,10 +218,58 @@ Quest を USB で PC に繋いで `tools/enable-quest-wifi-adb.cmd` をダブル
 ## 画面ミラー
 
 - 既定: 最大サイズ 1024、8 Mbps、30 fps、左目のみ（横長パネルを半分に crop）
-- 設定画面で 最大サイズ 720 / 1024 / 1280 / 1600、ビットレート 2 / 4 / 8 Mbps、30 / 60 fps、「両目を表示」を変更できる。カクつく端末では最大サイズかビットレートを下げる
+- 設定画面で 最大サイズ 720 / 1024 / 1280 / 1600 / 1920、ビットレート 2 / 4 / 8 / 16 Mbps、30 / 60 fps、「両目を表示」を変更できる。カクつく端末では最大サイズかビットレートを下げる
 - デコードが詰まった時はキーフレームまで映像を捨て、2 秒以内に来なければ server を再起動する
 - アプリを背面に回すと停止し、前面に戻ると再開する
 - PC の `tools/quest-mirror.cmd` と同時に使える（adbd は複数の TCP クライアントを受ける）
+
+## Windows 版
+
+スマホのアプリと同じ機能（同じコード）に、次を足したもの。
+
+- **画面ミラーの全画面表示**: ミラーの見出しの下の「全画面表示」で、「表示先」のディスプレイいっぱいに表示する（来場者向け）。「全体」は黒帯つきで全体を、「画面いっぱい」は中央を切り抜いて隙間なく表示する。Esc かダブルクリックで閉じる。メイン ウィンドウの F11 でも切り替える。メイン ウィンドウはそのまま操作できる。ON にするとミラーも ON になり、プレビューと全画面は 1 本の映像を共有する。エラーで映像が切れたら数秒ごとに自動で再試行する
+- **USB の Quest を Wi-Fi 接続に切替**: Quest の再起動後、USB でつないで押すだけで Wi-Fi adb を有効にする（「USB でつなぐ」のダイアログ。adb.exe を内部で実行する）
+- **Quest へのインストール**: 「Hub の設定」の隣のボタン。デモごとに PC の APK と Quest 内の更新日時を並べ、1 本ずつ、または新しいものを全部インストールする（`-r` でデータは残す。Quest の更新日時を読み直して確認する）。Hapbeat のグループの書き込み（`tools/install-demos.ps1 -Group n` と同じ結果）もここ
+
+カメラが無いので QR の読み取りは無く、プリセットは「リンクから Hub に取り込み」にリンクを貼り付ける。
+
+### インストール
+
+`tools\build-demo-remote-installer.cmd` をダブルクリックすると `installers\DemoRemote-Setup.exe` ができる（repo 直下、git 管理外）。これをエクスプローラーから実行する（ユーザーごとのインストールで、管理者権限は要らない）。以後はスタート メニューの「Hapbeat」か、デスクトップのショートカットから起動する。
+
+- 新しいインストーラーは、入っている版をそのまま更新する。設定とログは `%USERPROFILE%\.hapbeat-demo-remote\`（インストール先の外）に残る
+- インストーラーの版は `0.1.<android/demo-remote を変えた commit の数>`。**commit しないと番号が増えず、上書き更新にならない**（スクリプトが警告する）。タイトルバーには `0.1.0-d6（ブランチ commit）` が出て、未 commit の変更を含むビルドにはその旨が出る
+- adb の鍵は、`%USERPROFILE%\.android\adbkey` があればそれを使う（PC の adb を許可済みの Quest はそのままつながる）。無ければ `.hapbeat-demo-remote` に作る
+- `controller_id` は `pc-xxxxxxxx`
+- 初めて起動すると、Windows ファイアウォールの確認が出ることがある。プライベート ネットワークを許可する
+
+### 構成とビルド
+
+```
+android/demo-remote/
+  shared/    両方でコンパイルするソース（ただのディレクトリで、Gradle モジュールではない）。RemoteViewModel、全画面の Compose、protocol、adb、mirror
+  app/       Android だけのコード（MainActivity、USB ホスト、WifiBinding、MediaCodec、SharedPreferences、QR）
+  desktop/   Windows だけのコード（独立した Gradle ビルド。Android SDK は要らない）。Compose Multiplatform、FFmpeg、全画面、インストール画面
+  version.properties  版の値（両方が読む）
+```
+
+プラットフォームの差は `RemotePlatform`（`shared`）と、`app` と `desktop` に同じ名前で 1 つずつ書く関数（`ui/PlatformUi.kt`）で吸収する。
+
+```bash
+./gradlew -p desktop test                 # shared のテストと desktop のテスト
+./gradlew -p desktop run                  # 開発中の起動
+./gradlew -p desktop createDistributable  # build/compose/binaries/main/app/Demo Remote/Demo Remote.exe
+./gradlew -p desktop packageExe           # インストーラー（WiX はプラグインが取得）
+```
+
+Gradle の JDK は Android Studio の JBR でよい。パッケージには jpackage のある JDK 17 以上が要り、`DEMO_REMOTE_JPACKAGE_JDK`、`JAVA_HOME`、`~/.gradle/jdks`、`C:\Program Files\Java` の順に探す。`tools/quest-mirror/scrcpy/` に adb.exe があれば、2 つの DLL と一緒にアプリに同梱する。adb.exe は、動いている adb サーバーのもの → 同梱 → Android SDK → PATH の順に探す。
+
+動作確認用のモード（送信はせず、Demo Switch には触れない）:
+
+- `--selftest-render <dir>`: 画面を画面外に描いて PNG にする
+- `--selftest-mirror <ip> <秒> <out.png>`: ミラーの経路だけを動かし、最後のフレームを PNG に、数値を `<out.png>.txt` に書く。**Quest が寝ていると映像が来ない**（`wakefulness` の行で分かる）
+
+映像は FFmpeg（bytedeco の LGPL ビルド、Windows のネイティブのみ）で H.264 をデコードして BGRA にし、最新の 1 枚だけを描く（遅れたら捨てる）。
 
 ## ライセンス
 
