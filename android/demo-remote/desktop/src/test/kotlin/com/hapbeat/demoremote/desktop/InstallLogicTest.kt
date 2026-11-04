@@ -67,9 +67,9 @@ class InstallLogicTest {
 
     @Test
     fun theTableMatchesInstallDemos() {
-        // Same names as tools/install-demos.ps1 (package and file in quest-apks/).
+        // The default set of tools/install-demos.ps1 (package and file in quest-apks/); GloveBall is not in it.
         val byFile = QuestApkCatalog.apks.associate { it.fileName to it.packageName }
-        assertEquals(9, byFile.size)
+        assertEquals(8, byFile.size)
         assertEquals("jp.hapbeat.demohub", byFile["DemoHub.apk"])
         assertEquals("com.Hapbeat.HapticHandDemo_G2", byFile["HandDemo.apk"])
     }

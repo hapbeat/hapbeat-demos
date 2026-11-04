@@ -2,6 +2,9 @@ package com.hapbeat.demoremote.desktop
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.window.application
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
@@ -19,6 +22,8 @@ import com.hapbeat.demoremote.net.LocalIpv4
 import com.hapbeat.demoremote.net.PlatformNetwork
 import com.hapbeat.demoremote.ui.AppTheme
 import com.hapbeat.demoremote.ui.DesktopState
+import com.hapbeat.demoremote.ui.FULL_SCREEN_TITLE
+import com.hapbeat.demoremote.ui.MirrorFullScreenWindow
 import com.hapbeat.demoremote.ui.LocalDesktopState
 import com.hapbeat.demoremote.ui.LocalRemotePlatform
 import com.hapbeat.demoremote.ui.MirrorVideo
@@ -28,6 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import dadb.Dadb
 import org.jetbrains.skia.Bitmap
@@ -36,7 +42,10 @@ import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
+import java.awt.GraphicsEnvironment
+import java.awt.Robot
 import java.io.File
+import javax.imageio.ImageIO
 import java.net.InetAddress
 import java.nio.file.Files
 
@@ -145,10 +154,55 @@ object SelfTest {
         return if (decoded > 0) 0 else 1
     }
 
-    /** A made-up frame the size of the left eye through the same drawing as the mirror: blue left, red right, white centre mark. */
-    private fun renderVideo(dir: File, name: String, fill: Boolean) {
-        val width = 1832
-        val height = 1920
+    /**
+     * The real full-screen window on display [monitorIndex] with a made-up frame for [seconds]: writes what it finds to [out]
+     * and a capture of that display to `<out>.png`. No network, no adb. Passes when the window covers exactly that display
+     * and the frame's white centre mark is on screen.
+     */
+    fun fullScreen(monitorIndex: Int, seconds: Int, out: File): Int {
+        out.absoluteFile.parentFile?.mkdirs()
+        val temp = Files.createTempDirectory("demo-remote-fullscreen").toFile()
+        val store = PropertiesStore(File(temp, "settings.properties"))
+        store.write { putBoolean("auth_chosen", true); putBoolean("allow_unsigned", true); putBoolean("mirror_enabled", true) }
+        val device = GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices[monitorIndex]
+        var code = 1
+        application(exitProcessOnExit = false) {
+            val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+            val frames = remember { MirrorFrames().also { it.publish(TEST_WIDTH, TEST_HEIGHT, testFrame()) } }
+            val desktop = remember { DesktopState(store, frames, scope, temp.path).also { it.chooseMonitor(device.iDstring) } }
+            val vm = remember { RemoteViewModel(DesktopPlatform(BuildInfo.VERSION, temp, store, FixedNetwork(), DesktopUsbBridge(), null, File(temp, "none")), scope) }
+            LaunchedEffect(Unit) { desktop.changeFullScreen(vm, true) }
+            LaunchedEffect(Unit) {
+                delay(seconds * 1_000L)
+                val window = java.awt.Window.getWindows().first { (it as? java.awt.Frame)?.title == FULL_SCREEN_TITLE }
+                val expected = device.defaultConfiguration.bounds
+                val capture = Robot().createScreenCapture(expected)
+                ImageIO.write(capture, "png", File(out.path + ".png"))
+                val centre = capture.getRGB(capture.width / 2, capture.height / 2) and 0xffffff
+                val covers = window.bounds == expected && window.graphicsConfiguration.device == device
+                code = if (covers && centre == 0xffffff) 0 else 1
+                out.writeText(
+                    listOf(
+                        "display $monitorIndex ${device.iDstring} mode ${device.displayMode.width}x${device.displayMode.height}",
+                        "scale ${device.defaultConfiguration.defaultTransform.scaleX}", "expected $expected", "window ${window.bounds}",
+                        "window_on_display ${window.graphicsConfiguration.device == device}", "centre_rgb %06x".format(centre), "result ${if (code == 0) "pass" else "FAIL"}",
+                    ).joinToString("\n", postfix = "\n"),
+                )
+                scope.cancel()
+                exitApplication()
+            }
+            if (desktop.fullScreen) AppTheme { MirrorFullScreenWindow(vm, desktop) { null } }
+        }
+        return code
+    }
+
+    private const val TEST_WIDTH = 1832
+    private const val TEST_HEIGHT = 1920
+
+    /** A made-up frame the size of the left eye: blue left, red right, white centre mark. */
+    private fun testFrame(): ByteArray {
+        val width = TEST_WIDTH
+        val height = TEST_HEIGHT
         val bytes = ByteArray(width * height * 4)
         for (y in 0 until height) for (x in 0 until width) {
             val offset = (y * width + x) * 4
@@ -158,8 +212,13 @@ object SelfTest {
             bytes[offset + 2] = (if (mark || x >= width / 2) 255 else 0).toByte() // R
             bytes[offset + 3] = 255.toByte()
         }
+        return bytes
+    }
+
+    /** [testFrame] through the same drawing as the mirror. */
+    private fun renderVideo(dir: File, name: String, fill: Boolean) {
         val frames = MirrorFrames()
-        frames.publish(width, height, bytes)
+        frames.publish(TEST_WIDTH, TEST_HEIGHT, testFrame())
         val scene = ImageComposeScene(1920, 1080, Density(1f)) { MirrorVideo(frames, fill, Modifier.fillMaxSize()) }
         scene.render(0)
         File(dir, name).writeBytes((scene.render(1_000_000_000).encodeToData(EncodedImageFormat.PNG) ?: error("PNG encoding failed")).bytes)

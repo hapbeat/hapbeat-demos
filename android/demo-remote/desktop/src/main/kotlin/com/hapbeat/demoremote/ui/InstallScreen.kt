@@ -49,14 +49,13 @@ import java.util.Date
 import java.util.Locale
 import javax.swing.JFileChooser
 
-/** One demo of the table in `tools/install-demos.ps1`. */
+/** One demo of the default set in `tools/install-demos.ps1`. */
 data class QuestApk(val name: String, val packageName: String, val fileName: String)
 
 object QuestApkCatalog {
     val apks = listOf(
         QuestApk("Demo Hub", "jp.hapbeat.demohub", "DemoHub.apk"),
         QuestApk("Volley", "jp.hapbeat.volley", "Volley.apk"),
-        QuestApk("GloveBall", "jp.hapbeat.gloveballdemo.v2", "GloveBall.apk"),
         QuestApk("Boxing", "com.hapbeat.boxing", "Boxing.apk"),
         QuestApk("Hand Demo", "com.Hapbeat.HapticHandDemo_G2", "HandDemo.apk"),
         QuestApk("Safety Mill", "com.hapbeat.safetymill", "SafetyMillVR.apk"),

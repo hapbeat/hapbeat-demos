@@ -52,6 +52,7 @@ fun main(args: Array<String>) {
     when (rest.firstOrNull()) {
         "--selftest-render" -> exitProcess(SelfTest.render(File(rest[1])))
         "--selftest-mirror" -> exitProcess(SelfTest.mirror(rest[1], rest[2].toInt(), File(rest[3])))
+        "--selftest-fullscreen" -> exitProcess(SelfTest.fullScreen(rest[1].toInt(), rest[2].toInt(), File(rest[3])))
     }
     application {
         val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }

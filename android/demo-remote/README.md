@@ -268,6 +268,7 @@ Gradle の JDK は Android Studio の JBR でよい。パッケージには jpac
 
 - `--selftest-render <dir>`: 画面を画面外に描いて PNG にする
 - `--selftest-mirror <ip> <秒> <out.png>`: ミラーの経路だけを動かし、最後のフレームを PNG に、数値を `<out.png>.txt` に書く。**Quest が寝ていると映像が来ない**（`wakefulness` の行で分かる）
+- `--selftest-fullscreen <display index from 0> <seconds> <out.txt>`: the real full-screen window with a made-up frame on that display. Writes the window bounds and the result to `out.txt` and a capture to `out.txt.png`; passes when the window covers exactly that display.
 
 映像は FFmpeg（bytedeco の LGPL ビルド、Windows のネイティブのみ）で H.264 をデコードして BGRA にし、最新の 1 枚だけを描く（遅れたら捨てる）。
 

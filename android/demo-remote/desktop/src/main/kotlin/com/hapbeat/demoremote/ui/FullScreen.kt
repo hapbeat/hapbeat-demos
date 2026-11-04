@@ -205,7 +205,7 @@ fun ApplicationScope.MirrorFullScreenWindow(vm: RemoteViewModel, state: DesktopS
     Window(
         onCloseRequest = { state.changeFullScreen(vm, false) },
         state = windowState,
-        title = "Demo Remote 全画面",
+        title = FULL_SCREEN_TITLE,
         undecorated = true,
         resizable = false,
         // Over the taskbar of the audience's display; never over the main window when both share a display.
@@ -223,10 +223,12 @@ fun ApplicationScope.MirrorFullScreenWindow(vm: RemoteViewModel, state: DesktopS
             var first = true
             while (true) {
                 state.refreshMonitors()
+                // Set again once the window is on that display: a move across displays of different scaling can miss.
+                state.device()?.defaultConfiguration?.bounds?.let { if (window.bounds != it) window.bounds = it }
                 val main = mainWindow()
                 onTop = main != null && main.graphicsConfiguration.device != state.device()
                 // Opening this must not take the focus from the operator's window.
-                if (first && onTop) main?.toFront()
+                if (first) { if (onTop) main?.toFront() else window.toFront() }
                 first = false
                 delay(1_000)
             }
@@ -244,7 +246,7 @@ fun ApplicationScope.MirrorFullScreenWindow(vm: RemoteViewModel, state: DesktopS
                 .pointerInput(Unit) { awaitPointerEventScope { while (true) { awaitPointerEvent(); moves++ } } }
                 .pointerInput(Unit) { detectTapGestures(onDoubleTap = { state.changeFullScreen(vm, false) }) },
         ) {
-            if (vm.mirrorEnabled && vm.mirrorVideoSize != null) MirrorVideo(state.frames, state.fill, Modifier.fillMaxSize())
+            MirrorVideo(state.frames, state.fill, Modifier.fillMaxSize())
             if (vm.mirrorStatus.startsWith("ミラーエラー")) {
                 Text(
                     vm.mirrorStatus,
@@ -258,4 +260,5 @@ fun ApplicationScope.MirrorFullScreenWindow(vm: RemoteViewModel, state: DesktopS
     }
 }
 
+const val FULL_SCREEN_TITLE = "Demo Remote 全画面"
 private const val CURSOR_HIDE_MS = 2_000L
