@@ -1,6 +1,8 @@
 package com.hapbeat.demoremote.desktop
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import com.hapbeat.demoremote.AdbState
@@ -19,6 +21,7 @@ import com.hapbeat.demoremote.ui.AppTheme
 import com.hapbeat.demoremote.ui.DesktopState
 import com.hapbeat.demoremote.ui.LocalDesktopState
 import com.hapbeat.demoremote.ui.LocalRemotePlatform
+import com.hapbeat.demoremote.ui.MirrorVideo
 import com.hapbeat.demoremote.ui.PlatformExtraScreen
 import com.hapbeat.demoremote.ui.RemoteApp
 import kotlinx.coroutines.CoroutineScope
@@ -81,6 +84,8 @@ object SelfTest {
         val image = scene.render(1_000_000_000)
         File(dir, "install-1400x860.png").writeBytes((image.encodeToData(EncodedImageFormat.PNG) ?: error("PNG encoding failed")).bytes)
         scene.close()
+        renderVideo(dir, "video-fit-1920x1080.png", fill = false)
+        renderVideo(dir, "video-fill-1920x1080.png", fill = true)
         scope.cancel()
         0
     }
@@ -119,7 +124,8 @@ object SelfTest {
         while (System.nanoTime() < deadline && error.isEmpty()) Thread.sleep(100)
         val decoded = sink.framesDecoded
         val averageMs = if (decoded == 0L) 0.0 else sink.decodeNanos / 1_000_000.0 / decoded
-        val license = if (decoded > 0) FfmpegVideoSink.licenseText() else "-"
+        // The stream opened without an error: FFmpeg's natives loaded, frames or not.
+        val license = if (videoSize != "-" && error.isEmpty()) FfmpegVideoSink.licenseText() else "-"
         session.stop()
         val written = frames.read { width, height, bytes ->
             Bitmap().use { bitmap ->
@@ -137,5 +143,26 @@ object SelfTest {
         File(out.path + ".txt").writeText(report + "\n")
         println(report)
         return if (decoded > 0) 0 else 1
+    }
+
+    /** A made-up frame the size of the left eye through the same drawing as the mirror: blue left, red right, white centre mark. */
+    private fun renderVideo(dir: File, name: String, fill: Boolean) {
+        val width = 1832
+        val height = 1920
+        val bytes = ByteArray(width * height * 4)
+        for (y in 0 until height) for (x in 0 until width) {
+            val offset = (y * width + x) * 4
+            val mark = kotlin.math.abs(x - width / 2) < 40 && kotlin.math.abs(y - height / 2) < 40
+            bytes[offset] = (if (mark || x < width / 2) 255 else 0).toByte() // B
+            bytes[offset + 1] = (if (mark) 255 else y * 255 / height).toByte() // G
+            bytes[offset + 2] = (if (mark || x >= width / 2) 255 else 0).toByte() // R
+            bytes[offset + 3] = 255.toByte()
+        }
+        val frames = MirrorFrames()
+        frames.publish(width, height, bytes)
+        val scene = ImageComposeScene(1920, 1080, Density(1f)) { MirrorVideo(frames, fill, Modifier.fillMaxSize()) }
+        scene.render(0)
+        File(dir, name).writeBytes((scene.render(1_000_000_000).encodeToData(EncodedImageFormat.PNG) ?: error("PNG encoding failed")).bytes)
+        scene.close()
     }
 }
