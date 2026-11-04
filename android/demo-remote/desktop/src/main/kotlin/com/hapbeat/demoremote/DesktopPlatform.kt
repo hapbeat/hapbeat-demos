@@ -30,7 +30,7 @@ class DesktopPlatform(
     override val defaultMirrorSettings = MirrorSettings(maxSize = 1920, bitRate = 16_000_000, maxFps = 30)
     override val mirrorDefaultsNote = "既定は 1920 / 16 Mbps / 30 fps。"
     override val mirrorRetryMs: Long? = MIRROR_RETRY_MS
-    override val licensePaths = listOf("licenses/NOTICES.txt", "licenses/APACHE-2.0.txt")
+    override val licensePaths = listOf("licenses/NOTICES.txt", "licenses/APACHE-2.0.txt", "licenses/LGPL-3.0.txt", "licenses/GPL-3.0.txt")
     override val networkLabel = "PC LAN"
     override val networkMissingText = "LAN 未接続"
     override val questStatusOnTwoLines = true

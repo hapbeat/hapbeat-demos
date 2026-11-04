@@ -30,11 +30,14 @@ fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = Unit
 
 fun decodeImageBitmap(input: InputStream): ImageBitmap = org.jetbrains.skia.Image.makeFromEncoded(input.readBytes()).toComposeImageBitmap()
 
+/** The preview: the same frames as the full-screen output, never a second stream. */
 @Composable
-fun PlatformMirrorVideo(vm: RemoteViewModel, modifier: Modifier) = Box(modifier)
+fun PlatformMirrorVideo(vm: RemoteViewModel, modifier: Modifier) {
+    if (vm.mirrorVideoSize != null) MirrorVideo(LocalDesktopState.current.frames, fill = false, modifier) else Box(modifier)
+}
 
 @Composable
-fun PlatformMirrorHeaderExtras(vm: RemoteViewModel) = Unit
+fun PlatformMirrorHeaderExtras(vm: RemoteViewModel) = MirrorFullScreenControls(vm)
 
 /** The free half of the row under 「Hub の設定」. */
 @Composable

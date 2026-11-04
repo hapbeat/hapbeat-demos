@@ -1,5 +1,6 @@
 package com.hapbeat.demoremote.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import com.hapbeat.demoremote.AdbState
@@ -7,16 +8,29 @@ import com.hapbeat.demoremote.DesktopPlatform
 import com.hapbeat.demoremote.QuestState
 import com.hapbeat.demoremote.RemoteViewModel
 import com.hapbeat.demoremote.adb.DesktopUsbBridge
+import com.hapbeat.demoremote.adb.QuestAdb
+import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.mirror.FfmpegVideoSink
+import com.hapbeat.demoremote.mirror.MirrorFrames
+import com.hapbeat.demoremote.mirror.MirrorSession
 import com.hapbeat.demoremote.net.LocalIpv4
 import com.hapbeat.demoremote.net.PlatformNetwork
 import com.hapbeat.demoremote.ui.AppTheme
+import com.hapbeat.demoremote.ui.DesktopState
+import com.hapbeat.demoremote.ui.LocalDesktopState
 import com.hapbeat.demoremote.ui.RemoteApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import dadb.Dadb
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
 import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
@@ -39,10 +53,13 @@ object SelfTest {
         val platform = DesktopPlatform(BuildInfo.VERSION, temp, store, FixedNetwork(), DesktopUsbBridge(), null, File(temp, "none"))
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val vm = RemoteViewModel(platform, scope)
+        val desktop = DesktopState(store, MirrorFrames())
         vm.quests.add(QuestState("192.168.0.37", "HMD #1", model = "Quest 3S", adb = AdbState.CONNECTED, respondedLastRound = true, battery = 80, lastDemoId = "demo_hub"))
         vm.selectQuest("192.168.0.37")
         listOf(1400 to 860, 900 to 700).forEach { (width, height) ->
-            val scene = ImageComposeScene(width, height, Density(1f)) { AppTheme { RemoteApp(vm) } }
+            val scene = ImageComposeScene(width, height, Density(1f)) {
+                AppTheme { CompositionLocalProvider(LocalDesktopState provides desktop) { RemoteApp(vm) } }
+            }
             scene.render(0)
             val image = scene.render(1_000_000_000)
             val data = image.encodeToData(EncodedImageFormat.PNG) ?: error("PNG encoding failed")
@@ -52,5 +69,59 @@ object SelfTest {
         }
         scope.cancel()
         0
+    }
+
+    /**
+     * The mirror path only: streams from the Quest at [ip] for [seconds], then writes the last frame to [out] and the
+     * numbers to `<out>.txt` (a GUI exe shows no console). Sends nothing on Demo Switch and sets no property.
+     */
+    fun mirror(ip: String, seconds: Int, out: File): Int {
+        out.absoluteFile.parentFile?.mkdirs()
+        val temp = Files.createTempDirectory("demo-remote-mirror").toFile()
+        val frames = MirrorFrames()
+        val sink = FfmpegVideoSink(frames)
+        val platform = DesktopPlatform(
+            BuildInfo.VERSION, temp, PropertiesStore(File(temp, "settings.properties")), FixedNetwork(), DesktopUsbBridge(),
+            null, File(System.getProperty("user.home"), ".android"),
+        )
+        var videoSize = "-"
+        var error = ""
+        val session = MirrorSession(
+            { Dadb.create(ip, QuestAdb.PORT, platform.loadAdbKeyPair(), QuestAdb.CONNECT_TIMEOUT_MS, 0) },
+            { platform.openAsset("scrcpy-server.jar") }, MirrorSettings(1920, 16_000_000, 30), sink,
+            object : MirrorSession.Listener {
+                override fun onVideoSize(width: Int, height: Int) { videoSize = "${width}x$height" }
+                override fun onError(message: String) { error = message }
+            },
+        )
+        // A sleeping headset's display produces no frames at all: the report tells that apart from a decoder problem.
+        val wakefulness = runCatching {
+            Dadb.create(ip, QuestAdb.PORT, platform.loadAdbKeyPair(), QuestAdb.CONNECT_TIMEOUT_MS, 0).use { adb ->
+                adb.shell("dumpsys power | grep -m1 mWakefulness=").output.trim()
+            }
+        }.getOrElse { it.javaClass.simpleName }
+        session.start()
+        val deadline = System.nanoTime() + seconds * 1_000_000_000L
+        while (System.nanoTime() < deadline && error.isEmpty()) Thread.sleep(100)
+        val decoded = sink.framesDecoded
+        val averageMs = if (decoded == 0L) 0.0 else sink.decodeNanos / 1_000_000.0 / decoded
+        val license = if (decoded > 0) FfmpegVideoSink.licenseText() else "-"
+        session.stop()
+        val written = frames.read { width, height, bytes ->
+            Bitmap().use { bitmap ->
+                bitmap.installPixels(ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE), bytes, width * 4)
+                val data = Image.makeFromBitmap(bitmap).use { it.encodeToData(EncodedImageFormat.PNG) }
+                out.writeBytes(data?.bytes ?: ByteArray(0))
+            }
+            "${width}x$height"
+        } ?: "-"
+        val report = listOf(
+            "wakefulness $wakefulness", "packets ${sink.packetsReceived}", "send_errors ${sink.sendErrors}", "frames $decoded", "video_size $videoSize", "last_frame $written", "average_decode_ms %.2f".format(averageMs),
+            "ffmpeg_license $license", "java ${System.getProperty("java.version")} ${System.getProperty("java.home")}",
+            "error ${error.ifEmpty { "-" }}",
+        ).joinToString("\n")
+        File(out.path + ".txt").writeText(report + "\n")
+        println(report)
+        return if (decoded > 0) 0 else 1
     }
 }

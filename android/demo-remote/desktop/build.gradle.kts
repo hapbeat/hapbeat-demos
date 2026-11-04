@@ -127,6 +127,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
     implementation("dev.mobile:dadb:2.0.0")
     implementation("net.java.dev.jna:jna-platform:5.17.0")
+    // The LGPL build of FFmpeg (not "-gpl"), with the Windows natives only.
+    implementation("org.bytedeco:ffmpeg:7.1-1.5.11")
+    runtimeOnly("org.bytedeco:ffmpeg:7.1-1.5.11:windows-x86_64")
+    runtimeOnly("org.bytedeco:javacpp:1.5.11:windows-x86_64")
 
     testImplementation("junit:junit:4.13.2")
 }

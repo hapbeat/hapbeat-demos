@@ -33,4 +33,15 @@ JNA
   Copyright Java Native Access project contributors
   Apache License 2.0 - https://github.com/java-native-access/jna
 
-The full text of the Apache License 2.0 follows.
+FFmpeg 7.1 (libavcodec, libavutil, libswscale and the other libraries of the build)
+  Copyright the FFmpeg developers
+  GNU Lesser General Public License version 3 or later - https://ffmpeg.org
+  The LGPL build of the bytedeco presets (org.bytedeco:ffmpeg:7.1-1.5.11, not the -gpl one), unmodified, as separate DLLs
+  in the app's folder of Java libraries. It may link further libraries such as OpenH264 (BSD-2-Clause, Cisco).
+  Build scripts and sources: https://github.com/bytedeco/javacpp-presets/tree/master/ffmpeg
+
+JavaCPP / JavaCPP Presets for FFmpeg
+  Copyright Samuel Audet
+  Apache License 2.0 - https://github.com/bytedeco/javacpp , https://github.com/bytedeco/javacpp-presets
+
+The full text of the Apache License 2.0 follows. The GNU LGPL version 3 and the GNU GPL version 3, which it refers to, follow after it.
