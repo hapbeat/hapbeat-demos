@@ -14,7 +14,7 @@ class PresetMessagesTest {
 
     // hapbeat-contracts fixtures/sample-demo-switch-messages.json (tmp 324a009): unsigned_preset_*, written compact.
     private val fixtureGet = """{"version":1,"type":"PRESET_GET","controller_id":"remote-pixel","nonce":"0123456789abcdef","preset":1,"from":0}"""
-    private val fixtureSteps = """[{"demo_id":"energy-duel","options":{"tutorial":"on"}},{"demo_id":"volley","options":{"scene":"match"},"retry":false}]"""
+    private val fixtureSteps = """[{"demo_id":"energy-duel","options":{"tutorial":"on"},"retry":true},{"demo_id":"volley","options":{"scene":"match"}}]"""
     private val fixturePreset = """{"version":1,"type":"PRESET","controller_id":"remote-pixel","nonce":"0123456789abcdef","preset":1,""" +
         """"revision":7,"name":"XR Kaigi A","visible":true,"step_count":2,"from":0,"steps":$fixtureSteps}"""
     private val fixtureSet = """{"version":1,"type":"PRESET_SET","controller_id":"remote-pixel","seq":44,"demo_id":"demo_hub","preset":1,""" +
@@ -22,8 +22,8 @@ class PresetMessagesTest {
     private val fixtureStart = """{"version":1,"type":"PRESET_START","controller_id":"remote-pixel","seq":45,"demo_id":"demo_hub","preset":1}"""
 
     private val steps = listOf(
-        PresetStep("energy-duel", mapOf("tutorial" to "on")),
-        PresetStep("volley", mapOf("scene" to "match"), retry = false),
+        PresetStep("energy-duel", mapOf("tutorial" to "on"), retry = true),
+        PresetStep("volley", mapOf("scene" to "match")),
     )
 
     private fun parse(json: String) = DemoSwitchProtocol.parse(json.toByteArray(Charsets.UTF_8))
@@ -67,12 +67,14 @@ class PresetMessagesTest {
             DemoSwitchProtocol.canonicalPresetSet("remote-pixel", 44, 1, "XR Kaigi A", true, steps)
                 .endsWith("steps=46:energy-duel;tutorial=on;1|volley;scene=match;0\n"),
         )
+        // retry left out of a step means no もう一度.
+        assertEquals("handdemo;;0", DemoSwitchProtocol.canonicalSteps(listOf(PresetStep("handdemo"))))
         // Options sorted by key; no options leave the middle empty.
         assertEquals(
             "energy-duel;difficulty=strong,mode=free,tutorial=off;1|handdemo;;1",
             DemoSwitchProtocol.canonicalSteps(listOf(
-                PresetStep("energy-duel", linkedMapOf("tutorial" to "off", "mode" to "free", "difficulty" to "strong")),
-                PresetStep("handdemo"),
+                PresetStep("energy-duel", linkedMapOf("tutorial" to "off", "mode" to "free", "difficulty" to "strong"), retry = true),
+                PresetStep("handdemo", retry = true),
             )),
         )
     }
@@ -103,8 +105,8 @@ class PresetMessagesTest {
             DemoSwitchProtocol.hmacHex("test-secret", DemoSwitchProtocol.canonicalPresetStart("remote-pixel", 45, 1)),
         )
         val sorted = listOf(
-            PresetStep("energy-duel", linkedMapOf("tutorial" to "off", "mode" to "free", "difficulty" to "strong")),
-            PresetStep("handdemo"),
+            PresetStep("energy-duel", linkedMapOf("tutorial" to "off", "mode" to "free", "difficulty" to "strong"), retry = true),
+            PresetStep("handdemo", retry = true),
         )
         assertEquals(
             "dc7be339a0ad1ec58b3bbb28b8bc22eb71822361264ca89845f584cedf1c17a6",
@@ -160,8 +162,8 @@ class PresetMessagesTest {
             fixturePreset.replace("\"name\":\"XR Kaigi A\"", "\"name\":\"   \""),     // blank name
             fixturePreset.replace("\"name\":\"XR Kaigi A\"", "\"name\":\"a\\nb\""),  // control character
             fixturePreset.replace("\"name\":\"XR Kaigi A\"", "\"name\":\"${"x".repeat(41)}\""),
-            fixturePreset.replace("\"retry\":false", "\"retry\":\"false\""),
-            fixturePreset.replace("\"retry\":false", "\"retry\":false,\"title\":\"x\""), // unknown step field
+            fixturePreset.replace("\"retry\":true", "\"retry\":\"true\""),
+            fixturePreset.replace("\"retry\":true", "\"retry\":true,\"title\":\"x\""), // unknown step field
             fixturePreset.replace("\"demo_id\":\"volley\"", "\"demo_id\":\"Volley\""),
             fixturePreset.replace("\"scene\":\"match\"", "\"scene\":\"Match\""),
             fixturePreset.replace("\"scene\":\"match\"", "\"scene\":\"${"m".repeat(33)}\""),

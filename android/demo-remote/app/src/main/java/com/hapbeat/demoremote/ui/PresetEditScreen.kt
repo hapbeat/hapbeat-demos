@@ -193,10 +193,10 @@ private const val NAME_MAX_CODE_POINTS = 40
 private fun takeCodePoints(text: String, max: Int): String =
     if (text.codePointCount(0, text.length) <= max) text else text.substring(0, text.offsetByCodePoints(0, max))
 
-/** "Energy Duel（チュートリアル: なし）" plus "・もう一度なし" when retry is off ([hubDemos]: names of demos this app does not know). */
+/** "Energy Duel（チュートリアル: なし）" plus "・もう一度あり" when retry is on ([hubDemos]: names of demos this app does not know). */
 fun stepSummary(step: PresetStep, hubDemos: List<HubDemo>? = null): String {
     val options = DemoCatalog.optionSummary(step.demoId, step.options)
-    return DemoCatalog.labelFor(step.demoId, hubDemos) + (if (options.isEmpty()) "" else "（$options）") + if (step.retry) "" else "・もう一度なし"
+    return DemoCatalog.labelFor(step.demoId, hubDemos) + (if (options.isEmpty()) "" else "（$options）") + if (step.retry) "・もう一度あり" else ""
 }
 
 /** "Hand Demo → Energy Duel（モード: 試合）" style one-line summary of a demo order. */

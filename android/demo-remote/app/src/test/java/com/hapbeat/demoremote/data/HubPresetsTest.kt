@@ -116,7 +116,7 @@ class HubPresetsTest {
     @Test
     fun tooLargeForOneDatagram() {
         val all = mapOf("tutorial" to "off", "round_seconds" to "60", "difficulty" to "strong", "mode" to "match")
-        val preset = { n: Int -> HubPreset("あ".repeat(40), true, List(n) { PresetStep("energy-duel", all, retry = false) }) }
+        val preset = { n: Int -> HubPreset("あ".repeat(40), true, List(n) { PresetStep("energy-duel", all, retry = true) }) }
         // Grows by one step at a time until the worst case passes 1024 bytes.
         val fits = (0..32).last { HubPresets.remainingBytes(id, 1, preset(it)) >= 0 }
         assertTrue(fits < 32)

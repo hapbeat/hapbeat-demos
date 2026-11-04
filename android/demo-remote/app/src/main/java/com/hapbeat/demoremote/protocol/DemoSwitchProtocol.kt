@@ -318,7 +318,7 @@ object DemoSwitchProtocol {
     }
 
     /**
-     * Signed value of `steps`: `<demo_id>;<key=value,... sorted by key>;<1|0>` joined with `|` (retry omitted = 1).
+     * Signed value of `steps`: `<demo_id>;<key=value,... sorted by key>;<1|0>` joined with `|` (retry omitted = 0).
      * Identifiers and option values cannot contain `|`, `;`, `,` or `=`, so this is unambiguous.
      */
     fun canonicalSteps(steps: List<PresetStep>): String = steps.joinToString("|") { step ->
@@ -407,7 +407,7 @@ object DemoSwitchProtocol {
 
     /**
      * PRESET_SET with [steps] as given (callers pass validated steps, see HubPresets). `options` is left out when
-     * empty and `retry` when true, which signs the same as writing them.
+     * empty and `retry` when false, which signs the same as writing them.
      */
     fun buildPresetSet(
         controllerId: String, seq: Long, preset: Int, name: String, visible: Boolean, steps: List<PresetStep>, config: AuthConfig,
@@ -464,11 +464,11 @@ object DemoSwitchProtocol {
         config, canonicalDemoSettingsSet(controllerId, seq, target, settings),
     )
 
-    /** `steps` of PRESET_SET / HUB_START: `options` left out when empty and `retry` when true (signs the same). */
+    /** `steps` of PRESET_SET / HUB_START: `options` left out when empty and `retry` when false (signs the same). */
     private fun stepsJson(steps: List<PresetStep>): List<Map<String, Any?>> = steps.map { step ->
         linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
             if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
-            if (!step.retry) put("retry", false)
+            if (step.retry) put("retry", true)
         }
     }
 
@@ -756,7 +756,7 @@ object DemoSwitchProtocol {
                 else -> return null
             }
             val retry = when (val r = f["retry"]) {
-                null -> true
+                null -> false
                 is JsonBool -> r.value
                 else -> return null
             }

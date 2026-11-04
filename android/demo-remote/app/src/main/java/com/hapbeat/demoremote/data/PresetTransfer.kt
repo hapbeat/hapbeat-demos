@@ -163,7 +163,7 @@ object PresetTransfer {
             else -> return null
         }
         val retry = when (val r = f["retry"]) {
-            null -> true
+            null -> false
             is JsonBool -> r.value
             else -> return null
         }
@@ -176,7 +176,7 @@ object PresetTransfer {
         "steps" to preset.steps.map { step ->
             linkedMapOf<String, Any?>("demo_id" to step.demoId).apply {
                 if (step.options.isNotEmpty()) put("options", LinkedHashMap(step.options))
-                if (!step.retry) put("retry", false)
+                if (step.retry) put("retry", true)
             }
         },
     )

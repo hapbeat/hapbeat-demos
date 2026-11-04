@@ -2,9 +2,9 @@ package com.hapbeat.demoremote.data
 
 /**
  * One demo in a preset, same shape as a step of the Hub start extra (demo-session.md):
- * [options] descriptor option id → value (missing = the demo's default), [retry] false = no retry on failure.
+ * [options] descriptor option id → value (missing = the demo's default), [retry] true = もう一度 on the completion panel.
  */
-data class PresetStep(val demoId: String, val options: Map<String, String> = emptyMap(), val retry: Boolean = true)
+data class PresetStep(val demoId: String, val options: Map<String, String> = emptyMap(), val retry: Boolean = false)
 
 /** A preset handed over from the web showcase (QR / link); written into one of the Hub's slots with PRESET_SET. */
 data class RemotePreset(val name: String, val steps: List<PresetStep>)

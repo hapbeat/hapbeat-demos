@@ -44,8 +44,8 @@ class PresetTransferTest {
         assertEquals(
             listOf(
                 RemotePreset("XR Kaigi A", listOf(
-                    PresetStep("energy-duel", mapOf("tutorial" to "on")),
-                    PresetStep("volley", mapOf("scene" to "match"), retry = false),
+                    PresetStep("energy-duel", mapOf("tutorial" to "on"), retry = true),
+                    PresetStep("volley", mapOf("scene" to "match")),
                 )),
                 RemotePreset("短縮コース", listOf(PresetStep("handdemo"), PresetStep("trex-encounter"))),
             ),

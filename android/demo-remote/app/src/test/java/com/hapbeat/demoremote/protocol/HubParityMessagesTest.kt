@@ -221,8 +221,8 @@ class HubParityMessagesTest {
     fun hubStartMessage() {
         assertEquals(DemoSwitchMessage.HubStart("remote-pixel", 47, "demo_hub", startSteps, null), parse(hubStart))
         assertEquals(hubStart, DemoSwitchProtocol.buildHubStart("remote-pixel", 47, startSteps, unsigned))
-        assertTrue(DemoSwitchProtocol.canonicalHubStart("remote-pixel", 47, startSteps).endsWith("steps=20:volley;scene=match;1\n"))
-        assertEquals("8cc476ef9a64e5b376aad77225b57429736f116063bdf4149601e111bec1e7a2", hmac(parse(hubStart)!!))
+        assertTrue(DemoSwitchProtocol.canonicalHubStart("remote-pixel", 47, startSteps).endsWith("steps=20:volley;scene=match;0\n"))
+        assertEquals("34e7719552c6c843ce09bc17029dac95c9d53a4173733359e45ca49d2a4efe2f", hmac(parse(hubStart)!!))
         val step = """{"demo_id":"handdemo"}"""
         val many = { n: Int -> hubStart.replace(Regex("\"steps\":\\[.*]"), "\"steps\":[" + List(n) { step }.joinToString(",") + "]") }
         assertTrue(parse(many(32)) is DemoSwitchMessage.HubStart)
