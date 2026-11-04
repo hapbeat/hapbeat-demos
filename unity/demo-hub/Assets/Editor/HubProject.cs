@@ -127,7 +127,7 @@ namespace Hapbeat.DemoHub.Editor
         {
             PlayerSettings.companyName = "Hapbeat";
             PlayerSettings.productName = "Demo Hub";
-            PlayerSettings.bundleVersion = "0.1.0-d19";
+            PlayerSettings.bundleVersion = "0.1.0-d20";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, PackageId);
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;

@@ -66,7 +66,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps.Count, Is.EqualTo(1));
             Assert.That(parsed.Steps[0].DemoId, Is.EqualTo("volley"));
             Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "4" }), "Descriptor defaults, active only.");
-            Assert.That(parsed.Steps[0].Retry, Is.True);
+            Assert.That(parsed.Steps[0].Retry, Is.False);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.Finish.ActivityName, Is.EqualTo(HubIdentity.ActivityName));
             Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 4点先取"));
@@ -764,15 +764,15 @@ namespace Hapbeat.DemoHub.Tests
         [Test]
         public void ExternalStartAcceptsAnExternalPlan()
         {
-            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"}},{\"demo_id\":\"trex-encounter\",\"retry\":false}]}",
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"}},{\"demo_id\":\"trex-encounter\",\"retry\":true}]}",
                 out var request, out var error), Is.True, error);
             Assert.That(request.Preset, Is.Zero);
             Assert.That(request.DemoId, Is.Null);
             Assert.That(request.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
             Assert.That(request.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive" }));
-            Assert.That(request.Steps[0].Retry, Is.True, "retry defaults to true.");
+            Assert.That(request.Steps[0].Retry, Is.False, "retry defaults to false.");
             Assert.That(request.Steps[1].Options, Is.Empty);
-            Assert.That(request.Steps[1].Retry, Is.False);
+            Assert.That(request.Steps[1].Retry, Is.True);
         }
 
         [Test]
@@ -807,7 +807,7 @@ namespace Hapbeat.DemoHub.Tests
             var saved = File.ReadAllText(Path.Combine(_directory, HubPlanStore.PresetSlot(1) + ".json"));
 
             Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\",\"speed\":\"fast\"}},"
-                + "{\"demo_id\":\"trex-encounter\",\"retry\":false},{\"demo_id\":\"volley\"}]}", out var request, out var error), Is.True, error);
+                + "{\"demo_id\":\"trex-encounter\",\"retry\":true},{\"demo_id\":\"volley\"}]}", out var request, out var error), Is.True, error);
             LogAssert.Expect(LogType.Warning, new Regex("speed=fast"));
             var ticket = request.BuildTicket(presets, _catalog, finish, DemoSessionTicket.NewSessionId(), settings, new HubDemoSettings(), out error);
             Assert.That(ticket, Is.Not.Null, error);
@@ -817,7 +817,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "receive", ["tutorial"] = "on", ["points"] = "4" }),
                 "Given value kept, unknown option dropped, defaults for the rest, active options only.");
             Assert.That(parsed.Steps[2].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "4" }));
-            Assert.That(parsed.Steps.Select(s => s.Retry), Is.EqualTo(new[] { true, false, true }));
+            Assert.That(parsed.Steps.Select(s => s.Retry), Is.EqualTo(new[] { false, true, false }));
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.HapticsUi, Is.True);
             Assert.That(parsed.RecenterUi, Is.False);
@@ -873,7 +873,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps.Count, Is.EqualTo(1));
             Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "match", ["points"] = "4" }),
                 "Given value kept, unknown value and option replaced by the defaults, inactive options left out.");
-            Assert.That(parsed.Steps[0].Retry, Is.True);
+            Assert.That(parsed.Steps[0].Retry, Is.False);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.HapticsUi, Is.True);
             Assert.That(parsed.RecenterUi, Is.True);
@@ -1115,10 +1115,10 @@ namespace Hapbeat.DemoHub.Tests
             var finish = new DemoSessionComponent(HubIdentity.PackageName, HubIdentity.ActivityName);
             var settings = new HubSettings { HapticsUi = true, HandStyle = DemoHandStyle.Skin };
             var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
-            var steps = new[] { new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, false), new DemoSwitchPresetStep("boxing", null, true) };
+            var steps = new[] { new DemoSwitchPresetStep("volley", new Dictionary<string, string> { ["scene"] = "receive" }, true), new DemoSwitchPresetStep("boxing", null, false) };
             var fromSteps = HubStartRequest.FromSteps(steps).BuildTicket(presets, _catalog, finish, "0f3a9c2e7b1d4a56", settings, new HubDemoSettings(), out var error);
             Assert.That(fromSteps, Is.Not.Null, error);
-            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"},\"retry\":false},{\"demo_id\":\"boxing\"}]}",
+            Assert.That(HubStartRequest.TryParse("{\"version\":1,\"steps\":[{\"demo_id\":\"volley\",\"options\":{\"scene\":\"receive\"},\"retry\":true},{\"demo_id\":\"boxing\"}]}",
                 out var request, out error), Is.True, error);
             var fromExtra = request.BuildTicket(presets, _catalog, finish, "0f3a9c2e7b1d4a56", settings, new HubDemoSettings(), out error);
             Assert.That(fromSteps.ToJson(), Is.EqualTo(fromExtra.ToJson()));

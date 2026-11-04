@@ -279,7 +279,7 @@ namespace Hapbeat.DemoHub
     /// extra <see cref="Extra"/>, one JSON object of at most <see cref="MaxBytes"/> UTF-8 bytes: <c>{"version":1,"preset":1}</c>
     /// (preset 1..3), <c>{"version":1,"demo_id":"handdemo","options":{...}}</c> (options optional, string values) or
     /// <c>{"version":1,"steps":[{"demo_id":"handdemo","options":{...},"retry":false}, ...]}</c> (an external plan of 1..32
-    /// steps; each step has demo_id, optional options and optional retry, default true). Other fields, and anything but
+    /// steps; each step has demo_id, optional options and optional retry, default false). Other fields, and anything but
     /// exactly one of preset / demo_id / steps, are invalid. An external plan is never saved.
     /// </summary>
     public sealed class HubStartRequest
@@ -373,7 +373,7 @@ namespace Hapbeat.DemoHub
             new HubStartRequest(0, null, new Dictionary<string, string>(StringComparer.Ordinal), steps.Select(step => new HubPlanStep(step.DemoId,
                 step.Options.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal), step.Retry)).ToList());
 
-        /// <summary>One external plan step: only demo_id, options (optional) and retry (optional boolean, default true).</summary>
+        /// <summary>One external plan step: only demo_id, options (optional) and retry (optional boolean, default false).</summary>
         private static bool TryParseStep(JToken token, out HubPlanStep step, out string error)
         {
             step = null;
@@ -382,7 +382,7 @@ namespace Hapbeat.DemoHub
             if (unknown != null) { error = "unknown field " + unknown.Name; return false; }
             if (stepObject["demo_id"] == null) { error = "demo_id is missing"; return false; }
             if (!TryParseDemo(stepObject["demo_id"], stepObject["options"], out var demoId, out var options, out error)) return false;
-            var retry = true;
+            var retry = false;
             if (stepObject["retry"] != null)
             {
                 if (stepObject["retry"].Type != JTokenType.Boolean) { error = "retry must be true or false"; return false; }
@@ -424,7 +424,7 @@ namespace Hapbeat.DemoHub
 
         /// <summary>
         /// The session's ticket, as the top screen would start it: a preset's installed steps, one step of
-        /// <see cref="DemoId"/> with the given options and retry on, or the external plan's <see cref="Steps"/> with their
+        /// <see cref="DemoId"/> with the given options and no retry, or the external plan's <see cref="Steps"/> with their
         /// options and retry (unknown options and values are left out with a warning; an option a step does not give is the
         /// descriptor default, while for <see cref="DemoId"/> it comes from the per-demo settings <paramref name="demoSettings"/>,
         /// which also decide every `scope: device` option); finish = this Hub,

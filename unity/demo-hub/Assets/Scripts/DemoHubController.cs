@@ -474,7 +474,7 @@ namespace Hapbeat.DemoHub
 
         internal void StartPreset(int number) => TryStartPreset(number, null, out _);
 
-        /// <summary>A demo tile is a one-step session: the per-demo settings (session and device options), retry, finish = this Hub.</summary>
+        /// <summary>A demo tile is a one-step session: the per-demo settings (session and device options), no retry, finish = this Hub.</summary>
         internal void StartDemo(DemoSessionCatalogEntry entry) =>
             Launch(HubPlan.Single(entry.Descriptor, _demoSettings).BuildTicket(_catalog, Finish(), DemoSessionTicket.NewSessionId(), Settings.HapticsUi, Settings.HandStyle, Settings.RecenterUi,
                 Settings.TicketNarrationVolume, _demoSettings));

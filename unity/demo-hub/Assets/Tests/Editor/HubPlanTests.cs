@@ -37,7 +37,7 @@ namespace Hapbeat.DemoHub.Tests
             var plan = new HubPlan();
             Assert.That(plan.Add(_volley) && plan.Add(_boxing) && plan.Add(_trex), Is.True);
             Assert.That(plan.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "4" }));
-            Assert.That(plan.Steps.All(s => s.Retry), Is.True, "New steps offer retry by default.");
+            Assert.That(plan.Steps.Any(s => s.Retry), Is.False, "New steps do not offer retry by default.");
             Assert.That(plan.MoveUp(0), Is.False);
             Assert.That(plan.MoveDown(2), Is.False);
             Assert.That(plan.MoveDown(0), Is.True);
@@ -74,7 +74,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
             Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley レシーブ なし 5点先取"), "Hidden choices are remembered.");
             plan.ToggleRetry(0);
-            Assert.That(step.Retry, Is.False);
+            Assert.That(step.Retry, Is.True);
             Assert.That(HubPlan.Truncate(new string('あ', 50), 40).Length, Is.EqualTo(40));
         }
 
@@ -95,7 +95,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(store.TryLoad(HubPlanStore.PresetSlot(2), out var loaded), Is.True);
             Assert.That(loaded.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter" }));
             Assert.That(loaded.Steps[0].Options["scene"], Is.EqualTo("receive"));
-            Assert.That(loaded.Steps[0].Retry, Is.False);
+            Assert.That(loaded.Steps[0].Retry, Is.True);
             File.WriteAllText(Path.Combine(_directory, "preset-3.json"), "{broken");
             Assert.That(store.TryLoad(HubPlanStore.PresetSlot(3), out _), Is.False);
             Assert.That(store.LoadPreset(3).Steps, Is.Empty, "A broken preset is empty.");
@@ -198,7 +198,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[2].Title, Is.EqualTo("T-Rex Encounter"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
             Assert.That(parsed.Steps[0].PackageName, Is.EqualTo("jp.hapbeat.volley"));
-            Assert.That(parsed.Steps[1].Retry, Is.False);
+            Assert.That(parsed.Steps[1].Retry, Is.True);
             Assert.That(parsed.Steps[2].ActivityName, Is.EqualTo("com.epicgames.unreal.GameActivity"));
             Assert.That(parsed.Steps[2].Options, Is.Empty);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo("jp.hapbeat.demohub"));

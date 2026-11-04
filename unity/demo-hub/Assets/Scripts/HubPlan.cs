@@ -48,14 +48,14 @@ namespace Hapbeat.DemoHub
 
         /// <summary>
         /// One-step plan for a step-less start (a demo tile, the `demo_id` external start): the session options of the per-demo
-        /// settings <paramref name="demoSettings"/> (contracts "デモごとの設定"), retry offered.
+        /// settings <paramref name="demoSettings"/> (contracts "デモごとの設定"), no retry.
         /// </summary>
         public static HubPlan Single(DemoSessionDescriptor descriptor, HubDemoSettings demoSettings)
         {
             var plan = new HubPlan();
             var saved = demoSettings.Values(descriptor);
             plan.Steps.Add(new HubPlanStep(descriptor.DemoId,
-                descriptor.Options.Where(o => !o.IsDevice).ToDictionary(o => o.Id, o => saved[o.Id], StringComparer.Ordinal), true));
+                descriptor.Options.Where(o => !o.IsDevice).ToDictionary(o => o.Id, o => saved[o.Id], StringComparer.Ordinal), false));
             return plan;
         }
 
@@ -64,7 +64,7 @@ namespace Hapbeat.DemoHub
         {
             if (Steps.Count >= MaxSteps) return false;
             var options = descriptor.Options.Where(o => !o.IsDevice).ToDictionary(o => o.Id, o => o.Default, StringComparer.Ordinal);
-            Steps.Add(new HubPlanStep(descriptor.DemoId, options, true));
+            Steps.Add(new HubPlanStep(descriptor.DemoId, options, false));
             return true;
         }
 
@@ -313,7 +313,7 @@ namespace Hapbeat.DemoHub
                     if (token["options"] is JObject optionObject)
                         foreach (var property in optionObject.Properties())
                             if (property.Value.Type == JTokenType.String) options[property.Name] = property.Value.Value<string>();
-                    result.Steps.Add(new HubPlanStep(demoId, options, token.Value<bool?>("retry") ?? true));
+                    result.Steps.Add(new HubPlanStep(demoId, options, token.Value<bool?>("retry") ?? false));
                 }
                 plan = result;
                 return true;
