@@ -31,6 +31,8 @@ interface RemotePlatform {
     /** Diagnostics line 1 before the address, e.g. "スマホ Wi-Fi". */
     val networkLabel: String
     val networkMissingText: String
+    /** The selected Quest's status: 前面 on a line of its own, the marks wrapping below it (a resizable window); else one row. */
+    val questStatusOnTwoLines: Boolean
 
     /** Monotonic clock in ms (no relation to wall time). */
     fun monotonicMs(): Long

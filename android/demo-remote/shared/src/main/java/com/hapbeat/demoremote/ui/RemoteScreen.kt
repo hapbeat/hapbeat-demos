@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -216,6 +218,7 @@ private fun DiagnosticsLines(vm: RemoteViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp)) {
@@ -228,11 +231,10 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
             "${quest.label}  ${quest.ip}${if (quest.model.isNotEmpty()) "  (${quest.model})" else ""}",
             style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            // "デモ応答 ○" means running; STATE tells whether it is actually in front (commands are refused otherwise).
-            val front = if (quest.lastDemoId.isEmpty()) "-" else DemoCatalog.labelFor(quest.lastDemoId) +
-                if (quest.remoteState?.foreground == false) "（非前面: メニュー・一時停止・境界設定など）" else ""
-            Text("前面: $front", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // "デモ応答 ○" means running; STATE tells whether it is actually in front (commands are refused otherwise).
+        val front = if (quest.lastDemoId.isEmpty()) "-" else DemoCatalog.labelFor(quest.lastDemoId) +
+            if (quest.remoteState?.foreground == false) "（非前面: メニュー・一時停止・境界設定など）" else ""
+        val marks: @Composable () -> Unit = {
             Text("デモ応答 ${mark(quest.respondedLastRound)}")
             Text("adb ${if (quest.adb == AdbState.CONNECTED) "○" else "×"}")
             val battery = quest.battery
@@ -248,6 +250,15 @@ private fun QuestStatus(vm: RemoteViewModel, quest: QuestState?) {
             // Fixed width as well: "グループ 指定なし" is the longest text.
             val address = if (quest.adb == AdbState.CONNECTED) quest.address else null
             Text(DeviceAddressFile.groupStatus(address), maxLines = 1, modifier = Modifier.width(128.dp))
+        }
+        if (vm.platform.questStatusOnTwoLines) {
+            Text("前面: $front", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) { marks() }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("前面: $front", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                marks()
+            }
         }
         // Read-only state from adb (developer mode / adb / uptime / build); one fixed line.
         Text(

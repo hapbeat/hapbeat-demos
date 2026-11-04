@@ -35,6 +35,7 @@ class AndroidPlatform(private val app: Application) : RemotePlatform {
     override val licensePaths = listOf("licenses/NOTICES.txt", "licenses/APACHE-2.0.txt")
     override val networkLabel = "スマホ Wi-Fi"
     override val networkMissingText = "Wi-Fi 未接続"
+    override val questStatusOnTwoLines = false
 
     override fun monotonicMs(): Long = SystemClock.elapsedRealtime()
     override fun loadAdbKeyPair(): AdbKeyPair = AdbKeys.load(app.filesDir)
