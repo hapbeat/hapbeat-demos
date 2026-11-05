@@ -3,6 +3,7 @@ package com.hapbeat.demoremote
 import com.hapbeat.demoremote.adb.UsbBridge
 import com.hapbeat.demoremote.data.KeyValueStore
 import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.mirror.MirrorRelayMode
 import com.hapbeat.demoremote.mirror.VideoSink
 import com.hapbeat.demoremote.net.PlatformNetwork
 import dadb.AdbKeyPair
@@ -26,6 +27,8 @@ interface RemotePlatform {
     val mirrorRetryMs: Long?
     /** Makes a mirror's video output; null when it only exists later ([RemoteViewModel.onMirrorSinkAvailable]). */
     val mirrorSinkFactory: (() -> VideoSink)?
+    /** Whether this build relays its mirror video to others or takes it from a relay when one exists. */
+    val mirrorRelayMode: MirrorRelayMode
     /** Asset paths shown on the licence screen, in order. */
     val licensePaths: List<String>
     /** Diagnostics line 1 before the address, e.g. "スマホ Wi-Fi". */

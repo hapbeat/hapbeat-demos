@@ -17,7 +17,9 @@ import com.hapbeat.demoremote.adb.QuestAdb
 import com.hapbeat.demoremote.data.MirrorSettings
 import com.hapbeat.demoremote.mirror.FfmpegVideoSink
 import com.hapbeat.demoremote.mirror.MirrorFrames
+import com.hapbeat.demoremote.mirror.MirrorRoute
 import com.hapbeat.demoremote.mirror.MirrorSession
+import com.hapbeat.demoremote.mirror.RelayRole
 import com.hapbeat.demoremote.net.LocalIpv4
 import com.hapbeat.demoremote.net.PlatformNetwork
 import com.hapbeat.demoremote.ui.AppTheme
@@ -102,8 +104,9 @@ object SelfTest {
     /**
      * The mirror path only: streams from the Quest at [ip] for [seconds], then writes the last frame to [out] and the
      * numbers to `<out>.txt` (a GUI exe shows no console). Sends nothing on Demo Switch and sets no property.
+     * [relay] "host": also offers the video like the app does; "join": takes it from a relaying PC like a phone does.
      */
-    fun mirror(ip: String, seconds: Int, out: File): Int {
+    fun mirror(ip: String, seconds: Int, out: File, relay: String? = null): Int {
         out.absoluteFile.parentFile?.mkdirs()
         val temp = Files.createTempDirectory("demo-remote-mirror").toFile()
         val frames = MirrorFrames()
@@ -114,13 +117,23 @@ object SelfTest {
         )
         var videoSize = "-"
         var error = ""
+        var route = "-"
+        var relayClients = "-"
+        val role = when (relay) {
+            "host" -> RelayRole.Host(ip) { Dadb.create(ip, QuestAdb.PORT, platform.loadAdbKeyPair(), QuestAdb.CONNECT_TIMEOUT_MS, 5_000) }
+            "join" -> RelayRole.Join
+            else -> RelayRole.None
+        }
         val session = MirrorSession(
             { Dadb.create(ip, QuestAdb.PORT, platform.loadAdbKeyPair(), QuestAdb.CONNECT_TIMEOUT_MS, 0) },
             { platform.openAsset("scrcpy-server.jar") }, MirrorSettings(1920, 16_000_000, 30), sink,
             object : MirrorSession.Listener {
                 override fun onVideoSize(width: Int, height: Int) { videoSize = "${width}x$height" }
                 override fun onError(message: String) { error = message }
+                override fun onRoute(route_: MirrorRoute) { route = route_.name }
+                override fun onRelayClients(count: Int?) { relayClients = if (relayClients == "-") "$count" else "$relayClients,$count" }
             },
+            role,
         )
         // A sleeping headset's display produces no frames at all: the report tells that apart from a decoder problem.
         val wakefulness = runCatching {
@@ -146,6 +159,7 @@ object SelfTest {
         } ?: "-"
         val report = listOf(
             "wakefulness $wakefulness", "packets ${sink.packetsReceived}", "send_errors ${sink.sendErrors}", "frames $decoded", "video_size $videoSize", "last_frame $written", "average_decode_ms %.2f".format(averageMs),
+            "route $route", "relay_clients $relayClients",
             "ffmpeg_license $license", "java ${System.getProperty("java.version")} ${System.getProperty("java.home")}",
             "error ${error.ifEmpty { "-" }}",
         ).joinToString("\n")

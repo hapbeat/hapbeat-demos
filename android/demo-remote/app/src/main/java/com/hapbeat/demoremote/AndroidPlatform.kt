@@ -12,6 +12,7 @@ import com.hapbeat.demoremote.adb.UsbBridge
 import com.hapbeat.demoremote.data.KeyValueEditor
 import com.hapbeat.demoremote.data.KeyValueStore
 import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.mirror.MirrorRelayMode
 import com.hapbeat.demoremote.net.AndroidNetwork
 import com.hapbeat.demoremote.net.PlatformNetwork
 import dadb.AdbKeyPair
@@ -29,7 +30,8 @@ class AndroidPlatform(private val app: Application) : RemotePlatform {
     override val network: PlatformNetwork = AndroidNetwork(app)
     override val usb: UsbBridge = AndroidUsbBridge(app)
     override val defaultMirrorSettings = MirrorSettings()
-    override val mirrorDefaultsNote = "既定は 1024 / 8 Mbps / 30 fps（廉価タブレットでも詰まりにくい値）。"
+    override val mirrorDefaultsNote = "既定は 1024 / 8 Mbps / 30 fps（廉価タブレットでも詰まりにくい値）。PC がミラー中は PC の画質で受けます。"
+    override val mirrorRelayMode = MirrorRelayMode.JOIN
     override val mirrorRetryMs: Long? = null
     override val mirrorSinkFactory = null
     override val licensePaths = listOf("licenses/NOTICES.txt", "licenses/APACHE-2.0.txt")

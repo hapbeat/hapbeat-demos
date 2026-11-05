@@ -52,6 +52,8 @@ fun main(args: Array<String>) {
     when (rest.firstOrNull()) {
         "--selftest-render" -> exitProcess(SelfTest.render(File(rest[1])))
         "--selftest-mirror" -> exitProcess(SelfTest.mirror(rest[1], rest[2].toInt(), File(rest[3])))
+        "--selftest-relay-host" -> exitProcess(SelfTest.mirror(rest[1], rest[2].toInt(), File(rest[3]), relay = "host"))
+        "--selftest-relay-join" -> exitProcess(SelfTest.mirror(rest[1], rest[2].toInt(), File(rest[3]), relay = "join"))
         "--selftest-fullscreen" -> exitProcess(SelfTest.fullScreen(rest[1].toInt(), rest[2].toInt(), File(rest[3])))
     }
     application {

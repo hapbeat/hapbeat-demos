@@ -796,6 +796,16 @@ private fun MirrorHeader(vm: RemoteViewModel) {
             }
             Switch(checked = vm.mirrorEnabled, onCheckedChange = vm::changeMirrorEnabled)
         }
+        // Keeps its line while the text changes.
+        if (vm.mirrorEnabled) {
+            Text(
+                vm.mirrorRouteText.ifEmpty { " " },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         PlatformMirrorHeaderExtras(vm)
     }
 }

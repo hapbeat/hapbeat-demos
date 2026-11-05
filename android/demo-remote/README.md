@@ -221,7 +221,14 @@ Quest を USB で PC に繋いで `tools/enable-quest-wifi-adb.cmd` をダブル
 - 設定画面で 最大サイズ 720 / 1024 / 1280 / 1600 / 1920、ビットレート 2 / 4 / 8 / 16 Mbps、30 / 60 fps、「両目を表示」を変更できる。カクつく端末では最大サイズかビットレートを下げる
 - デコードが詰まった時はキーフレームまで映像を捨て、2 秒以内に来なければ server を再起動する
 - アプリを背面に回すと停止し、前面に戻ると再開する
-- PC の `tools/quest-mirror.cmd` と同時に使える（adbd は複数の TCP クライアントを受ける）
+- PC の `tools/quest-mirror.cmd` と同時に使える（adbd は複数の TCP クライアントを受ける）。ただし Quest は映像を 2 本作る
+- **PC の中継（Quest の映像は 1 本のまま）**: スマホは単体で動く。PC のアプリがその Quest をミラーしていないあいだは、スマホは今までどおり Quest から直接受ける。PC がミラーを始めると、スマホは 5 秒以内に PC 経由に切り替え、自分の分の映像を止める。PC がミラーを止めるか、PC に届かなくなると、直接に戻る
+  - 操作は要らない。画面ミラーの見出しの下に、スマホは「PC 経由で受信中」「Quest から直接受信中」、PC は「スマホへ中継中（n 台）」と出る。「PC に届かないため直接受信中（Quest の負荷増）」は、PC は中継しているがスマホから届かないとき（下記のファイアウォール、別のネットワーク）
+  - PC は受け取った映像を加工せずに流す（デコードも再エンコードもしない）。画質は PC の設定のとおりで、スマホの画質と「両目を表示」の設定は直接受けるときだけ使う。PC 側の Quest への要求には短い間隔のキーフレームを足す（30 fps で約 2 秒ごと。PC 単体でも同じ）。途中から入ったスマホには、まず直前のキーフレームを 1 枚見せ、次のキーフレームから動く
+  - **初回は PC に Windows の通信の許可が出る**（スマホをつながなくても、PC がミラーを始めた時に出る）。今の Wi-Fi の種類（プライベート / パブリック）にチェックを入れて「許可」を押す。許可しないとスマホから届かず、スマホは直接受ける
+  - スマホは、PC が Quest に置くメモ（`/data/local/tmp/hapbeat-remote-relay`、PC のアドレス・ポート・合言葉）を adb で読んで PC を見つける。設定もペアリングも要らず、その Quest に adb を許可された端末だけが読める。映像は Wi-Fi adb と同じく暗号化しない
+  - PC は同時に 4 台まで（5 台目は直接受ける）。読むのが遅れたスマホは、次のキーフレームまでコマを落とす（PC の画面と他のスマホには影響しない）。PC の画質を再生できないスマホは、そのミラーのあいだ直接受ける（「PC の画質を再生できず直接受信中（Quest の負荷増）」。ミラーを入れ直すと PC 経由をまた試す）
+  - スマホを親にしない理由: スマホのアプリは画面ロックや背面でミラーを止めるので、来場者向けの PC の画面が止まる。画質を上げるとスマホが受信・送信・再生を同時にこなすことになる
 
 ## Windows 版
 
@@ -268,6 +275,7 @@ Gradle の JDK は Android Studio の JBR でよい。パッケージには jpac
 
 - `--selftest-render <dir>`: 画面を画面外に描いて PNG にする
 - `--selftest-mirror <ip> <秒> <out.png>`: ミラーの経路だけを動かし、最後のフレームを PNG に、数値を `<out.png>.txt` に書く。**Quest が寝ていると映像が来ない**（`wakefulness` の行で分かる）
+- `--selftest-relay-host <ip> <秒> <out.png>` / `--selftest-relay-join <ip> <秒> <out.png>`: 同じ経路を、中継する側・スマホの側の役で動かす。2 つ同時に起動すると、スマホなしで PC 中継を確かめられる（`route`・`relay_clients` の行）
 - `--selftest-fullscreen <display index from 0> <seconds> <out.txt>`: the real full-screen window with a made-up frame on that display. Writes the window bounds and the result to `out.txt` and a capture to `out.txt.png`; passes when the window covers exactly that display.
 
 映像は FFmpeg（bytedeco の LGPL ビルド、Windows のネイティブのみ）で H.264 をデコードして BGRA にし、最新の 1 枚だけを描く（遅れたら捨てる）。

@@ -55,8 +55,10 @@ class ScrcpyVideoReader(private val input: InputStream) {
 
     companion object {
         const val CODEC_H264 = 0x68323634
-        private const val FLAG_CONFIG = 1L shl 62
-        private const val FLAG_KEY_FRAME = 1L shl 61
+        const val FLAG_CONFIG = 1L shl 62
+        const val FLAG_KEY_FRAME = 1L shl 61
+        /** First word of a session packet's header. */
+        const val SESSION_MARK = 0x80000000.toInt()
         private const val PTS_MASK = (1L shl 61) - 1
         private const val MAX_PACKET_SIZE = 16L * 1024 * 1024
 

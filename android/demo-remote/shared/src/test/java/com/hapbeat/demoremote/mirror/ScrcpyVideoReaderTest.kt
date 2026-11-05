@@ -73,7 +73,7 @@ class ScrcpyVideoReaderTest {
         assertTrue(scid.toLong(16) <= Int.MAX_VALUE)
         val cmd = ScrcpyLaunch.serverCommand("0000abcd", MirrorSettings(), "1832:1920:0:0")
         assertEquals(
-            "CLASSPATH=/data/local/tmp/hapbeat-remote-scrcpy.jar app_process / com.genymobile.scrcpy.Server 4.1 " +
+            "CLASSPATH=/data/local/tmp/hapbeat-remote-scrcpy-0000abcd.jar app_process / com.genymobile.scrcpy.Server 4.1 " +
                 "scid=0000abcd log_level=warn tunnel_forward=true audio=false control=false cleanup=true " +
                 "video_codec=h264 max_size=1024 video_bit_rate=8000000 max_fps=30 " +
                 "send_device_meta=false stay_awake=false power_on=false crop=1832:1920:0:0",

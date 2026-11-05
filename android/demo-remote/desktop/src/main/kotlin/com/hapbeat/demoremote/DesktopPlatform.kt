@@ -4,6 +4,7 @@ import com.hapbeat.demoremote.adb.AdbKeys
 import com.hapbeat.demoremote.adb.UsbBridge
 import com.hapbeat.demoremote.data.KeyValueStore
 import com.hapbeat.demoremote.data.MirrorSettings
+import com.hapbeat.demoremote.mirror.MirrorRelayMode
 import com.hapbeat.demoremote.mirror.VideoSink
 import com.hapbeat.demoremote.net.PlatformNetwork
 import dadb.AdbKeyPair
@@ -28,7 +29,8 @@ class DesktopPlatform(
 ) : RemotePlatform {
     override val controllerIdPrefix = "pc-"
     override val defaultMirrorSettings = MirrorSettings(maxSize = 1920, bitRate = 16_000_000, maxFps = 30)
-    override val mirrorDefaultsNote = "既定は 1920 / 16 Mbps / 30 fps。"
+    override val mirrorDefaultsNote = "既定は 1920 / 16 Mbps / 30 fps。中継先のスマホも同じ画質で受けます。"
+    override val mirrorRelayMode = MirrorRelayMode.HOST
     override val mirrorRetryMs: Long? = MIRROR_RETRY_MS
     override val licensePaths = listOf("licenses/NOTICES.txt", "licenses/APACHE-2.0.txt", "licenses/LGPL-3.0.txt", "licenses/GPL-3.0.txt")
     override val networkLabel = "PC LAN"

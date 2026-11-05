@@ -37,7 +37,10 @@ import com.hapbeat.demoremote.data.TransferResult
 import com.hapbeat.demoremote.data.UnwrittenDemoSettings
 import com.hapbeat.demoremote.data.UnwrittenPreset
 import com.hapbeat.demoremote.data.UnwrittenPresets
+import com.hapbeat.demoremote.mirror.MirrorRelayMode
+import com.hapbeat.demoremote.mirror.MirrorRoute
 import com.hapbeat.demoremote.mirror.MirrorSession
+import com.hapbeat.demoremote.mirror.RelayRole
 import com.hapbeat.demoremote.mirror.VideoSink
 import com.hapbeat.demoremote.net.AdbPortScanner
 import com.hapbeat.demoremote.net.DemoSwitchSocket
@@ -189,6 +192,8 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
     var mirrorEnabled by mutableStateOf(settings.mirrorEnabled); private set
     var mirrorVideoSize by mutableStateOf<Pair<Int, Int>?>(null); private set
     var mirrorStatus by mutableStateOf(""); private set
+    /** One line under the mirror's heading: where the video comes from, or goes on to. */
+    var mirrorRouteText by mutableStateOf(""); private set
     var keepScreenOn by mutableStateOf(settings.keepScreenOn); private set
     /** List responders that run inside a development editor (STATE `editor`) too; off by default. */
     var showEditors by mutableStateOf(settings.showEditors); private set
@@ -2620,6 +2625,10 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
         mirrorStatus = "ミラー開始中…"
         var session: MirrorSession? = null
         val wake = wakePayload()
+        val relayRole = when (platform.mirrorRelayMode) {
+            MirrorRelayMode.JOIN -> RelayRole.Join
+            MirrorRelayMode.HOST -> RelayRole.Host(ip) { Dadb.create(ip, QuestAdb.PORT, keyPair, QuestAdb.CONNECT_TIMEOUT_MS, RELAY_NOTE_READ_TIMEOUT_MS) }
+        }
         session = MirrorSession({
             // The mirror's own adb connection gets the same wake-up as the control one.
             wake?.let { QuestWake.wakeBlocking(ip, it) }
@@ -2641,7 +2650,20 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
                         scheduleMirrorRetry()
                     }
                 }
-            })
+
+                override fun onRoute(route: MirrorRoute) {
+                    if (platform.mirrorRelayMode != MirrorRelayMode.JOIN) return
+                    scope.launch(Dispatchers.Main) {
+                        if (mirrorSession === session) mirrorRouteText = mirrorRouteLabel(route)
+                    }
+                }
+
+                override fun onRelayClients(count: Int?) {
+                    scope.launch(Dispatchers.Main) {
+                        if (mirrorSession === session) mirrorRouteText = relayClientsLabel(count)
+                    }
+                }
+            }, relayRole)
         mirrorSession = session
         session!!.start()
     }
@@ -2649,6 +2671,20 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
     private fun stopMirror() {
         mirrorSession?.stop()
         mirrorSession = null
+        mirrorRouteText = ""
+    }
+
+    private fun mirrorRouteLabel(route: MirrorRoute) = when (route) {
+        MirrorRoute.VIA_PC -> "PC 経由で受信中"
+        MirrorRoute.DIRECT -> "Quest から直接受信中"
+        MirrorRoute.DIRECT_PC_UNREACHABLE -> "PC に届かないため直接受信中（Quest の負荷増）"
+        MirrorRoute.DIRECT_PC_TOO_HEAVY -> "PC の画質を再生できず直接受信中（Quest の負荷増）"
+    }
+
+    private fun relayClientsLabel(count: Int?) = when (count) {
+        null -> "スマホへの中継を開始できません"
+        0 -> "スマホへの中継: 接続なし"
+        else -> "スマホへ中継中（$count 台）"
     }
 
     fun retryMirror() {
@@ -2692,6 +2728,7 @@ class RemoteViewModel(val platform: RemotePlatform, private val scope: Coroutine
         const val BATTERY_INTERVAL_MS = 30_000L
         /** Shell keepalive while adb is connected: keeps the Quest's Wi-Fi out of power save. */
         const val KEEPALIVE_INTERVAL_MS = 20_000L
+        const val RELAY_NOTE_READ_TIMEOUT_MS = 5_000
         const val LAUNCH_REDISCOVER_DELAY_MS = 3_000L
         const val MAX_LOGS = 20
         const val FOLLOW_AUTH_WAIT_MS = 3_000L
