@@ -70,9 +70,9 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(HubPlan.VisibleOptions(step, _volley).Select(o => o.Id), Is.EqualTo(new[] { "scene", "points" }), "The match has no tutorial.");
             Assert.That(plan.CycleOption(0, _volley, "tutorial"), Is.False, "Inactive option cannot be cycled.");
             var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
-            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley 6人制の試合 5点先取"));
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("バレーボール 6人制の試合 5点先取"));
             Assert.That(plan.CycleOption(0, _volley, "scene"), Is.True);
-            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("Volley レシーブ なし 5点先取"), "Hidden choices are remembered.");
+            Assert.That(HubPlan.Title(step, volley), Is.EqualTo("バレーボール レシーブ なし 5点先取"), "Hidden choices are remembered.");
             plan.ToggleRetry(0);
             Assert.That(step.Retry, Is.True);
             Assert.That(HubPlan.Truncate(new string('あ', 50), 40).Length, Is.EqualTo(40));
@@ -194,8 +194,8 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.HapticsUi, Is.False);
             Assert.That(parsed.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "boxing", "trex-encounter" }));
             Assert.That(parsed.Steps[0].Options, Is.EquivalentTo(new Dictionary<string, string> { ["scene"] = "block", ["tutorial"] = "on", ["points"] = "5" }), "Only active options.");
-            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 5点先取"), "Application name, then option values.");
-            Assert.That(parsed.Steps[2].Title, Is.EqualTo("T-Rex Encounter"));
+            Assert.That(parsed.Steps[0].Title, Is.EqualTo("バレーボール スパイク＋ブロック あり 5点先取"), "Demo name, then option values.");
+            Assert.That(parsed.Steps[2].Title, Is.EqualTo("T-Rex エンカウンター"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Skin));
             Assert.That(parsed.Steps[0].PackageName, Is.EqualTo("jp.hapbeat.volley"));
             Assert.That(parsed.Steps[1].Retry, Is.True);
@@ -210,18 +210,25 @@ namespace Hapbeat.DemoHub.Tests
         }
 
         [Test]
-        public void NamesComeFromTheApplicationLabel()
+        public void NamesComeFromTheDescriptorTitle()
         {
             var volley = _catalog.Single(e => e.Descriptor.DemoId == "volley");
-            Assert.That(volley.DisplayName, Is.EqualTo("Volley"), "PackageManager label, no Hapbeat prefix.");
+            Assert.That(volley.DisplayName, Is.EqualTo("バレーボール"), "The descriptor's Japanese title, not the PackageManager label.");
             var unlabeled = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", "  ");
-            Assert.That(unlabeled.DisplayName, Is.EqualTo("バレーボール"), "Without a label: the descriptor title.");
-            var longName = new DemoSessionCatalogEntry(_volley, "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", new string('x', 45));
+            Assert.That(unlabeled.DisplayName, Is.EqualTo("バレーボール"), "Without a label: the descriptor title too.");
+            var untitled = new DemoSessionCatalogEntry(WithTitle(_volley, ""), "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", "Volley");
+            Assert.That(untitled.DisplayName, Is.EqualTo("Volley"), "Without a title: the PackageManager label.");
+            // A 40-character title (the descriptor maximum) plus the option values goes past the limit.
+            var longName = new DemoSessionCatalogEntry(WithTitle(_volley, new string('長', 40)), "jp.hapbeat.volley", "com.unity3d.player.UnityPlayerGameActivity", "Volley");
             var plan = new HubPlan();
             plan.Add(_volley);
-            Assert.That(HubPlan.Title(plan.Steps[0], longName).Length, Is.EqualTo(HubPlan.TitleMaxLength), "Step titles keep the 40-character limit.");
-            Assert.That(plan.Summary(_catalog), Is.EqualTo("Volley スパイク＋ブロック あり 4点先取"));
+            Assert.That(HubPlan.Title(plan.Steps[0], longName), Is.EqualTo(new string('長', 40)), "Step titles keep the 40-character limit.");
+            Assert.That(plan.Summary(_catalog), Is.EqualTo("バレーボール スパイク＋ブロック あり 4点先取"));
         }
+
+        /// <summary>The descriptor with another Japanese title (the JSON cannot carry an empty one).</summary>
+        internal static DemoSessionDescriptor WithTitle(DemoSessionDescriptor descriptor, string ja) =>
+            new DemoSessionDescriptor(descriptor.DemoId, new DemoSessionLabel(ja), descriptor.Minutes, descriptor.SupportsHapticsToggle, descriptor.Options);
 
         [Test]
         public void HubTextGlyphsExistInTheBundledFont()

@@ -22,8 +22,8 @@ namespace Hapbeat.DemoSwitch
         public string ActivityName { get; }
         /// <summary>PackageManager label of the launcher activity (the name in Quest's library), or null when unknown.</summary>
         public string AppLabel { get; }
-        /// <summary>The application name for lists and step titles: <see cref="AppLabel"/>, else the descriptor's Japanese title.</summary>
-        public string DisplayName => AppLabel ?? Descriptor.Title.Ja;
+        /// <summary>The name for lists and step titles: the descriptor's Japanese title, else <see cref="AppLabel"/>.</summary>
+        public string DisplayName => string.IsNullOrWhiteSpace(Descriptor.Title.Ja) ? AppLabel : Descriptor.Title.Ja;
     }
 
     /// <summary>One MAIN/LAUNCHER activity with its PackageManager label (null when it could not be read).</summary>

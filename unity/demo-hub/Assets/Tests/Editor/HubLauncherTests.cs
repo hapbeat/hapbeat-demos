@@ -69,7 +69,7 @@ namespace Hapbeat.DemoHub.Tests
             Assert.That(parsed.Steps[0].Retry, Is.False);
             Assert.That(parsed.Finish.PackageName, Is.EqualTo(HubIdentity.PackageName));
             Assert.That(parsed.Finish.ActivityName, Is.EqualTo(HubIdentity.ActivityName));
-            Assert.That(parsed.Steps[0].Title, Is.EqualTo("Volley スパイク＋ブロック あり 4点先取"));
+            Assert.That(parsed.Steps[0].Title, Is.EqualTo("バレーボール スパイク＋ブロック あり 4点先取"));
             Assert.That(parsed.HandStyle, Is.EqualTo(DemoHandStyle.Ghost));
             Assert.That(parsed.RecenterUi, Is.False);
             var shown = HubPlan.Single(_volley, new HubDemoSettings()).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, true, null, new HubDemoSettings());
@@ -298,16 +298,16 @@ namespace Hapbeat.DemoHub.Tests
                 controller.Initialize(_catalog, new HubPlanStore(_directory));
                 controller.Show(DemoHubController.HubScreen.Manage);
                 Assert.That(controller.GridRows, Is.EqualTo(3), "Catalog 3 rows (and the step hint).");
-                var catalogPosition = Buttons(controller).First(b => b.Label == "Volley").Rect.anchoredPosition;
+                var catalogPosition = Buttons(controller).First(b => b.Label == "バレーボール").Rect.anchoredPosition;
                 Vector3 TopLeft() => controller.Panel.transform.TransformPoint(new Vector3(-controller.Panel.Size.x * 0.5f, controller.Panel.Size.y * 0.5f, 0));
                 var topLeft = TopLeft();
                 var height = controller.Panel.Size.y;
-                for (var i = 0; i < 10; i++) Press(Buttons(controller).First(b => b.Label == "Volley"));
+                for (var i = 0; i < 10; i++) Press(Buttons(controller).First(b => b.Label == "バレーボール"));
                 Assert.That(controller.EditedPlan.Steps.Count, Is.EqualTo(10));
                 Assert.That(controller.GridRows, Is.EqualTo(10), "Plan 10 rows.");
                 Assert.That(controller.Panel.Size.y - height, Is.EqualTo(7 * 43f).Within(1e-3f), "Seven more rows of 40 mm + 3 mm gap.");
                 Assert.That(Vector3.Distance(TopLeft(), topLeft), Is.LessThan(1e-5f), "Tabs and catalog stay where they were.");
-                Assert.That(Buttons(controller).First(b => b.Label == "Volley").Rect.anchoredPosition - new Vector2(-controller.Panel.Size.x * 0.5f, controller.Panel.Size.y * 0.5f),
+                Assert.That(Buttons(controller).First(b => b.Label == "バレーボール").Rect.anchoredPosition - new Vector2(-controller.Panel.Size.x * 0.5f, controller.Panel.Size.y * 0.5f),
                     Is.EqualTo(catalogPosition - new Vector2(-controller.Panel.Size.x * 0.5f, height * 0.5f)));
                 AssertInsideWithoutOverlap(controller);
 
@@ -487,11 +487,11 @@ namespace Hapbeat.DemoHub.Tests
                 controller.Settings.VisiblePresets.Add(1);
                 controller.Preset(1).Add(catalog[0].Descriptor);
                 controller.Show(DemoHubController.HubScreen.Top);
-                Assert.That(Buttons(controller).Count(b => b.Label.StartsWith("Demo ")), Is.EqualTo(catalog.Count), "Every tile at once.");
+                Assert.That(Buttons(controller).Count(b => b.Label.StartsWith("デモ ")), Is.EqualTo(catalog.Count), "Every tile at once.");
                 AssertInsideWithoutOverlap(controller);
 
                 controller.Show(DemoHubController.HubScreen.Manage);
-                Assert.That(Buttons(controller).Count(b => b.Label.StartsWith("Demo ")), Is.EqualTo(catalog.Count), "Whole catalog.");
+                Assert.That(Buttons(controller).Count(b => b.Label.StartsWith("デモ ")), Is.EqualTo(catalog.Count), "Whole catalog.");
                 AssertInsideWithoutOverlap(controller);
                 controller.SelectTab(DemoHubController.TilesTab);
                 Assert.That(Buttons(controller).Count(b => b.Label == HubText.TileOn), Is.EqualTo(catalog.Count));
@@ -517,7 +517,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(controller.EditedPlan.Steps.Select(s => s.DemoId), Is.EqualTo(new[] { "volley", "trex-encounter", "boxing" }));
                 Assert.That(controller.SelectedStep, Is.EqualTo(1), "The selection follows the moved step.");
                 var moved = Buttons(controller).Single(b => b.Label.StartsWith("2. "));
-                Assert.That(moved.Label, Is.EqualTo("2. T-Rex Encounter"));
+                Assert.That(moved.Label, Is.EqualTo("2. T-Rex エンカウンター"));
                 Assert.That(moved.IsFlashing && moved.Highlighted, Is.True);
                 Assert.That(Buttons(controller).Single(b => b.Label.StartsWith("3. ")).IsFlashing, Is.False);
                 controller.RemoveStep(0);
@@ -688,7 +688,7 @@ namespace Hapbeat.DemoHub.Tests
                 controller.Show(DemoHubController.HubScreen.Finished);
                 controller.Show(DemoHubController.HubScreen.Top);
                 Assert.That(Texts(controller).Any(t => t.StartsWith(HubText.Preset + " 1")), Is.True);
-                Assert.That(Texts(controller).Any(t => t.StartsWith("Boxing")), Is.True, "Tiles use the application name.");
+                Assert.That(Texts(controller).Any(t => t.StartsWith("ボクシング")), Is.True, "Tiles use the descriptor title.");
 
                 LogAssert.Expect(LogType.Warning, new Regex("Application launch is supported only"));
                 LogAssert.Expect(LogType.Error, new Regex(@"\[Demo Session\] Launch failed"));
@@ -943,7 +943,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(controller.HasInstalledStep(2), Is.True);
                 Assert.That(store.LoadSettings().VisiblePresets, Has.Member(2), "visible is the saved top-screen choice.");
                 Assert.That(store.LoadPreset(2).Name, Is.EqualTo("展示 A"));
-                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nVolley レシーブ あり 4点先取"), "The top screen is refreshed.");
+                Assert.That(Texts(controller), Has.Member("プリセット 2：展示 A\nバレーボール レシーブ あり 4点先取"), "The top screen is refreshed.");
 
                 var read = controller.ReadPreset(2);
                 Assert.That(read.Visible, Is.True);
@@ -1010,7 +1010,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(read.Player, Is.EqualTo(DemoDeviceAddress.Unspecified), "No address file read: -1.");
                 Assert.That(read.Group, Is.EqualTo(DemoDeviceAddress.Unspecified));
                 Assert.That(read.Demos.Select(d => d.DemoId), Is.EqualTo(new[] { "volley", "boxing", "trex-encounter" }), "Catalog order.");
-                Assert.That(read.Demos.Select(d => d.Title), Is.EqualTo(new[] { "Volley", "Boxing", "T-Rex Encounter" }), "The display names.");
+                Assert.That(read.Demos.Select(d => d.Title), Is.EqualTo(new[] { "バレーボール", "ボクシング", "T-Rex エンカウンター" }), "The display names.");
                 Assert.That(read.Demos.Select(d => d.Visible), Is.EqualTo(new[] { false, true, false }));
 
                 controller.Show(DemoHubController.HubScreen.Manage);
@@ -1025,10 +1025,15 @@ namespace Hapbeat.DemoHub.Tests
         public void RemoteTitleIsTheDisplayNameOrTheDemoId()
         {
             var descriptor = _volley;
-            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", new string('長', 45))), Is.EqualTo(new string('長', 40)), "Cut to 40.");
-            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Bad\u0007Name")), Is.EqualTo("volley"), "Control character.");
-            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Volley")), Is.EqualTo("Volley"));
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Volley")), Is.EqualTo("バレーボール"), "The descriptor title wins over the label.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a", "Bad\u0007Name")), Is.EqualTo("バレーボール"), "A bad label is not used.");
             Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(descriptor, "p", "a")), Is.EqualTo("バレーボール"), "No label: the descriptor title.");
+            // Without a title the label is the display name, and it still follows the HUB_SETTINGS title rules.
+            var untitled = HubPlanTests.WithTitle(descriptor, "");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(untitled, "p", "a", "Volley")), Is.EqualTo("Volley"), "No title: the label.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(untitled, "p", "a", new string('長', 45))), Is.EqualTo(new string('長', 40)), "Cut to 40.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(untitled, "p", "a", "Bad\u0007Name")), Is.EqualTo("volley"), "Control character.");
+            Assert.That(DemoHubController.RemoteTitle(new DemoSessionCatalogEntry(untitled, "p", "a")), Is.EqualTo("volley"), "No title and no label: the demo ID.");
         }
 
         [Test]
@@ -1059,7 +1064,7 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(saved.NarrationVolume, Is.EqualTo(70));
                 Assert.That(controller.ReadSettings().NarrationVolume, Is.EqualTo(70));
                 Assert.That(saved.Revision, Is.EqualTo(revision + 1));
-                Assert.That(Buttons(controller).Select(b => b.Label), Has.Member("Boxing"), "The top screen shows the new tile.");
+                Assert.That(Buttons(controller).Select(b => b.Label), Has.Member("ボクシング"), "The top screen shows the new tile.");
 
                 Assert.That(controller.TryStoreSettings(false, false, DemoHandStyle.Ghost, 50, true, new string[0], out error), Is.True, error);
                 Assert.That(Texts(controller), Has.Member(HubText.StaffWaitingNote), "The staff waiting screen is shown at once.");
@@ -1159,7 +1164,7 @@ namespace Hapbeat.DemoHub.Tests
             var demoSettings = BoxingAt("30", "6");
             var tile = HubPlan.Single(_boxing, demoSettings).BuildTicket(_catalog, finish, DemoSessionTicket.NewSessionId(), false, DemoHandStyle.Ghost, false, null, demoSettings);
             Assert.That(OptionsOf(tile), Is.EquivalentTo(new Dictionary<string, string> { ["round"] = "30", ["haptics_db"] = "6" }));
-            Assert.That(tile.Steps[0].Title, Is.EqualTo("Boxing 30秒"), "The title shows session options only.");
+            Assert.That(tile.Steps[0].Title, Is.EqualTo("ボクシング 30秒"), "The title shows session options only.");
 
             var presets = new[] { new HubPlan(), new HubPlan(), new HubPlan() };
             Assert.That(HubStartRequest.TryParse("{\"version\":1,\"demo_id\":\"boxing\",\"options\":{\"round\":\"55\"}}", out var request, out var error), Is.True, error);
@@ -1415,7 +1420,7 @@ namespace Hapbeat.DemoHub.Tests
                 var width = controller.Panel.Size.x;
                 AssertInsideWithoutOverlap(controller);
 
-                Press(Buttons(controller).Single(b => b.Label == "Boxing"));
+                Press(Buttons(controller).Single(b => b.Label == "ボクシング"));
                 Assert.That(controller.SelectedDemo, Is.EqualTo(_catalog.ToList().FindIndex(e => e.Descriptor.DemoId == "boxing")));
                 Assert.That(Texts(controller), Has.Member(HubText.DeviceSettings), "Device options are marked.");
                 var round = Buttons(controller).Single(b => b.Label == "ラウンド：55秒");
@@ -1433,14 +1438,14 @@ namespace Hapbeat.DemoHub.Tests
                 Assert.That(store.LoadDemoSettings().Values(_boxing)["haptics_db"], Is.EqualTo("6"), "Saved at once.");
                 Assert.That(store.LoadSettings().Revision, Is.EqualTo(revision + 1));
 
-                Press(Buttons(controller).Single(b => b.Label == "Volley"));
+                Press(Buttons(controller).Single(b => b.Label == "バレーボール"));
                 Assert.That(Texts(controller), Has.No.Member(HubText.DeviceSettings), "Volley has no device option.");
                 Assert.That(Buttons(controller).Count(b => b.Label.StartsWith("モード：")), Is.EqualTo(1));
                 AssertInsideWithoutOverlap(controller);
-                Press(Buttons(controller).Single(b => b.Label == "T-Rex Encounter"));
+                Press(Buttons(controller).Single(b => b.Label == "T-Rex エンカウンター"));
                 Assert.That(Texts(controller), Has.Member(HubText.NoOptions));
                 AssertTextsFitTheirLines(controller, "manage, no options");
-                Press(Buttons(controller).Single(b => b.Label == "T-Rex Encounter"));
+                Press(Buttons(controller).Single(b => b.Label == "T-Rex エンカウンター"));
                 Assert.That(controller.SelectedDemo, Is.EqualTo(-1), "Pressed again: deselected.");
             }
             finally { Object.DestroyImmediate(go); }
